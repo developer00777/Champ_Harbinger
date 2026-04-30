@@ -1,0 +1,50 @@
+import { NextResponse } from "next/server";
+import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { findEmailForPerson } from "@/lib/tools/email-tools";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+/**
+ * User-triggered "Find email" for a single contact. Wraps the same
+ * findEmailForPerson logic the agent uses, with an ownership check so users
+ * can only resolve emails for people in their own campaigns.
+ */
+export async function POST(req: Request) {
+  const ctx = await getSupabaseAndUser();
+  if (!ctx) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { supabase, user } = ctx;
+
+  let body: { personId?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const personId = body.personId;
+  if (!personId) {
+    return NextResponse.json({ error: "personId required" }, { status: 400 });
+  }
+
+  // Ownership check: person must be linked to a campaign owned by this user.
+  const { data: ownership } = await supabase
+    .from("campaign_people")
+    .select("campaign:campaigns!inner(user_id)")
+    .eq("person_id", personId)
+    .limit(1)
+    .maybeSingle();
+
+  const ownerId =
+    (ownership?.campaign as unknown as { user_id?: string } | null)?.user_id ??
+    null;
+
+  if (!ownerId || ownerId !== user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const result = await findEmailForPerson(personId);
+  return NextResponse.json(result);
+}
