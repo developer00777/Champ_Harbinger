@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Signal — Next.js 16 standalone build.
+# ChampHarbinger — Next.js 16 standalone build.
 # Built on node:20-alpine. Multi-stage to keep the final image small.
 
 ARG NODE_VERSION=20-alpine
@@ -26,12 +26,16 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Next inlines NEXT_PUBLIC_* at build time. Pass them as build args if you
 # want the client bundle to include them; otherwise they'll be baked as empty.
-ARG NEXT_PUBLIC_SUPABASE_URL
-ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
-ARG NEXT_PUBLIC_APP_URL
-ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
-ENV NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
-ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_HARBINGER_APP_URL
+ARG NEXT_PUBLIC_SENTRY_DSN
+ARG NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
+ARG NEXT_PUBLIC_POSTHOG_HOST
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ENV NEXT_PUBLIC_HARBINGER_APP_URL=$NEXT_PUBLIC_HARBINGER_APP_URL
+ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
+ENV NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN=$NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
+ENV NEXT_PUBLIC_POSTHOG_HOST=$NEXT_PUBLIC_POSTHOG_HOST
 RUN pnpm build
 
 # ----------------------------------------------------------------------------
@@ -48,6 +52,9 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Drizzle schema + migration files (added by Stream A — required so the
+# release-phase migration script can find them at runtime).
+COPY --from=builder --chown=nextjs:nodejs /app/db ./db
 
 USER nextjs
 EXPOSE 3000

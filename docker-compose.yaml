@@ -1,43 +1,75 @@
-# Signal self-host.
+# ChampHarbinger self-host.
 #
-# This compose file runs the Next.js app only. Bring your own Supabase —
-# either a hosted project (https://supabase.com) or a local stack via
-# `supabase start`.
+# Local stack: Next.js app + Postgres 16. No external services required for
+# a clean boot — Clerk runs in Keyless mode and OpenRouter only needs an API
+# key (set in .env.local) when you exercise AI flows.
 #
 # Minimal setup:
-#   cp .env.example .env
-#   # fill in SUPABASE_* and ANTHROPIC_API_KEY at minimum
+#   cp .env.example .env.local
+#   # fill in OPENROUTER_API_KEY at minimum (Clerk Keyless covers auth in dev)
+#   docker compose up -d postgres   # start Postgres only, then run dev outside Docker
+#   pnpm db:migrate
+#   pnpm dev
+#
+# Or run the full containerized stack:
 #   docker compose up -d
 #
 # The app will be reachable at http://localhost:3000.
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: harbinger-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: harbinger
+      POSTGRES_PASSWORD: harbinger
+      POSTGRES_DB: champ_harbinger
+    ports:
+      - "5432:5432"
+    volumes:
+      - harbinger-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harbinger -d champ_harbinger"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         # Build-time env (inlined into the client bundle).
-        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY}
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
-    image: signal:latest
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_HARBINGER_APP_URL: ${NEXT_PUBLIC_HARBINGER_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN}
+        NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: ${NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN}
+        NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST}
+    image: champ-harbinger:latest
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "${PORT:-3000}:3000"
     env_file:
-      - .env
+      - .env.local
     environment:
       NODE_ENV: production
+      DATABASE_URL: postgres://harbinger:harbinger@postgres:5432/champ_harbinger
     healthcheck:
       test:
         [
           "CMD",
           "node",
           "-e",
-          "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))",
+          "require('http').get('http://localhost:3000/api/metrics', (r) => process.exit(r.statusCode === 200 ? 0 : 1))",
         ]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 30s
+
+volumes:
+  harbinger-pg-data:
