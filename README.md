@@ -1,124 +1,86 @@
-<div align="center">
+# ChampHarbinger
 
-<!-- Drop your logo at public/signal-logo.png (or .svg) and reference it here -->
-<!-- <img src="./public/signal-logo.png" alt="Signal" width="140" /> -->
+A Champions Group product. ChampHarbinger detects buying signals on the web before they become deals — monitoring hiring, funding, news, and review-sentiment shifts, then enriching contacts and drafting personalized outreach in a chat-first workspace.
 
-# Signal
-
-### Open-source AI sales intelligence and outreach automation.
-
-**The open alternative to Clay, Apollo, and Outreach — run it on your own keys.**
+The name *Harbinger* — "a signal that something is coming" — names the product concept directly: ChampHarbinger surfaces buying intent before it becomes a deal.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./.github/CONTRIBUTING.md)
-[![Built with Claude](https://img.shields.io/badge/Built%20with-Claude-d97757.svg)](https://www.anthropic.com/claude)
-[![Stars](https://img.shields.io/github/stars/jay-sahnan/signal?style=social)](https://github.com/jay-sahnan/signal/stargazers)
-
-🌐 [Website](https://github.com/jay-sahnan/signal) &nbsp;·&nbsp;
-📚 [Docs](./docs) &nbsp;·&nbsp;
-🏗️ [Architecture](./docs/architecture.md) &nbsp;·&nbsp;
-⚡ [Quick start](#-quick-start) &nbsp;·&nbsp;
-💬 [Discussions](../../discussions)
-
-<br />
-
-<!-- Drop a hero screenshot or GIF at docs/assets/hero.png and uncomment: -->
-<!-- <img src="./docs/assets/hero.png" alt="Signal workspace" width="860" /> -->
-
-</div>
 
 ---
 
-Signal watches the web for buying signals (hiring changes, funding news, product launches, review shifts), enriches the companies and contacts behind them, drafts personalized outreach, and runs multi-step email sequences — all from a single chat-first workspace.
+## Stack
 
-It's built for teams that want a CRM-adjacent tool they can read, fork, self-host, and extend. Instead of paying per seat for a black-box SaaS, run Signal on your own Supabase + Anthropic keys and own the pipeline end to end.
+Next.js 16 · React 19 · TypeScript · Tailwind 4 · shadcn/ui · Drizzle ORM · Postgres 16 · Clerk · OpenRouter (Vercel AI SDK) · Sentry · Prometheus.
 
-> 🧪 Signal is designed for single-tenant self-hosting — one Supabase project per team. See [architecture.md](./docs/architecture.md#multi-tenancy) before deploying for multiple independent teams.
+---
 
-> ⚠️ **Upgrading from a pre-Clerk version?** Auth has migrated from Supabase Auth to Clerk (Supabase remains the data layer). **Take a `pg_dump` first — this migration is destructive and not reversible.** It **wipes all user-owned data** (`campaigns`, `chats`, `user_profile`, `api_usage`, `user_settings`, `email_drafts`, `sent_emails`, `sequences`, plus user-authored `email_skills`) — old Supabase user UUIDs don't map to Clerk IDs. Built-in seed data and shared pools (`organizations`, `people`, `signals`) survive. Sign up for a free Clerk account ([10k MAU free](https://clerk.com/pricing)) and run `pnpm setup` to wire it up. See [docs/setup.md § Clerk](./docs/setup.md#4-clerk-auth) and [`supabase/migrations/20260427000000_clerk_auth_migration.sql`](./supabase/migrations/20260427000000_clerk_auth_migration.sql) if you need a custom backfill.
+## Features
 
-<br />
+- **Intent signals engine** — authorable recipes that watch companies and surface buying triggers (hiring changes, funding, news, review shifts).
+- **Campaign workspace** — chat-driven interface backed by AI to research, shortlist, and draft outreach.
+- **Contact enrichment** — pulls LinkedIn, GitHub, and company pages into a single profile.
+- **Outreach sequences** — multi-step email sequences with open/reply tracking.
+- **Browser automation** — Browserbase + Stagehand for the long tail of sites without APIs.
+- **Own your data** — Postgres + Drizzle ORM on your own infrastructure.
 
-## ✨ Features
+---
 
-- 🛰️ **Signals engine** — authorable "recipes" that watch companies and surface buying triggers.
-- 💬 **Campaign workspace** — chat-driven interface backed by Claude to research, shortlist, and draft.
-- 🔎 **Contact enrichment** — pulls LinkedIn, GitHub, and company pages into a single profile.
-- ✉️ **Outreach sequences** — multi-step emails via AgentMail with open / reply tracking.
-- 🤖 **Browser automation** — Browserbase + Stagehand for the long tail of sites without APIs.
-- 🔐 **Own your data** — Postgres + RLS on your Supabase; bring your own LLM keys.
+## Local development
 
-<!-- Drop product GIFs here to mimic Postiz's feature grid. Example:
-<div align="center">
-  <img src="./docs/assets/signals.gif" width="48%" />
-  <img src="./docs/assets/workspace.gif" width="48%" />
-  <img src="./docs/assets/sequences.gif" width="48%" />
-  <img src="./docs/assets/enrichment.gif" width="48%" />
-</div>
--->
-
-<br />
-
-## 🛠️ Tech stack
-
-- **Framework** — Next.js 16 (App Router) + React 19 + TypeScript
-- **Database** — Supabase (Postgres + Auth + RLS)
-- **AI** — Anthropic Claude via `@ai-sdk/anthropic` and the Vercel AI SDK
-- **Automation** — Browserbase + Stagehand for browser tasks
-- **Email** — AgentMail for send / reply / open tracking
-- **Jobs** — QStash (Upstash) for scheduled signal runs
-- **UI** — Tailwind CSS 4, shadcn/ui
-- **Testing** — Vitest, Playwright
-
-<br />
-
-## 🚀 Quick start
-
-You'll need **Node 20+**, **Docker**, the **Supabase CLI**, a **Supabase project** (hosted or local), and an **Anthropic API key**.
+**Requirements:** Docker, pnpm, a Clerk project, an OpenRouter API key.
 
 ```bash
-git clone https://github.com/jay-sahnan/signal.git
-cd signal
-corepack enable      # activates the pinned pnpm version
+git clone <repo-url> champ-harbinger
+cd champ-harbinger
+cp .env.example .env.local
+# Fill in CLERK_*, OPENROUTER_API_KEY, and any optional integrations
 pnpm install
-pnpm setup           # interactive: prompts for required keys, runs migrations
-pnpm dev             # http://localhost:3000
+docker compose up -d postgres
+pnpm db:migrate
+pnpm dev
 ```
 
-Prefer to configure by hand? Follow [`docs/setup.md`](./docs/setup.md).
+App at http://localhost:3000.
 
-<br />
+---
 
-## 🐳 Self-host with Docker
+## Environment variables
+
+Copy `.env.example` to `.env.local` and fill in:
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | Postgres connection string |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Yes | Clerk public key |
+| `CLERK_SECRET_KEY` | Yes | Clerk secret key |
+| `OPENROUTER_API_KEY` | Yes | OpenRouter API key |
+| `HARBINGER_DEFAULT_MODEL` | Yes | Default LLM (e.g. `anthropic/claude-sonnet-4-6`) |
+| `SENTRY_DSN` | Optional | Sentry error tracking |
+| `BROWSERBASE_API_KEY` | Optional | Web automation |
+| `EXA_API_KEY` | Optional | Web search enrichment |
+
+---
+
+## Deployment
+
+**Railway (recommended for staging):** see `docs/superpowers/plans/2026-04-30-champ-harbinger-implementation.md` for the full staging setup. Any standard Postgres host works — the only thing that changes is `DATABASE_URL`.
+
+**Docker Compose (local):**
 
 ```bash
-cp .env.example .env
-# fill in SUPABASE_URL + ANTHROPIC_API_KEY at minimum
-docker compose up -d
+docker compose up
 ```
 
-Signal does not bundle Supabase in the compose file — bring your own (hosted Supabase project or local `supabase start`). See [`docs/setup.md`](./docs/setup.md) for the full walkthrough.
+Provisions Postgres 16 + the Next.js app. Requires `.env.local` to be populated first.
 
-<br />
+---
 
-## 🤝 Contributing
+## Champions Group
 
-Issues and PRs welcome. Start with [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md). AI-assisted PRs are fine — we build with Claude ourselves.
+ChampHarbinger is part of the Champ suite — sitting alongside ChampOracle, ChampMail, ChampIQ, ChampQuest, ChampTrack, ChampUTM, ChampVideo, and ChampVox.
 
-Looking for somewhere to start? Filter issues by [`good first issue`](../../labels/good%20first%20issue).
+*Empowering Innovation. Building Resilience.*
 
-<br />
+---
 
-## 💬 Community
-
-- 🐛 [Issues](../../issues) — bug reports and feature requests
-- 💡 [Discussions](../../discussions) — questions, ideas, show & tell
-- 🔒 [Security](./.github/SECURITY.md) — vulnerability disclosure
-
-<br />
-
-<br /><br />
-
-## 📄 License
-
-[AGPL-3.0](./LICENSE) with an optional enterprise carve-out for files explicitly tagged. See the license file for details.
+License: AGPL-3.0-only. © 2026 Champions Group.
