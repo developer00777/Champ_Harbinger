@@ -84,7 +84,7 @@ export async function POST(request: Request) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       return Response.json(
-        { trackingConfigId, error: `Signal execution failed: ${msg}` },
+        { trackingConfigId, error: `Buying-signal execution failed: ${msg}` },
         { status: 500 },
       );
     }

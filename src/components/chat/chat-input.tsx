@@ -105,7 +105,7 @@ export function ChatInput({
           </Button>
           <Textarea
             ref={textareaRef}
-            placeholder="Ask Signal anything..."
+            placeholder="Ask ChampHarbinger anything..."
             className="max-h-[72px] min-h-[44px] resize-none overflow-y-auto text-sm transition-[height] duration-100"
             rows={1}
             value={input}

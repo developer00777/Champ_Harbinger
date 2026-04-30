@@ -18,8 +18,12 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Signal",
-  description: "Signal Dashboard",
+  title: "ChampHarbinger",
+  description: "A Champions Group product. Detect buying signals before they become deals.",
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({

@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
  * Read-only status grid for every integration in `INTEGRATIONS`. Lets the
  * user see at a glance which features are unlocked and which are gated by
  * a missing env var. Each row links to the signup page so they can fix
- * what's missing without leaving Signal.
+ * what's missing without leaving ChampHarbinger.
  */
 export function IntegrationsPanel() {
   const { statuses, loading, error } = useIntegrationsStatus();
