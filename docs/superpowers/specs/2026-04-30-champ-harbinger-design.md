@@ -31,7 +31,7 @@ This spec covers the v1 build: a complete rebrand of Signal into ChampHarbinger,
 - Localization beyond English
 - Multi-tenant SaaS hardening beyond what Clerk-based scoping provides — we remain in single-tenant deployment posture
 - Migration of any existing Signal data — fresh schema, fresh database
-- Production deployment automation — local Docker Compose only in v1; production hosting decided later
+- Production-grade deployment hardening (CDN, multi-region, autoscaling) — v1 deploys to Railway as a single-region staging environment for testing
 
 ## Architecture
 
@@ -54,7 +54,7 @@ This spec covers the v1 build: a complete rebrand of Signal into ChampHarbinger,
 | Metrics | Prometheus (`/metrics` endpoint) | New |
 | Testing | Vitest + Playwright | Unchanged |
 | Tooling | pnpm + Husky | Unchanged |
-| Deployment (v1) | Docker Compose (local) | Production target TBD |
+| Deployment (v1) | Docker Compose (local) + Railway (staging) | Railway provides managed Postgres, container build, env vars |
 
 ### Components
 
@@ -99,11 +99,13 @@ This spec covers the v1 build: a complete rebrand of Signal into ChampHarbinger,
 - `pnpm db:push` runs Drizzle migrations
 - `pnpm db:studio` opens Drizzle Studio for inspection
 
-### Production
+### Staging / production (Railway)
 
-- Any standard Postgres host (Neon, Render, RDS, self-managed)
-- No vendor lock — connection string is the only thing that changes between envs
-- Backup/restore via standard `pg_dump` / `pg_restore`
+- Railway-managed Postgres provisioned via Railway plugin → connection string injected as `DATABASE_URL` automatically
+- App container built from a `Dockerfile` (multi-stage: deps → build → runtime)
+- Migrations run on deploy via a release-phase command (`pnpm db:migrate`)
+- Backup/restore via standard `pg_dump` / `pg_restore` against Railway's Postgres
+- No vendor lock at the code level — Railway is just one Postgres + container host; can move to Neon/RDS/Fly later by changing the connection string and deployment target
 
 ### Explicitly not built
 
@@ -257,7 +259,7 @@ All optional integrations follow the same pattern: check env vars at module init
 
 ## Verification
 
-The build is "done" only when all of the following pass:
+### Phase 1 — Local (must pass before Phase 2)
 
 - App boots locally with `docker-compose up`
 - Postgres reachable; Drizzle migration applied; schema visible in `pnpm db:studio`
@@ -273,12 +275,22 @@ The build is "done" only when all of the following pass:
 - All existing Signal tests pass after rebrand (or are updated/removed if they tested removed features)
 - Lint and typecheck clean
 
+### Phase 2 — Railway staging
+
+- Railway project created; Postgres plugin attached; environment variables set
+- App deploys successfully from `main` (or a `staging` branch) on push
+- Migration runs on deploy; schema present in Railway-managed Postgres
+- App reachable at the Railway-provided public URL
+- Login via Clerk works against the Railway URL (Clerk allowed origins updated)
+- LLM call works in deployed environment
+- Sentry receives errors from the deployed app
+- `/api/metrics` reachable (optionally IP-restricted)
+
 ## Open Questions / Future Work
 
 - **ChampMail integration** — when ChampMail is ready, wire it into the email provider stub
 - **LakeStream / Lake B2B integration** — connect data enrichment paths to internal sources
-- **Production hosting** — choose between Vercel, self-hosted Docker, or another platform
 - **Custom logo design** — replace placeholder wordmark
-- **Marketing site polish** — final hero copy, feature tour, customer logos (if applicable)
 - **Lake B2B contact-database direct integration** — for native contact lookups
 - **Brand voice review** — final copy pass with Champions Group marketing
+- **Production hardening on Railway** — autoscaling, multi-region, CDN in front of static assets, IP allowlist for `/api/metrics`
