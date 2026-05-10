@@ -92,7 +92,7 @@ const SERVICE_LABELS: Record<string, string> = {
   apify: "Apify",
   browserbase: "Browserbase",
   google: "Google Places",
-  agentmail: "AgentMail",
+  champmail: "ChampMail",
 };
 
 const OP_LABELS: Record<string, string> = {

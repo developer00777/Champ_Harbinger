@@ -1,7 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
-import { sendMessage } from "@/lib/services/agentmail-service";
+import { getEmailProvider } from "@/lib/email/provider";
 import { trackUsage } from "@/lib/services/cost-tracker";
 
 export interface EnrollmentForSend {
@@ -63,29 +63,35 @@ export async function sendApprovedDraft(
   }
 
   const [settings] = await adminDb
-    .select({ agentmailInboxId: schema.userSettings.agentmailInboxId })
+    .select({ fromEmail: schema.userSettings.fromName, fromName: schema.userSettings.fromName, replyToEmail: schema.userSettings.replyToEmail })
     .from(schema.userSettings)
     .where(eq(schema.userSettings.clerkUserId, draft.clerkUserId))
     .limit(1);
 
-  if (!settings?.agentmailInboxId) {
-    return { ok: false, reason: "No AgentMail inbox configured" };
+  const emailProvider = getEmailProvider();
+  if (!emailProvider.enabled) {
+    return { ok: false, reason: "Email sending is disabled. Configure ChampMail or another provider to enable." };
   }
 
   try {
-    const result = await sendMessage(settings.agentmailInboxId, {
+    const result = await emailProvider.send({
       to: draft.toEmail,
+      from: settings?.fromEmail ?? "ChampHarbinger",
       subject: draft.subject,
       html: draft.bodyHtml,
-      text: draft.bodyText ?? undefined,
+      text: draft.bodyText ?? "",
+      replyTo: settings?.replyToEmail ?? undefined,
     });
 
-    const messageId = result.messageId ?? crypto.randomUUID();
-    const threadId = result.threadId ?? null;
+    if (result.status === "failed") {
+      return { ok: false, reason: result.error ?? "Email provider returned failed status" };
+    }
+
+    const messageId = result.providerId ?? result.id;
 
     await adminDb.insert(schema.sentEmails).values({
       agentmailMessageId: messageId,
-      agentmailThreadId: threadId,
+      agentmailThreadId: null,
       draftId: draft.id,
       campaignPeopleId: enrollment.campaign_people_id,
       campaignId: draft.campaignId,
@@ -93,7 +99,7 @@ export async function sendApprovedDraft(
       clerkUserId: draft.clerkUserId,
       clerkOrgId: draft.clerkOrgId,
       toEmail: draft.toEmail,
-      fromEmail: settings.agentmailInboxId,
+      fromEmail: settings?.fromEmail ?? "ChampHarbinger",
       subject: draft.subject,
       status: "sent",
       sentAt: now,
@@ -148,7 +154,7 @@ export async function sendApprovedDraft(
     }
 
     trackUsage({
-      service: "agentmail",
+      service: "email-provider",
       operation: "send-email",
       estimated_cost_usd: 0.0004,
       campaign_id: draft.campaignId,

@@ -4,7 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { adminDb as db } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { ExaService } from "@/lib/services/exa-service";
-import { sendMessage } from "@/lib/services/agentmail-service";
+import { getEmailProvider } from "@/lib/email/provider";
 import { trackUsage } from "@/lib/services/cost-tracker";
 import { saveDraft } from "@/lib/email-composition/save";
 import {
@@ -380,7 +380,7 @@ export const writeEmail = tool({
 
 export const sendEmail = tool({
   description:
-    "Send a previously written email draft via AgentMail. Only call this after the user has reviewed and confirmed the draft.",
+    "Send a previously written email draft via the configured email provider. Only call this after the user has reviewed and confirmed the draft.",
   inputSchema: z.object({
     draftId: z.string().uuid().describe("Draft ID to send."),
   }),
@@ -403,7 +403,6 @@ export const sendEmail = tool({
 
     const [settings] = await db
       .select({
-        agentmailInboxId: schema.userSettings.agentmailInboxId,
         fromName: schema.userSettings.fromName,
         replyToEmail: schema.userSettings.replyToEmail,
       })
@@ -411,24 +410,28 @@ export const sendEmail = tool({
       .where(eq(schema.userSettings.clerkUserId, draft.clerkUserId))
       .limit(1);
 
-    if (!settings?.agentmailInboxId) {
+    const emailProvider = getEmailProvider();
+    if (!emailProvider.enabled) {
       return {
         error:
-          "Email is not configured. Go to Settings > Email and select an AgentMail inbox first.",
+          "Email sending is disabled. Configure ChampMail or another provider in Settings > Email to enable.",
       };
     }
 
     let messageId: string;
-    let threadId: string | null = null;
     try {
-      const result = await sendMessage(settings.agentmailInboxId, {
+      const result = await emailProvider.send({
         to: draft.toEmail,
+        from: settings?.fromName ?? "ChampHarbinger",
         subject: draft.subject,
         html: draft.bodyHtml,
-        text: draft.bodyText ?? undefined,
+        text: draft.bodyText ?? "",
+        replyTo: settings?.replyToEmail ?? undefined,
       });
-      messageId = result.messageId ?? crypto.randomUUID();
-      threadId = result.threadId ?? null;
+      if (result.status === "failed") {
+        return { error: `Failed to send email: ${result.error ?? "Unknown error"}` };
+      }
+      messageId = result.providerId ?? result.id;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       return { error: `Failed to send email: ${msg}` };
@@ -438,7 +441,7 @@ export const sendEmail = tool({
 
     await db.insert(schema.sentEmails).values({
       agentmailMessageId: messageId,
-      agentmailThreadId: threadId,
+      agentmailThreadId: null,
       draftId,
       campaignPeopleId: draft.campaignPeopleId,
       campaignId: draft.campaignId,
@@ -446,7 +449,7 @@ export const sendEmail = tool({
       clerkUserId: draft.clerkUserId,
       clerkOrgId: draft.clerkOrgId,
       toEmail: draft.toEmail,
-      fromEmail: settings.agentmailInboxId,
+      fromEmail: settings?.fromName ?? "ChampHarbinger",
       subject: draft.subject,
       status: "sent",
       sentAt: now,
@@ -463,7 +466,7 @@ export const sendEmail = tool({
       .where(eq(schema.campaignPeople.id, draft.campaignPeopleId));
 
     trackUsage({
-      service: "agentmail",
+      service: "email-provider",
       operation: "send-email",
       estimated_cost_usd: 0.0004,
       campaign_id: draft.campaignId,
@@ -578,34 +581,43 @@ export const sendBulkEmails = tool({
       return { error: "No drafts found to send." };
     }
 
+    const emailProvider = getEmailProvider();
+    if (!emailProvider.enabled) {
+      return {
+        error: "Email sending is disabled. Configure ChampMail or another provider in Settings > Email to enable.",
+      };
+    }
+
     const [settings] = await db
-      .select({ agentmailInboxId: schema.userSettings.agentmailInboxId })
+      .select({ fromName: schema.userSettings.fromName, replyToEmail: schema.userSettings.replyToEmail })
       .from(schema.userSettings)
       .where(eq(schema.userSettings.clerkUserId, drafts[0].clerkUserId))
       .limit(1);
-
-    if (!settings?.agentmailInboxId) {
-      return { error: "Email not configured. Go to Settings > Email first." };
-    }
 
     const results: Array<{ draftId: string; status: string; error?: string }> = [];
 
     for (const draft of drafts) {
       try {
-        const result = await sendMessage(settings.agentmailInboxId, {
+        const sendResult = await emailProvider.send({
           to: draft.toEmail,
+          from: settings?.fromName ?? "ChampHarbinger",
           subject: draft.subject,
           html: draft.bodyHtml,
-          text: draft.bodyText ?? undefined,
+          text: draft.bodyText ?? "",
+          replyTo: settings?.replyToEmail ?? undefined,
         });
 
-        const messageId = result.messageId ?? crypto.randomUUID();
-        const threadId = result.threadId ?? null;
+        if (sendResult.status === "failed") {
+          results.push({ draftId: draft.id, status: "failed", error: sendResult.error });
+          continue;
+        }
+
+        const messageId = sendResult.providerId ?? sendResult.id;
         const now = new Date();
 
         await db.insert(schema.sentEmails).values({
           agentmailMessageId: messageId,
-          agentmailThreadId: threadId,
+          agentmailThreadId: null,
           draftId: draft.id,
           campaignPeopleId: draft.campaignPeopleId,
           campaignId: draft.campaignId,
@@ -613,7 +625,7 @@ export const sendBulkEmails = tool({
           clerkUserId: draft.clerkUserId,
           clerkOrgId: draft.clerkOrgId,
           toEmail: draft.toEmail,
-          fromEmail: settings.agentmailInboxId,
+          fromEmail: settings?.fromName ?? "ChampHarbinger",
           subject: draft.subject,
           status: "sent",
           sentAt: now,
@@ -630,7 +642,7 @@ export const sendBulkEmails = tool({
           .where(eq(schema.campaignPeople.id, draft.campaignPeopleId));
 
         trackUsage({
-          service: "agentmail",
+          service: "email-provider",
           operation: "send-email",
           estimated_cost_usd: 0.0004,
           campaign_id: campaignId,

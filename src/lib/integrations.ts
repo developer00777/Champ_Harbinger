@@ -136,29 +136,15 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Add BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID to .env.local",
   },
   {
-    id: "agentmail",
-    name: "AgentMail",
+    id: "champmail",
+    name: "ChampMail",
     category: "email",
     severity: "optional",
     feature: "Outbound email + delivery tracking",
     consequence:
       "Outreach sequences can be drafted but not sent. Delivery / reply tracking is disabled.",
-    envVars: ["AGENTMAIL_API_KEY"],
-    signupUrl: "https://agentmail.to",
-    keysUrl: "https://agentmail.to/dashboard",
-    fixHint: "Add `AGENTMAIL_API_KEY=am_...` to .env.local",
-  },
-  {
-    id: "agentmail_webhook",
-    name: "AgentMail webhooks",
-    category: "email",
-    severity: "optional",
-    feature: "Inbound reply / delivery callbacks",
-    consequence:
-      "Email status updates (opened, clicked, replied) won't be recorded — outreach pipeline can't progress contacts automatically.",
-    envVars: ["AGENTMAIL_WEBHOOK_SECRET"],
-    keysUrl: "https://agentmail.to/dashboard (webhook settings)",
-    fixHint: "Add `AGENTMAIL_WEBHOOK_SECRET=whsec_...` to .env.local",
+    envVars: ["CHAMPMAIL_API_KEY"],
+    fixHint: "Add `CHAMPMAIL_API_KEY=...` to .env.local (ChampMail integration coming soon)",
   },
   {
     id: "qstash",
