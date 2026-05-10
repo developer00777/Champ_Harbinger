@@ -1,38 +1,48 @@
 import { describe, expect, it, vi } from "vitest";
 
-const fakeRows = [
-  {
-    id: "co1",
-    organization_id: "o1",
-    campaign_id: "c1",
-    relevance_score: 9,
-    score_reason: "perfect ICP",
-    status: "qualified",
-    created_at: "2026-04-18T00:00:00Z",
-    updated_at: "2026-04-18T00:00:00Z",
-    organization: {
-      name: "Acme",
-      domain: "acme.com",
-      url: "https://acme.com",
-      industry: "SaaS",
-      location: "SF",
-      description: "short desc",
-      enrichment_data: { website_summary: "SHOULD_NOT_APPEAR_IN_LIST" },
-      enrichment_status: "enriched",
-      source: "exa",
+// getCompanies: db.select({...}).from(campaignOrganizations).innerJoin(...).where(...).orderBy(...)
+
+const { mockSelect } = vi.hoisted(() => {
+  const fakeRows = [
+    {
+      id: "co1",
+      organizationId: "o1",
+      campaignId: "c1",
+      relevanceScore: "9",
+      scoreReason: "perfect ICP",
+      status: "qualified",
+      createdAt: new Date("2026-04-18T00:00:00Z"),
+      updatedAt: new Date("2026-04-18T00:00:00Z"),
+      org: {
+        id: "o1",
+        name: "Acme",
+        domain: "acme.com",
+        url: "https://acme.com",
+        industry: "SaaS",
+        location: "SF",
+        description: "short desc",
+        enrichmentData: { website_summary: "SHOULD_NOT_APPEAR_IN_LIST" },
+        enrichmentStatus: "enriched",
+        source: "exa",
+      },
     },
+  ];
+
+  const mockOrderBy = vi.fn().mockResolvedValue(fakeRows);
+  const mockWhere = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
+  const mockInnerJoin = vi.fn().mockReturnValue({ where: mockWhere });
+  const mockFrom = vi.fn().mockReturnValue({ innerJoin: mockInnerJoin });
+  const mockSelect = vi.fn().mockReturnValue({ from: mockFrom });
+  return { mockSelect };
+});
+
+vi.mock("@/lib/db/admin", () => ({
+  adminDb: {
+    select: mockSelect,
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   },
-];
-
-const mockOrder = vi.fn().mockResolvedValue({ data: fakeRows, error: null });
-const mockEq = vi.fn(() => ({ order: mockOrder }));
-const mockSelect = vi.fn(() => ({ eq: mockEq }));
-const mockFrom = vi.fn((_table?: string) => ({ select: mockSelect }));
-
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi
-    .fn()
-    .mockResolvedValue({ from: (table: string) => mockFrom(table) }),
 }));
 
 import { getCompanies } from "@/lib/tools/search-tools";
@@ -52,7 +62,7 @@ describe("getCompanies return shape", () => {
       organization_id: "o1",
       name: "Acme",
       domain: "acme.com",
-      relevance_score: 9,
+      relevance_score: "9",
     });
   });
 });

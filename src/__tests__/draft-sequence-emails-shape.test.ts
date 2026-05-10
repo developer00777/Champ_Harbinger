@@ -1,87 +1,101 @@
 import { describe, expect, it, vi } from "vitest";
 
-const mockFrom = vi.fn((table: string) => {
-  if (table === "sequences") {
-    return {
-      select: () => ({
-        eq: () => ({
-          single: async () => ({
-            data: { id: "seq1", name: "RE Outreach", campaign_id: "c1" },
-            error: null,
-          }),
-        }),
-      }),
-    };
+// draftSequenceEmails uses:
+//   - `db` from "@/db" for queries
+//   - `schema` from "@/lib/db/scoped" for table/column references
+//   - `getScopedDb` from "@/lib/db/scoped" (only used by createSequence, not draftSequenceEmails)
+
+// Mock email composition utilities (only draftEmailsForSequence uses them)
+vi.mock("@/lib/email-composition/compose", () => ({
+  composeEmail: vi.fn(),
+  mapConcurrent: vi.fn(),
+}));
+vi.mock("@/lib/email-composition/load-skills", () => ({
+  loadActiveEmailSkills: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("@/lib/email-composition/save", () => ({
+  saveDraft: vi.fn(),
+}));
+
+// Build a mock db.select() that cycles through expected query results in order.
+const { mockSelect } = vi.hoisted(() => {
+  let callCount = 0;
+
+  const sequenceRow = { id: "seq1", name: "RE Outreach", campaignId: "c1" };
+  const stepsRows = [
+    { id: "st1", stepNumber: 1, delayDays: null, condition: null },
+    { id: "st2", stepNumber: 2, delayDays: 3, condition: null },
+  ];
+  const enrollmentsRows = [
+    { id: "en1", personId: "p1", campaignPeopleId: "cp1" },
+  ];
+  const peopleRows = [
+    {
+      id: "p1",
+      name: "Alice",
+      title: "CTO",
+      workEmail: "alice@acme.com",
+      personalEmail: null,
+      organizationId: "o1",
+    },
+  ];
+  const orgsRows = [{ id: "o1", name: "Acme", domain: "acme.com" }];
+
+  function makeChain(data: unknown[]) {
+    const limit = vi.fn().mockResolvedValue(data);
+    const orderBy = vi.fn().mockResolvedValue(data);
+    // .where() resolves to data directly (for inArray queries), and also supports chaining
+    const whereResolvable = Object.assign(Promise.resolve(data), {
+      limit,
+      orderBy,
+    });
+    const where = vi.fn().mockReturnValue(whereResolvable);
+    return { from: vi.fn().mockReturnValue({ where, orderBy, limit }) };
   }
-  if (table === "sequence_steps") {
-    return {
-      select: () => ({
-        eq: () => ({
-          order: async () => ({
-            data: [
-              { id: "st1", step_number: 1, delay_days: 0, condition: null },
-              { id: "st2", step_number: 2, delay_days: 3, condition: null },
-            ],
-            error: null,
-          }),
-        }),
-      }),
-    };
-  }
-  if (table === "sequence_enrollments") {
-    return {
-      select: () => ({
-        eq: async () => ({
-          data: [{ id: "en1", person_id: "p1", campaign_people_id: "cp1" }],
-          error: null,
-        }),
-      }),
-    };
-  }
-  if (table === "people") {
-    return {
-      select: () => ({
-        in: async () => ({
-          data: [
-            {
-              id: "p1",
-              name: "Alice",
-              title: "CTO",
-              work_email: "alice@acme.com",
-              personal_email: null,
-              organization_id: "o1",
-              enrichment_data: { bio: "BIG_BIO_SHOULD_NOT_APPEAR" },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    };
-  }
-  if (table === "organizations") {
-    return {
-      select: () => ({
-        in: async () => ({
-          data: [
-            {
-              id: "o1",
-              name: "Acme",
-              domain: "acme.com",
-              enrichment_data: { summary: "BIG_SUMMARY_SHOULD_NOT_APPEAR" },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    };
-  }
-  throw new Error(`unexpected table ${table}`);
+
+  const mockSelect = vi.fn().mockImplementation(() => {
+    callCount++;
+    const n = callCount;
+    if (n === 1) return makeChain([sequenceRow]);
+    if (n === 2) return makeChain(stepsRows);
+    if (n === 3) return makeChain(enrollmentsRows);
+    if (n === 4) return makeChain(peopleRows);
+    return makeChain(orgsRows);
+  });
+
+  return { mockSelect };
 });
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi
-    .fn()
-    .mockResolvedValue({ from: (table: string) => mockFrom(table) }),
+// Mock @/lib/db/scoped with the real schema so column references work.
+vi.mock("@/lib/db/scoped", async () => {
+  const realSchema = await import("@/lib/db/scoped")
+    .then(() => import("../../db/schema"))
+    .catch(async () => {
+      // Fallback: import schema directly
+      return import("../../db/schema");
+    });
+  return {
+    getScopedDb: vi.fn().mockResolvedValue({
+      raw: {
+        select: vi.fn(),
+        insert: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+      },
+      userId: "user1",
+      orgId: null,
+    }),
+    schema: realSchema,
+  };
+});
+
+vi.mock("@/db", () => ({
+  db: {
+    select: mockSelect,
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  },
 }));
 
 import { draftSequenceEmails } from "@/lib/tools/sequence-tools";

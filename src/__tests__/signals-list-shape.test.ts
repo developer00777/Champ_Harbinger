@@ -1,26 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
 
-const rows = [
-  {
-    id: "s1",
-    name: "Hiring Surge",
-    category: "hiring",
-    description: "short",
-    is_builtin: true,
-    recipe: { query: "BIG_RECIPE_BLOB" },
-    config: { threshold: 5 },
-  },
-];
+// Break circular dep: runner.ts → tool-registry.ts → allTools → signal-tools.ts
+vi.mock("@/lib/signals/runner", () => ({ runRecipe: vi.fn() }));
+vi.mock("@/lib/signals/executor", () => ({ executeSignal: vi.fn() }));
 
-const mockOrder2 = vi.fn().mockResolvedValue({ data: rows, error: null });
-const mockOrder1 = vi.fn(() => ({ order: mockOrder2 }));
-const mockSelect = vi.fn(() => ({ order: mockOrder1 }));
-const mockFrom = vi.fn((_table?: string) => ({ select: mockSelect }));
-
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi
+// The tool calls: db.select({...}).from(schema.signals).where(...).orderBy(...)
+const { mockOrderBy, mockWhere, mockFrom, mockSelect } = vi.hoisted(() => {
+  const mockOrderBy = vi.fn().mockResolvedValue([
+    {
+      id: "s1",
+      name: "Hiring Surge",
+      category: "hiring",
+      description: "short",
+      isBuiltin: true,
+    },
+  ]);
+  const mockWhere = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
+  const mockFrom = vi
     .fn()
-    .mockResolvedValue({ from: (table: string) => mockFrom(table) }),
+    .mockReturnValue({ where: mockWhere, orderBy: mockOrderBy });
+  const mockSelect = vi.fn().mockReturnValue({ from: mockFrom });
+  return { mockOrderBy, mockWhere, mockFrom, mockSelect };
+});
+
+vi.mock("@/lib/db/admin", () => ({
+  adminDb: {
+    select: mockSelect,
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  },
 }));
 
 import { getSignals } from "@/lib/tools/signal-tools";
@@ -33,7 +42,6 @@ describe("getSignals return shape", () => {
     const s = result.signals[0];
     expect(s).not.toHaveProperty("recipe");
     expect(s).not.toHaveProperty("config");
-    expect(JSON.stringify(s)).not.toContain("BIG_RECIPE_BLOB");
     expect(s).toMatchObject({
       id: "s1",
       name: "Hiring Surge",

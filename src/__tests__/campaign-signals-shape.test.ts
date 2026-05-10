@@ -1,41 +1,53 @@
 import { describe, expect, it, vi } from "vitest";
 
-const allSignals = [
-  {
-    id: "s1",
-    name: "Hiring Surge",
-    category: "hiring",
-    description: "Company is hiring aggressively...",
-    is_builtin: true,
-    recipe: { query: "BIG_BLOB_THAT_SHOULD_NOT_APPEAR", params: {} },
-    config: { threshold: 5, lookbackDays: 30 },
+// Break circular dep: runner.ts → tool-registry.ts → allTools → signal-tools.ts
+vi.mock("@/lib/signals/runner", () => ({ runRecipe: vi.fn() }));
+vi.mock("@/lib/signals/executor", () => ({ executeSignal: vi.fn() }));
+
+// getCampaignSignals runs two queries via Promise.all:
+// 1. db.select({...}).from(schema.signals).orderBy(...)        -> allSignals
+// 2. db.select({...}).from(schema.campaignSignals).where(...)  -> toggles
+
+const { mockSelect } = vi.hoisted(() => {
+  let callCount = 0;
+
+  const makeChainForCall = (callIndex: number) => {
+    if (callIndex === 1) {
+      // signals query — ends with .orderBy()
+      const orderBy = vi.fn().mockResolvedValue([
+        {
+          id: "s1",
+          name: "Hiring Surge",
+          category: "hiring",
+          description: "Company is hiring aggressively...",
+          isBuiltin: true,
+        },
+      ]);
+      const where = vi.fn().mockReturnValue({ orderBy });
+      return { from: vi.fn().mockReturnValue({ where, orderBy }) };
+    }
+    // campaignSignals query — ends with .where()
+    const where = vi
+      .fn()
+      .mockResolvedValue([{ signalId: "s1", enabled: true }]);
+    return { from: vi.fn().mockReturnValue({ where }) };
+  };
+
+  const mockSelect = vi.fn().mockImplementation(() => {
+    callCount++;
+    return makeChainForCall(callCount);
+  });
+
+  return { mockSelect };
+});
+
+vi.mock("@/lib/db/admin", () => ({
+  adminDb: {
+    select: mockSelect,
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   },
-];
-
-const mockSignalsSelectOrder2 = vi
-  .fn()
-  .mockResolvedValue({ data: allSignals, error: null });
-const mockSignalsSelectOrder1 = vi.fn(() => ({
-  order: mockSignalsSelectOrder2,
-}));
-const mockSignalsSelect = vi.fn(() => ({ order: mockSignalsSelectOrder1 }));
-
-const mockTogglesEq = vi.fn().mockResolvedValue({
-  data: [{ signal_id: "s1", enabled: true, config_override: { threshold: 3 } }],
-  error: null,
-});
-const mockTogglesSelect = vi.fn(() => ({ eq: mockTogglesEq }));
-
-const mockFrom = vi.fn((table: string) => {
-  if (table === "signals") return { select: mockSignalsSelect };
-  if (table === "campaign_signals") return { select: mockTogglesSelect };
-  throw new Error(`unexpected table ${table}`);
-});
-
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi
-    .fn()
-    .mockResolvedValue({ from: (table: string) => mockFrom(table) }),
 }));
 
 import { getCampaignSignals } from "@/lib/tools/signal-tools";
