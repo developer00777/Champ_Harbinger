@@ -89,7 +89,7 @@ export default function OutreachPage() {
         .in("status", ["draft"])
         .order("created_at", { ascending: false })
         .limit(200),
-      supabase.from("user_settings").select("agentmail_inbox_id").maybeSingle(),
+      supabase.from("user_settings").select("from_name").maybeSingle(),
       supabase.from("sequence_steps").select("sequence_id, step_number"),
     ]);
 
@@ -99,7 +99,7 @@ export default function OutreachPage() {
     const enrollmentRows = enrollmentCountsRes.data ?? [];
     const cards = enrollmentsRes.data ?? [];
     const rawDrafts = draftsRes.data ?? [];
-    const hasInbox = !!settingsRes.data?.agentmail_inbox_id;
+    const hasInbox = false; // Email sending disabled until ChampMail or another provider is configured
 
     // Sequence counts
     const countsBySeq = new Map<

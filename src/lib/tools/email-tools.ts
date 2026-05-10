@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createClient, getSupabaseAndUser } from "@/lib/supabase/server";
 import { ExaService } from "@/lib/services/exa-service";
-import { sendMessage } from "@/lib/services/agentmail-service";
+import { getEmailProvider } from "@/lib/email/provider";
 import { trackUsage } from "@/lib/services/cost-tracker";
 import { saveDraft } from "@/lib/email-composition/save";
 import {
@@ -380,7 +380,7 @@ export const writeEmail = tool({
 
 export const sendEmail = tool({
   description:
-    "Send a previously written email draft via AgentMail. Only call this after the user has reviewed and confirmed the draft.",
+    "Send a previously written email draft via the configured email provider. Only call this after the user has reviewed and confirmed the draft.",
   inputSchema: z.object({
     draftId: z.string().uuid().describe("Draft ID to send."),
   }),
@@ -405,27 +405,31 @@ export const sendEmail = tool({
 
     const { data: settings } = await supabase
       .from("user_settings")
-      .select("agentmail_inbox_id, from_name, reply_to_email")
+      .select("from_name, reply_to_email")
       .single();
 
-    if (!settings?.agentmail_inbox_id) {
+    const emailProvider = getEmailProvider();
+    if (!emailProvider.enabled) {
       return {
         error:
-          "Email is not configured. Go to Settings > Email and select an AgentMail inbox first.",
+          "Email sending is disabled. Configure ChampMail or another provider in Settings > Email to enable.",
       };
     }
 
     let messageId: string;
-    let threadId: string | null = null;
     try {
-      const result = await sendMessage(settings.agentmail_inbox_id, {
+      const result = await emailProvider.send({
         to: draft.to_email,
+        from: settings?.from_name ?? "ChampHarbinger",
         subject: draft.subject,
         html: draft.body_html,
-        text: draft.body_text ?? undefined,
+        text: draft.body_text ?? draft.body_html ?? "",
+        replyTo: settings?.reply_to_email ?? undefined,
       });
-      messageId = result.messageId ?? crypto.randomUUID();
-      threadId = result.threadId ?? null;
+      if (result.status === "failed") {
+        return { error: `Failed to send email: ${result.error ?? "Unknown error"}` };
+      }
+      messageId = result.providerId ?? result.id;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       return { error: `Failed to send email: ${msg}` };
@@ -435,14 +439,14 @@ export const sendEmail = tool({
 
     await supabase.from("sent_emails").insert({
       agentmail_message_id: messageId,
-      agentmail_thread_id: threadId,
+      agentmail_thread_id: null,
       draft_id: draftId,
       campaign_people_id: draft.campaign_people_id,
       campaign_id: draft.campaign_id,
       person_id: draft.person_id,
       user_id: draft.user_id,
       to_email: draft.to_email,
-      from_email: settings.agentmail_inbox_id,
+      from_email: settings?.from_name ?? "ChampHarbinger",
       subject: draft.subject,
       status: "sent",
       sent_at: now,
@@ -568,43 +572,50 @@ export const sendBulkEmails = tool({
       return { error: "No drafts found to send." };
     }
 
-    const { data: settings } = await supabase
-      .from("user_settings")
-      .select("agentmail_inbox_id")
-      .single();
-
-    if (!settings?.agentmail_inbox_id) {
+    const emailProvider = getEmailProvider();
+    if (!emailProvider.enabled) {
       return {
-        error: "Email not configured. Go to Settings > Email first.",
+        error: "Email sending is disabled. Configure ChampMail or another provider in Settings > Email to enable.",
       };
     }
+
+    const { data: settings } = await supabase
+      .from("user_settings")
+      .select("from_name, reply_to_email")
+      .single();
 
     const results: Array<{ draftId: string; status: string; error?: string }> =
       [];
 
     for (const draft of drafts) {
       try {
-        const result = await sendMessage(settings.agentmail_inbox_id, {
+        const sendResult = await emailProvider.send({
           to: draft.to_email,
+          from: settings?.from_name ?? "ChampHarbinger",
           subject: draft.subject,
           html: draft.body_html,
-          text: draft.body_text ?? undefined,
+          text: draft.body_text ?? draft.body_html ?? "",
+          replyTo: settings?.reply_to_email ?? undefined,
         });
 
-        const messageId = result.messageId ?? crypto.randomUUID();
-        const threadId = result.threadId ?? null;
+        if (sendResult.status === "failed") {
+          results.push({ draftId: draft.id, status: "failed", error: sendResult.error });
+          continue;
+        }
+
+        const messageId = sendResult.providerId ?? sendResult.id;
         const now = new Date().toISOString();
 
         await supabase.from("sent_emails").insert({
           agentmail_message_id: messageId,
-          agentmail_thread_id: threadId,
+          agentmail_thread_id: null,
           draft_id: draft.id,
           campaign_people_id: draft.campaign_people_id,
           campaign_id: draft.campaign_id,
           person_id: draft.person_id,
           user_id: draft.user_id,
           to_email: draft.to_email,
-          from_email: settings.agentmail_inbox_id,
+          from_email: settings?.from_name ?? "ChampHarbinger",
           subject: draft.subject,
           status: "sent",
           sent_at: now,

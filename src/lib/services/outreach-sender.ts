@@ -1,5 +1,5 @@
 import { getAdminClient } from "@/lib/supabase/admin";
-import { sendMessage } from "@/lib/services/agentmail-service";
+import { getEmailProvider } from "@/lib/email/provider";
 import { trackUsage } from "@/lib/services/cost-tracker";
 
 export interface EnrollmentForSend {
@@ -55,35 +55,41 @@ export async function sendApprovedDraft(
 
   const { data: settings } = await supabase
     .from("user_settings")
-    .select("agentmail_inbox_id")
+    .select("from_name, reply_to_email")
     .eq("user_id", draft.user_id)
     .single();
 
-  if (!settings?.agentmail_inbox_id) {
-    return { ok: false, reason: "No AgentMail inbox configured" };
+  const emailProvider = getEmailProvider();
+  if (!emailProvider.enabled) {
+    return { ok: false, reason: "Email sending is disabled. Configure ChampMail or another provider to enable." };
   }
 
   try {
-    const result = await sendMessage(settings.agentmail_inbox_id, {
+    const result = await emailProvider.send({
       to: draft.to_email,
+      from: settings?.from_name ?? "ChampHarbinger",
       subject: draft.subject,
       html: draft.body_html,
-      text: draft.body_text ?? undefined,
+      text: draft.body_text ?? draft.body_html ?? "",
+      replyTo: settings?.reply_to_email ?? undefined,
     });
 
-    const messageId = result.messageId ?? crypto.randomUUID();
-    const threadId = result.threadId ?? null;
+    if (result.status === "failed") {
+      return { ok: false, reason: result.error ?? "Email provider returned failed status" };
+    }
+
+    const messageId = result.providerId ?? result.id;
 
     await supabase.from("sent_emails").insert({
       agentmail_message_id: messageId,
-      agentmail_thread_id: threadId,
+      agentmail_thread_id: null,
       draft_id: draft.id,
       campaign_people_id: enrollment.campaign_people_id,
       campaign_id: draft.campaign_id,
       person_id: enrollment.person_id,
       user_id: draft.user_id,
       to_email: draft.to_email,
-      from_email: settings.agentmail_inbox_id,
+      from_email: settings?.from_name ?? "ChampHarbinger",
       subject: draft.subject,
       status: "sent",
       sent_at: now,
