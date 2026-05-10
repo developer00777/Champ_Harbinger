@@ -1,6 +1,6 @@
 "use client";
 
-import type { EnrollmentCard } from "@/app/outreach/page";
+import type { EnrollmentCard } from "@/app/(app)/outreach/page";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { StatusPill } from "@/components/ui/status-pill";
 import {

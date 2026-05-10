@@ -63,14 +63,22 @@ export async function sendApprovedDraft(
   }
 
   const [settings] = await adminDb
-    .select({ fromEmail: schema.userSettings.fromName, fromName: schema.userSettings.fromName, replyToEmail: schema.userSettings.replyToEmail })
+    .select({
+      fromEmail: schema.userSettings.fromName,
+      fromName: schema.userSettings.fromName,
+      replyToEmail: schema.userSettings.replyToEmail,
+    })
     .from(schema.userSettings)
     .where(eq(schema.userSettings.clerkUserId, draft.clerkUserId))
     .limit(1);
 
   const emailProvider = getEmailProvider();
   if (!emailProvider.enabled) {
-    return { ok: false, reason: "Email sending is disabled. Configure ChampMail or another provider to enable." };
+    return {
+      ok: false,
+      reason:
+        "Email sending is disabled. Configure ChampMail or another provider to enable.",
+    };
   }
 
   try {
@@ -84,7 +92,10 @@ export async function sendApprovedDraft(
     });
 
     if (result.status === "failed") {
-      return { ok: false, reason: result.error ?? "Email provider returned failed status" };
+      return {
+        ok: false,
+        reason: result.error ?? "Email provider returned failed status",
+      };
     }
 
     const messageId = result.providerId ?? result.id;
@@ -154,7 +165,7 @@ export async function sendApprovedDraft(
     }
 
     trackUsage({
-      service: "email-provider",
+      service: "champmail",
       operation: "send-email",
       estimated_cost_usd: 0.0004,
       campaign_id: draft.campaignId,

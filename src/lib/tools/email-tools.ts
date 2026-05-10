@@ -174,11 +174,7 @@ export async function findEmailForPerson(personId: string): Promise<{
         workEmailVerifiedAt: schema.people.workEmailVerifiedAt,
       })
       .from(schema.people)
-      .where(
-        and(
-          eq(schema.people.organizationId, person.organizationId),
-        ),
-      );
+      .where(and(eq(schema.people.organizationId, person.organizationId)));
 
     const evidence: VerifiedEmail[] = [];
     for (const p of orgPeople) {
@@ -429,7 +425,9 @@ export const sendEmail = tool({
         replyTo: settings?.replyToEmail ?? undefined,
       });
       if (result.status === "failed") {
-        return { error: `Failed to send email: ${result.error ?? "Unknown error"}` };
+        return {
+          error: `Failed to send email: ${result.error ?? "Unknown error"}`,
+        };
       }
       messageId = result.providerId ?? result.id;
     } catch (err) {
@@ -466,7 +464,7 @@ export const sendEmail = tool({
       .where(eq(schema.campaignPeople.id, draft.campaignPeopleId));
 
     trackUsage({
-      service: "email-provider",
+      service: "champmail",
       operation: "send-email",
       estimated_cost_usd: 0.0004,
       campaign_id: draft.campaignId,
@@ -584,17 +582,22 @@ export const sendBulkEmails = tool({
     const emailProvider = getEmailProvider();
     if (!emailProvider.enabled) {
       return {
-        error: "Email sending is disabled. Configure ChampMail or another provider in Settings > Email to enable.",
+        error:
+          "Email sending is disabled. Configure ChampMail or another provider in Settings > Email to enable.",
       };
     }
 
     const [settings] = await db
-      .select({ fromName: schema.userSettings.fromName, replyToEmail: schema.userSettings.replyToEmail })
+      .select({
+        fromName: schema.userSettings.fromName,
+        replyToEmail: schema.userSettings.replyToEmail,
+      })
       .from(schema.userSettings)
       .where(eq(schema.userSettings.clerkUserId, drafts[0].clerkUserId))
       .limit(1);
 
-    const results: Array<{ draftId: string; status: string; error?: string }> = [];
+    const results: Array<{ draftId: string; status: string; error?: string }> =
+      [];
 
     for (const draft of drafts) {
       try {
@@ -608,7 +611,11 @@ export const sendBulkEmails = tool({
         });
 
         if (sendResult.status === "failed") {
-          results.push({ draftId: draft.id, status: "failed", error: sendResult.error });
+          results.push({
+            draftId: draft.id,
+            status: "failed",
+            error: sendResult.error,
+          });
           continue;
         }
 
@@ -642,7 +649,7 @@ export const sendBulkEmails = tool({
           .where(eq(schema.campaignPeople.id, draft.campaignPeopleId));
 
         trackUsage({
-          service: "email-provider",
+          service: "champmail",
           operation: "send-email",
           estimated_cost_usd: 0.0004,
           campaign_id: campaignId,

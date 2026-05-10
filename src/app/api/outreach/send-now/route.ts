@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await sendApprovedDraft(supabase, enrollment);
+  const result = await sendApprovedDraft(enrollment);
 
   if (!result.ok) {
     return NextResponse.json(

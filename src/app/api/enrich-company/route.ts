@@ -54,12 +54,12 @@ async function getActiveSignalSlugs(
 
   if (!data) return new Set();
   return new Set(
-    data
-      .map((row: Record<string, unknown>) => {
+    (data as Array<Record<string, unknown>>)
+      .map((row) => {
         const signal = row.signals as { slug: string } | null;
         return signal?.slug;
       })
-      .filter((s): s is string => !!s),
+      .filter((s: string | undefined): s is string => !!s),
   );
 }
 
@@ -193,9 +193,8 @@ async function findContactsForCompany(
   const existingUrls = new Set(
     (existingLinks || [])
       .map(
-        (l) =>
-          (l.person as unknown as { linkedin_url: string | null } | null)
-            ?.linkedin_url,
+        (l: { person: unknown }) =>
+          (l.person as { linkedin_url: string | null } | null)?.linkedin_url,
       )
       .filter(Boolean) as string[],
   );

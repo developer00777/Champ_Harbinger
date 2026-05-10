@@ -68,12 +68,14 @@ export async function POST(request: Request) {
     }
 
     // Filter to only enriched people
-    const enrichedLinks = (links || []).filter((l) => {
-      const person = l.person as unknown as {
-        enrichment_status: string;
-      } | null;
-      return person?.enrichment_status === "enriched";
-    });
+    const enrichedLinks = (links || []).filter(
+      (l: { id: string; person: unknown }) => {
+        const person = l.person as unknown as {
+          enrichment_status: string;
+        } | null;
+        return person?.enrichment_status === "enriched";
+      },
+    );
 
     if (enrichedLinks.length === 0) {
       return Response.json({
@@ -85,50 +87,52 @@ export async function POST(request: Request) {
     const profile = await getProfileForPrompt(campaignId);
 
     // Build a compact summary of each contact for scoring
-    const contactSummaries = enrichedLinks.map((l) => {
-      const person = l.person as unknown as Record<string, unknown>;
-      const enrichment = person.enrichment_data as Record<
-        string,
-        unknown
-      > | null;
-      const org = person.organization as {
-        name?: string;
-        domain?: string;
-        industry?: string;
-      } | null;
+    const contactSummaries = enrichedLinks.map(
+      (l: { id: string; person: unknown }) => {
+        const person = l.person as unknown as Record<string, unknown>;
+        const enrichment = person.enrichment_data as Record<
+          string,
+          unknown
+        > | null;
+        const org = person.organization as {
+          name?: string;
+          domain?: string;
+          industry?: string;
+        } | null;
 
-      const summary: Record<string, unknown> = {
-        id: l.id, // campaign_people link ID
-        name: person.name,
-        title: person.title,
-        company: org?.name || "Unknown",
-        industry: org?.industry || null,
-      };
+        const summary: Record<string, unknown> = {
+          id: l.id, // campaign_people link ID
+          name: person.name,
+          title: person.title,
+          company: org?.name || "Unknown",
+          industry: org?.industry || null,
+        };
 
-      // Include LinkedIn headline and recent post topics
-      const linkedin = enrichment?.linkedin as {
-        profileInfo?: { headline?: string };
-        posts?: Array<{ text: string }>;
-      } | null;
-      if (linkedin?.profileInfo?.headline) {
-        summary.headline = linkedin.profileInfo.headline;
-      }
-      if (linkedin?.posts && linkedin.posts.length > 0) {
-        summary.recentPostTopics = linkedin.posts
-          .slice(0, 3)
-          .map((p) => p.text.slice(0, 150));
-      }
+        // Include LinkedIn headline and recent post topics
+        const linkedin = enrichment?.linkedin as {
+          profileInfo?: { headline?: string };
+          posts?: Array<{ text: string }>;
+        } | null;
+        if (linkedin?.profileInfo?.headline) {
+          summary.headline = linkedin.profileInfo.headline;
+        }
+        if (linkedin?.posts && linkedin.posts.length > 0) {
+          summary.recentPostTopics = linkedin.posts
+            .slice(0, 3)
+            .map((p) => p.text.slice(0, 150));
+        }
 
-      // Include Twitter bio
-      const twitter = enrichment?.twitter as {
-        user?: { description?: string; followers_count?: number };
-      } | null;
-      if (twitter?.user?.description) {
-        summary.twitterBio = twitter.user.description;
-      }
+        // Include Twitter bio
+        const twitter = enrichment?.twitter as {
+          user?: { description?: string; followers_count?: number };
+        } | null;
+        if (twitter?.user?.description) {
+          summary.twitterBio = twitter.user.description;
+        }
 
-      return summary;
-    });
+        return summary;
+      },
+    );
 
     // Build the scoring prompt
     const profileContext = profile

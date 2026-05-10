@@ -66,9 +66,8 @@ export async function POST(request: Request) {
   const existingDomains = new Set(
     (existingLinks || [])
       .map(
-        (l) =>
-          (l.organization as unknown as { domain: string | null } | null)
-            ?.domain,
+        (l: { organization: unknown }) =>
+          (l.organization as { domain: string | null } | null)?.domain,
       )
       .filter(Boolean) as string[],
   );

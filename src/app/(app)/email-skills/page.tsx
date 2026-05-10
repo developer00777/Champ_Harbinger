@@ -109,7 +109,9 @@ export default function EmailSkillsPage() {
         .eq("scope_id", scopeId)
         .eq("enabled", true);
       if (!mountedRef.current) return;
-      setAttachedIds(new Set((data ?? []).map((r) => r.skill_id as string)));
+      setAttachedIds(
+        new Set((data ?? []).map((r: { skill_id: string }) => r.skill_id)),
+      );
     },
     [],
   );

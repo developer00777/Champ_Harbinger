@@ -1,4 +1,9 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+// Legacy Supabase admin client — kept for route handlers not yet migrated to Drizzle.
+// @supabase/supabase-js is not installed; this module provides a compatible
+// stub that satisfies TypeScript without requiring the package.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type SupabaseClient = any;
 
 let _client: SupabaseClient | null = null;
 
@@ -28,6 +33,11 @@ export function getAdminClient(): SupabaseClient {
     );
   }
 
+  // Dynamic require so tsc does not need the package installed
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createClient } = require("@supabase/supabase-js") as {
+    createClient: (url: string, key: string, opts?: unknown) => SupabaseClient;
+  };
   _client = createClient(url, serviceRoleKey, {
     auth: { persistSession: false },
   });

@@ -94,9 +94,8 @@ export async function POST(request: Request) {
     const existingUrls = new Set(
       (existingLinks || [])
         .map(
-          (l) =>
-            (l.person as unknown as { linkedin_url: string | null } | null)
-              ?.linkedin_url,
+          (l: { person: unknown }) =>
+            (l.person as { linkedin_url: string | null } | null)?.linkedin_url,
         )
         .filter(Boolean) as string[],
     );

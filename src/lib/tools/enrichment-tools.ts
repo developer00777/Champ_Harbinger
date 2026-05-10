@@ -78,7 +78,10 @@ export const searchPeople = tool({
       const existingLinks = await db
         .select({ linkedinUrl: schema.people.linkedinUrl })
         .from(schema.campaignPeople)
-        .innerJoin(schema.people, eq(schema.campaignPeople.personId, schema.people.id))
+        .innerJoin(
+          schema.people,
+          eq(schema.campaignPeople.personId, schema.people.id),
+        )
         .where(eq(schema.campaignPeople.campaignId, input.campaignId));
       for (const l of existingLinks) {
         if (l.linkedinUrl) existingUrls.add(l.linkedinUrl);
@@ -295,7 +298,10 @@ async function enrichContactById(
         .where(eq(schema.organizations.name, companyName))
         .limit(1);
 
-      const orgEnrichment = orgRow?.enrichmentData as Record<string, unknown> | null;
+      const orgEnrichment = orgRow?.enrichmentData as Record<
+        string,
+        unknown
+      > | null;
       if (orgEnrichment) {
         const searches = orgEnrichment.searches as
           | Array<{ results: Array<{ url: string }> }>
@@ -400,7 +406,10 @@ async function enrichContactById(
   // ── Email discovery ──────────────────────────────────────────────────
   // If the contact has no email after enrichment, try to find one.
   const [personAfter] = await db
-    .select({ workEmail: schema.people.workEmail, personalEmail: schema.people.personalEmail })
+    .select({
+      workEmail: schema.people.workEmail,
+      personalEmail: schema.people.personalEmail,
+    })
     .from(schema.people)
     .where(eq(schema.people.id, personId))
     .limit(1);
@@ -875,7 +884,11 @@ async function enrichCompanyById(
   const recent = await isRecentlyEnriched("organizations", organizationId);
   if (recent) {
     const [org] = await db
-      .select({ name: schema.organizations.name, domain: schema.organizations.domain, enrichmentData: schema.organizations.enrichmentData })
+      .select({
+        name: schema.organizations.name,
+        domain: schema.organizations.domain,
+        enrichmentData: schema.organizations.enrichmentData,
+      })
       .from(schema.organizations)
       .where(eq(schema.organizations.id, organizationId))
       .limit(1);
@@ -1205,14 +1218,26 @@ export const findContacts = tool({
           description: schema.organizations.description,
         })
         .from(schema.campaignOrganizations)
-        .innerJoin(schema.organizations, eq(schema.campaignOrganizations.organizationId, schema.organizations.id))
+        .innerJoin(
+          schema.organizations,
+          eq(
+            schema.campaignOrganizations.organizationId,
+            schema.organizations.id,
+          ),
+        )
         .where(eq(schema.campaignOrganizations.id, input.companyId))
         .limit(1);
       if (!link) {
         throw new Error(`Company not found`);
       }
       orgId = link.organizationId;
-      org = { name: link.name, domain: link.domain, industry: link.industry, location: link.location, description: link.description };
+      org = {
+        name: link.name,
+        domain: link.domain,
+        industry: link.industry,
+        location: link.location,
+        description: link.description,
+      };
     } else {
       const [orgData] = await db
         .select({
@@ -1239,7 +1264,10 @@ export const findContacts = tool({
       const existingLinks = await db
         .select({ linkedinUrl: schema.people.linkedinUrl })
         .from(schema.campaignPeople)
-        .innerJoin(schema.people, eq(schema.campaignPeople.personId, schema.people.id))
+        .innerJoin(
+          schema.people,
+          eq(schema.campaignPeople.personId, schema.people.id),
+        )
         .where(eq(schema.campaignPeople.campaignId, input.campaignId));
       for (const l of existingLinks) {
         if (l.linkedinUrl) existingUrls.add(l.linkedinUrl);
@@ -1273,15 +1301,15 @@ export const findContacts = tool({
           });
 
           if (dp.email) {
-            const { makeEmailPatternDb } = await import("@/lib/services/email-pattern");
-            await (await import("@/lib/services/email-pattern")).recordVerifiedEmail(
-              makeEmailPatternDb(db),
-              {
-                personId: person.id,
-                email: dp.email,
-                source: "team_page",
-              },
-            );
+            const { makeEmailPatternDb } =
+              await import("@/lib/services/email-pattern");
+            await (
+              await import("@/lib/services/email-pattern")
+            ).recordVerifiedEmail(makeEmailPatternDb(db), {
+              personId: person.id,
+              email: dp.email,
+              source: "team_page",
+            });
           }
 
           if (input.campaignId) {
@@ -1461,10 +1489,19 @@ export const getContacts = tool({
         orgIndustry: schema.organizations.industry,
       })
       .from(schema.campaignPeople)
-      .innerJoin(schema.people, eq(schema.campaignPeople.personId, schema.people.id))
-      .leftJoin(schema.organizations, eq(schema.people.organizationId, schema.organizations.id))
+      .innerJoin(
+        schema.people,
+        eq(schema.campaignPeople.personId, schema.people.id),
+      )
+      .leftJoin(
+        schema.organizations,
+        eq(schema.people.organizationId, schema.organizations.id),
+      )
       .where(eq(schema.campaignPeople.campaignId, input.campaignId))
-      .orderBy(drizzleDesc(schema.campaignPeople.priorityScore), drizzleDesc(schema.campaignPeople.createdAt));
+      .orderBy(
+        drizzleDesc(schema.campaignPeople.priorityScore),
+        drizzleDesc(schema.campaignPeople.createdAt),
+      );
 
     // Filter by enrichment status (lives on the person record)
     if (input.enrichmentStatus) {
@@ -1500,7 +1537,11 @@ export const getContacts = tool({
       score_reason: row.scoreReason,
       source: row.source,
       company: row.orgName
-        ? { name: row.orgName, domain: row.orgDomain, industry: row.orgIndustry }
+        ? {
+            name: row.orgName,
+            domain: row.orgDomain,
+            industry: row.orgIndustry,
+          }
         : null,
       created_at: row.createdAt,
       updated_at: row.updatedAt,
@@ -1541,7 +1582,10 @@ export const getContactDetail = tool({
         orgEnrichmentStatus: schema.organizations.enrichmentStatus,
       })
       .from(schema.people)
-      .leftJoin(schema.organizations, eq(schema.people.organizationId, schema.organizations.id))
+      .leftJoin(
+        schema.organizations,
+        eq(schema.people.organizationId, schema.organizations.id),
+      )
       .where(eq(schema.people.id, personId))
       .limit(1);
 
@@ -1806,7 +1850,7 @@ export const getGoogleReviews = tool({
           signalId: signal.id,
           campaignId: input.campaignId,
           organizationId: input.organizationId,
-          output: result as Record<string, unknown>,
+          output: result as unknown as Record<string, unknown>,
           status: result.found ? "success" : "failed",
         });
       }

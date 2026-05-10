@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   for (let i = 0; i < configs.length; i += BATCH_SIZE) {
     const batch = configs.slice(i, i + BATCH_SIZE);
     const results = await Promise.allSettled(
-      batch.map(async (config) => {
+      batch.map(async (config: { id: string; schedule: string }) => {
         await qstash.publishJSON({
           url: `${baseUrl}/api/tracking/run`,
           body: { trackingConfigId: config.id },

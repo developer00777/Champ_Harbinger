@@ -9,7 +9,7 @@ import {
 } from "@/components/outreach/outreach-drafts-panel";
 import { SequenceList } from "@/components/outreach/sequence-list";
 import { SignalKanban } from "@/components/outreach/signal-kanban";
-import type { EnrollmentCard, SequenceRow } from "@/app/outreach/page";
+import type { EnrollmentCard, SequenceRow } from "@/app/(app)/outreach/page";
 
 interface OutreachTabsProps {
   drafts: DraftRow[];

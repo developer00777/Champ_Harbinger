@@ -7,12 +7,7 @@ import { Loader2, MessageCircle, Trash2 } from "lucide-react";
 import { ChatInput } from "@/components/chat/chat-input";
 import { SafeLink } from "@/components/safe-link";
 import { Button } from "@/components/ui/button";
-import {
-  type ChatSummary,
-  deleteChat,
-  listChats,
-} from "@/lib/services/chat-history";
-import { createClient } from "@/lib/supabase/client";
+import type { ChatSummary } from "@/lib/services/chat-history";
 
 function timeAgo(dateStr: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -34,11 +29,11 @@ export default function ChatPage() {
 
   useEffect(() => {
     mountedRef.current = true;
-    const supabase = createClient();
-    listChats(supabase, 50)
-      .then((data) => {
+    fetch("/api/chats")
+      .then((res) => res.json())
+      .then((data: { chats: ChatSummary[] }) => {
         if (mountedRef.current) {
-          setChats(data);
+          setChats(data.chats ?? []);
           setLoading(false);
         }
       })
@@ -57,6 +52,16 @@ export default function ChatPage() {
     const id = crypto.randomUUID();
     const params = new URLSearchParams({ q: input });
     router.push(`/chat/${id}?${params.toString()}`);
+  };
+
+  const handleDelete = (chatId: string) => {
+    fetch("/api/chats", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId }),
+    })
+      .then(() => setChats((prev) => prev.filter((c) => c.id !== chatId)))
+      .catch(() => {});
   };
 
   return (
@@ -114,13 +119,7 @@ export default function ChatPage() {
                     className="text-muted-foreground hover:text-destructive h-7 w-7 shrink-0 opacity-60 transition-opacity hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
                     onClick={(e) => {
                       e.preventDefault();
-                      deleteChat(createClient(), chat.id)
-                        .then(() =>
-                          setChats((prev) =>
-                            prev.filter((c) => c.id !== chat.id),
-                          ),
-                        )
-                        .catch(() => {});
+                      handleDelete(chat.id);
                     }}
                   >
                     <Trash2 className="h-3.5 w-3.5" />

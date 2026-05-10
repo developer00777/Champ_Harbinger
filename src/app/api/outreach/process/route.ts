@@ -87,7 +87,7 @@ async function handleSignalTrigger(
     return NextResponse.json({ sent: 0, reason: "no matching sequences" });
   }
 
-  const sequenceIds = sequences.map((s) => s.id);
+  const sequenceIds = (sequences as Array<{ id: string }>).map((s) => s.id);
 
   // Org-scoped fires: pick the best contact, auto-enroll, auto-draft.
   // Person-scoped fires (no organizationId): skip selection and use the
@@ -125,7 +125,7 @@ async function handleSignalTrigger(
     }
     enrollmentQuery = enrollmentQuery.in(
       "person_id",
-      people.map((p) => p.id),
+      (people as Array<{ id: string }>).map((p) => p.id),
     );
   }
 
@@ -175,7 +175,7 @@ async function pickAndDraft(
 
   if (!people || people.length === 0) return 0;
 
-  const personIds = people.map((p) => p.id as string);
+  const personIds = (people as Array<{ id: string }>).map((p) => p.id);
   const { data: cpRows } = await supabase
     .from("campaign_people")
     .select("id, person_id, priority_score, outreach_status")
@@ -259,7 +259,9 @@ async function pickAndDraft(
   let drafted = 0;
 
   for (const pick of picks) {
-    const person = people.find((p) => p.id === pick.personId);
+    const person = (
+      people as Array<{ id: string; [key: string]: unknown }>
+    ).find((p) => p.id === pick.personId);
     const cp = cpByPersonId.get(pick.personId);
     if (!person || !cp) continue;
 
@@ -522,7 +524,7 @@ function checkCondition(condition: string, outreachStatus: string): boolean {
 }
 
 async function sendStepEmail(
-  supabase: ReturnType<typeof getAdminClient>,
+  _supabase: ReturnType<typeof getAdminClient>,
   enrollment: {
     id: string;
     sequence_id: string;
@@ -531,6 +533,6 @@ async function sendStepEmail(
     current_step: number;
   },
 ): Promise<boolean> {
-  const result = await sendApprovedDraft(supabase, enrollment);
+  const result = await sendApprovedDraft(enrollment);
   return result.ok;
 }

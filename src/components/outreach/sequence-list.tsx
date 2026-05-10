@@ -1,6 +1,6 @@
 "use client";
 
-import type { SequenceRow } from "@/app/outreach/page";
+import type { SequenceRow } from "@/app/(app)/outreach/page";
 import { ReviewButton } from "@/components/outreach/review-button";
 import { SequenceProgressBar } from "@/components/outreach/sequence-progress-bar";
 import { StatusPill } from "@/components/ui/status-pill";

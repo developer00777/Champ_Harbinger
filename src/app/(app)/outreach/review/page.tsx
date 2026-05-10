@@ -184,70 +184,76 @@ function ReviewPageInner() {
       const steps = stepsRes.data;
       const totalSteps = steps?.length ?? 1;
 
-      const mapped: DraftForReview[] = (rawDrafts ?? []).map((d) => {
-        const person = d.people as unknown as {
-          name: string;
-          title: string | null;
-          organization_id: string | null;
-          enrichment_data: EnrichmentData;
-          enrichment_status: "pending" | "in_progress" | "enriched" | "failed";
-          last_enriched_at: string | null;
-          work_email: string | null;
-          work_email_confidence: number | null;
-          personal_email: string | null;
-          linkedin_url: string | null;
-          twitter_url: string | null;
-          organizations: {
+      const mapped: DraftForReview[] = (rawDrafts ?? []).map(
+        (d: Record<string, unknown>) => {
+          const person = d.people as unknown as {
             name: string;
-            domain: string | null;
-            industry: string | null;
+            title: string | null;
+            organization_id: string | null;
+            enrichment_data: EnrichmentData;
+            enrichment_status:
+              | "pending"
+              | "in_progress"
+              | "enriched"
+              | "failed";
+            last_enriched_at: string | null;
+            work_email: string | null;
+            work_email_confidence: number | null;
+            personal_email: string | null;
+            linkedin_url: string | null;
+            twitter_url: string | null;
+            organizations: {
+              name: string;
+              domain: string | null;
+              industry: string | null;
+            } | null;
           } | null;
-        } | null;
-        const cp = d.campaign_people as unknown as {
-          priority_score: number | null;
-        } | null;
-        const enrollment = d.sequence_enrollments as unknown as {
-          current_step: number | null;
-        } | null;
-        const stepData = d.sequence_steps as unknown as {
-          step_number: number;
-          delay_days: number | null;
-          delay_hours: number | null;
-        } | null;
+          const cp = d.campaign_people as unknown as {
+            priority_score: number | null;
+          } | null;
+          const enrollment = d.sequence_enrollments as unknown as {
+            current_step: number | null;
+          } | null;
+          const stepData = d.sequence_steps as unknown as {
+            step_number: number;
+            delay_days: number | null;
+            delay_hours: number | null;
+          } | null;
 
-        return {
-          id: d.id,
-          to_email: d.to_email,
-          subject: d.subject,
-          body_html: d.body_html,
-          body_text: d.body_text,
-          ai_reasoning: d.ai_reasoning,
-          review_status: d.review_status ?? "pending",
-          status: d.status ?? "draft",
-          sequence_step_id: d.sequence_step_id,
-          enrollment_id: d.enrollment_id,
-          enrollment_current_step: enrollment?.current_step ?? null,
-          person_id: d.person_id,
-          person_name: person?.name ?? "Unknown",
-          person_title: person?.title ?? null,
-          person_work_email: person?.work_email ?? null,
-          person_work_email_confidence: person?.work_email_confidence ?? null,
-          person_personal_email: person?.personal_email ?? null,
-          person_linkedin_url: person?.linkedin_url ?? null,
-          person_twitter_url: person?.twitter_url ?? null,
-          company_name: person?.organizations?.name ?? null,
-          company_domain: person?.organizations?.domain ?? null,
-          company_industry: person?.organizations?.industry ?? null,
-          priority_score: cp?.priority_score ?? null,
-          enrichment_status: person?.enrichment_status ?? "pending",
-          last_enriched_at: person?.last_enriched_at ?? null,
-          enrichment_data: person?.enrichment_data ?? ({} as EnrichmentData),
-          step_number: stepData?.step_number ?? 1,
-          total_steps: totalSteps,
-          delay_days: stepData?.delay_days ?? null,
-          delay_hours: stepData?.delay_hours ?? null,
-        };
-      });
+          return {
+            id: d.id,
+            to_email: d.to_email,
+            subject: d.subject,
+            body_html: d.body_html,
+            body_text: d.body_text,
+            ai_reasoning: d.ai_reasoning,
+            review_status: d.review_status ?? "pending",
+            status: d.status ?? "draft",
+            sequence_step_id: d.sequence_step_id,
+            enrollment_id: d.enrollment_id,
+            enrollment_current_step: enrollment?.current_step ?? null,
+            person_id: d.person_id,
+            person_name: person?.name ?? "Unknown",
+            person_title: person?.title ?? null,
+            person_work_email: person?.work_email ?? null,
+            person_work_email_confidence: person?.work_email_confidence ?? null,
+            person_personal_email: person?.personal_email ?? null,
+            person_linkedin_url: person?.linkedin_url ?? null,
+            person_twitter_url: person?.twitter_url ?? null,
+            company_name: person?.organizations?.name ?? null,
+            company_domain: person?.organizations?.domain ?? null,
+            company_industry: person?.organizations?.industry ?? null,
+            priority_score: cp?.priority_score ?? null,
+            enrichment_status: person?.enrichment_status ?? "pending",
+            last_enriched_at: person?.last_enriched_at ?? null,
+            enrichment_data: person?.enrichment_data ?? ({} as EnrichmentData),
+            step_number: stepData?.step_number ?? 1,
+            total_steps: totalSteps,
+            delay_days: stepData?.delay_days ?? null,
+            delay_hours: stepData?.delay_hours ?? null,
+          };
+        },
+      );
 
       setDrafts(mapped);
 

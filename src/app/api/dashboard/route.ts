@@ -123,7 +123,7 @@ export async function GET(request: Request) {
   }
 
   const campaigns = (campaignsRes.data ?? [])
-    .map((c) => {
+    .map((c: { id: string; name: string; status: string }) => {
       const stats = campaignMap.get(c.id) ?? {
         leads: 0,
         sent: 0,
@@ -144,7 +144,10 @@ export async function GET(request: Request) {
           stats.sent > 0 ? Math.round((stats.replied / stats.sent) * 100) : 0,
       };
     })
-    .sort((a, b) => b.replyRate - a.replyRate);
+    .sort(
+      (a: { replyRate: number }, b: { replyRate: number }) =>
+        b.replyRate - a.replyRate,
+    );
 
   return Response.json({ totals, timeSeries, campaigns });
 }
