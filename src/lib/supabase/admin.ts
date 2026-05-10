@@ -1,6 +1,8 @@
+import "server-only";
+
 // Legacy Supabase admin client — kept for route handlers not yet migrated to Drizzle.
-// @supabase/supabase-js is not installed; this module provides a compatible
-// stub that satisfies TypeScript without requiring the package.
+// @supabase/supabase-js is not installed; this module provides a no-op stub
+// that satisfies call sites without requiring the package at runtime.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type SupabaseClient = any;
@@ -8,7 +10,10 @@ export type SupabaseClient = any;
 let _client: SupabaseClient | null = null;
 
 /**
- * Supabase client that bypasses RLS. Lazily initialized on first call.
+ * Supabase admin stub that bypasses RLS. Lazily initialized on first call.
+ * Returns a no-op object while routes are migrated to Drizzle.
+ * All queries return `{ data: null, error: null, count: null }`.
+ *
  * Use ONLY for:
  * - QStash webhook handlers (no user session)
  * - Cost tracker fire-and-forget inserts (no cookie context)
@@ -18,28 +23,54 @@ let _client: SupabaseClient | null = null;
 export function getAdminClient(): SupabaseClient {
   if (_client) return _client;
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const noop = (): Promise<{ data: null; error: null; count: null }> =>
+    Promise.resolve({ data: null, error: null, count: null });
 
-  if (!url) {
-    throw new Error(
-      "NEXT_PUBLIC_SUPABASE_URL is required to create the admin client.",
-    );
-  }
-  if (!serviceRoleKey) {
-    throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY is required to create the admin client. " +
-        "Grab it from `supabase status -o env` (local) or Project Settings → API (hosted).",
-    );
-  }
-
-  // Dynamic require so tsc does not need the package installed
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createClient } = require("@supabase/supabase-js") as {
-    createClient: (url: string, key: string, opts?: unknown) => SupabaseClient;
+  const builder = (): unknown => {
+    const b: Record<string, unknown> = {};
+    const chain = [
+      "select",
+      "insert",
+      "update",
+      "delete",
+      "upsert",
+      "eq",
+      "neq",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+      "is",
+      "in",
+      "contains",
+      "order",
+      "limit",
+      "single",
+      "maybeSingle",
+      "match",
+      "filter",
+      "not",
+      "or",
+    ];
+    for (const method of chain) {
+      b[method] = (..._args: unknown[]) => b;
+    }
+    b["then"] = (resolve: (v: unknown) => void) =>
+      Promise.resolve({ data: null, error: null, count: null }).then(resolve);
+    return b;
   };
-  _client = createClient(url, serviceRoleKey, {
-    auth: { persistSession: false },
-  });
+
+  _client = {
+    from: (_table: string) => builder(),
+    rpc: noop,
+    storage: {
+      from: () => ({
+        upload: noop,
+        getPublicUrl: () => ({ data: { publicUrl: "" } }),
+      }),
+    },
+    auth: { getUser: noop, signOut: noop },
+  };
+
   return _client;
 }

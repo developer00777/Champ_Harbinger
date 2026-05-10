@@ -1,63 +1,72 @@
+import "server-only";
+
 // Legacy Supabase server client — kept for route handlers not yet migrated to Drizzle.
-// @supabase/ssr is not installed; this module provides a compatible stub that
-// satisfies TypeScript without requiring the package at compile time.
+// @supabase/ssr is not installed; this module provides a no-op stub that
+// satisfies call sites without requiring the package at runtime.
 
 import { auth } from "@clerk/nextjs/server";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type SupabaseClient = any;
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+/**
+ * Server Supabase stub. Returns a no-op object so route handlers don't crash
+ * while these routes are being migrated to Drizzle.
+ * All queries return `{ data: null, error: null, count: null }`.
+ */
+const makeStub = (): SupabaseClient => {
+  const noop = (): Promise<{ data: null; error: null; count: null }> =>
+    Promise.resolve({ data: null, error: null, count: null });
 
-let warnedKeyless = false;
-function warnIfKeyless() {
-  if (warnedKeyless) return;
-  if (process.env.CLERK_FRONTEND_API_DOMAIN) return;
-  if (process.env.NODE_ENV === "production") {
-    warnedKeyless = true;
-    console.error(
-      "FATAL: CLERK_FRONTEND_API_DOMAIN is unset in production. " +
-        "Supabase third-party auth is disabled and every RLS-protected " +
-        "query will return zero rows. Configure Clerk → Supabase before " +
-        "serving traffic.",
-    );
-    return;
-  }
-  warnedKeyless = true;
-  console.warn(
-    "\n⚠ Clerk Keyless mode detected\n" +
-      "  Supabase third-party auth is disabled because CLERK_FRONTEND_API_DOMAIN\n" +
-      "  is not set. All RLS-protected queries will return empty rows.\n" +
-      "  Fix: rerun `pnpm setup` (option [2]) or paste the domain into .env.local.\n" +
-      "  See: https://clerk.com/setup/supabase\n",
-  );
-}
+  const builder = (): unknown => {
+    const b: Record<string, unknown> = {};
+    const chain = [
+      "select",
+      "insert",
+      "update",
+      "delete",
+      "upsert",
+      "eq",
+      "neq",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+      "is",
+      "in",
+      "contains",
+      "order",
+      "limit",
+      "single",
+      "maybeSingle",
+      "match",
+      "filter",
+      "not",
+      "or",
+    ];
+    for (const method of chain) {
+      b[method] = (..._args: unknown[]) => b;
+    }
+    b["then"] = (resolve: (v: unknown) => void) =>
+      Promise.resolve({ data: null, error: null, count: null }).then(resolve);
+    return b;
+  };
+
+  return {
+    from: (_table: string) => builder(),
+    rpc: noop,
+    storage: {
+      from: () => ({
+        upload: noop,
+        getPublicUrl: () => ({ data: { publicUrl: "" } }),
+      }),
+    },
+    auth: { getUser: noop, signOut: noop },
+  };
+};
 
 export const createClient = async (): Promise<SupabaseClient> => {
-  warnIfKeyless();
-  const { getToken } = await auth();
-
-  // Dynamic require so tsc does not need the package installed
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createServerClient } = require("@supabase/ssr") as {
-    createServerClient: (
-      url: string,
-      key: string,
-      opts?: unknown,
-    ) => SupabaseClient;
-  };
-  return createServerClient(supabaseUrl!, supabaseKey!, {
-    cookies: { getAll: () => [], setAll: () => {} },
-    global: {
-      fetch: async (input: RequestInfo | URL, init: RequestInit = {}) => {
-        const token = await getToken();
-        const headers = new Headers(init.headers as HeadersInit | undefined);
-        if (token) headers.set("Authorization", `Bearer ${token}`);
-        return fetch(input, { ...init, headers });
-      },
-    },
-  });
+  return makeStub();
 };
 
 /**
@@ -70,7 +79,7 @@ export async function getSupabaseAndUser(): Promise<{
 } | null> {
   const { isAuthenticated, userId, sessionClaims } = await auth();
   if (!isAuthenticated || !userId) return null;
-  const supabase = await createClient();
+  const supabase = makeStub();
   const email =
     (sessionClaims as { email?: string } | null | undefined)?.email ?? "";
   return { supabase, user: { id: userId, email } };

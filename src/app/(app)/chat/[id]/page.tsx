@@ -13,8 +13,6 @@ import { ChatMessages } from "@/components/chat/chat-messages";
 import { Button } from "@/components/ui/button";
 import { useCampaign } from "@/lib/campaign-context";
 import { useStreaming } from "@/lib/streaming-context";
-import { loadChat, saveChat } from "@/lib/services/chat-history";
-import { createClient } from "@/lib/supabase/client";
 
 // ---------------------------------------------------------------------------
 // Inner component -- only rendered after initial messages are loaded so that
@@ -31,6 +29,40 @@ function summarizeChat(chatId: string) {
     );
   } else {
     fetch("/api/chat/summarize", { method: "POST", body, keepalive: true });
+  }
+}
+
+async function saveChatViaApi(
+  chatId: string,
+  messages: UIMessage[],
+  campaignId?: string,
+): Promise<void> {
+  try {
+    await fetch(`/api/chats/${chatId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, campaignId }),
+    });
+  } catch (err) {
+    console.error("[chat-page] save failed:", err);
+  }
+}
+
+async function loadChatViaApi(chatId: string): Promise<{
+  id: string;
+  title: string;
+  messages: UIMessage[];
+} | null> {
+  try {
+    const res = await fetch(`/api/chats/${chatId}`);
+    if (!res.ok) return null;
+    return (await res.json()) as {
+      id: string;
+      title: string;
+      messages: UIMessage[];
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -59,13 +91,7 @@ function ChatView({
     messages: initialMessages,
     onFinish({ messages: allMessages }) {
       if (userId) {
-        saveChat(
-          createClient(),
-          userId,
-          chatId,
-          allMessages,
-          activeCampaignId ?? undefined,
-        );
+        saveChatViaApi(chatId, allMessages, activeCampaignId ?? undefined);
       }
       turnCount.current++;
       // Generate a clean title after the first assistant reply so the chat
@@ -166,7 +192,7 @@ function ChatView({
 }
 
 // ---------------------------------------------------------------------------
-// Outer component -- loads chat from DB, then renders ChatView.
+// Outer component -- loads chat from API, then renders ChatView.
 // ---------------------------------------------------------------------------
 
 export default function ChatPage() {
@@ -180,11 +206,10 @@ export default function ChatPage() {
 
   useEffect(() => {
     let cancelled = false;
-    loadChat(createClient(), chatId).then((chat) => {
+    loadChatViaApi(chatId).then((chat) => {
       if (cancelled) return;
       setInitialMessages(chat?.messages ?? []);
-      const title = (chat as { title?: string | null } | null)?.title ?? null;
-      setInitialTitle(title);
+      setInitialTitle(chat?.title ?? null);
     });
     return () => {
       cancelled = true;

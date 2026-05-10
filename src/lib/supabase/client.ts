@@ -1,48 +1,64 @@
 "use client";
 
 // Legacy Supabase browser client — kept for pages not yet migrated to Drizzle.
-// @supabase/ssr is not installed; this module provides a compatible stub that
-// satisfies TypeScript without requiring the package at compile time.
+// @supabase/ssr is not installed; this module returns a no-op stub that
+// satisfies call sites without requiring the package at runtime.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type SupabaseClient = any;
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
-
-interface ClerkWindow {
-  Clerk?: {
-    session?: { getToken: () => Promise<string | null> };
-  };
-}
-
 /**
- * Browser Supabase client that forwards the Clerk session token as a Bearer
- * header on every request.
+ * Browser Supabase stub. Returns a no-op object so call sites don't crash
+ * while these pages are being migrated to Drizzle / API routes.
+ * All queries return `{ data: null, error: null, count: null }`.
  */
 export const createClient = (): SupabaseClient => {
-  // Dynamic require so tsc does not need the package installed
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createBrowserClient } = require("@supabase/ssr") as {
-    createBrowserClient: (
-      url: string,
-      key: string,
-      opts?: unknown,
-    ) => SupabaseClient;
+  const noop = (): Promise<{ data: null; error: null; count: null }> =>
+    Promise.resolve({ data: null, error: null, count: null });
+
+  const builder = (): unknown => {
+    const b: Record<string, unknown> = {};
+    const chain = [
+      "select",
+      "insert",
+      "update",
+      "delete",
+      "upsert",
+      "eq",
+      "neq",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+      "is",
+      "in",
+      "contains",
+      "order",
+      "limit",
+      "single",
+      "maybeSingle",
+      "match",
+      "filter",
+      "not",
+      "or",
+    ];
+    for (const method of chain) {
+      b[method] = (..._args: unknown[]) => b;
+    }
+    b["then"] = (resolve: (v: unknown) => void) =>
+      Promise.resolve({ data: null, error: null, count: null }).then(resolve);
+    return b;
   };
-  return createBrowserClient(supabaseUrl!, supabaseKey!, {
-    global: {
-      fetch: async (input: RequestInfo | URL, init: RequestInit = {}) => {
-        const token =
-          typeof window !== "undefined"
-            ? await ((
-                window as unknown as ClerkWindow
-              ).Clerk?.session?.getToken() ?? null)
-            : null;
-        const headers = new Headers(init.headers as HeadersInit | undefined);
-        if (token) headers.set("Authorization", `Bearer ${token}`);
-        return fetch(input, { ...init, headers });
-      },
+
+  return {
+    from: (_table: string) => builder(),
+    rpc: noop,
+    storage: {
+      from: () => ({
+        upload: noop,
+        getPublicUrl: () => ({ data: { publicUrl: "" } }),
+      }),
     },
-  });
+    auth: { getUser: noop, signOut: noop },
+  };
 };

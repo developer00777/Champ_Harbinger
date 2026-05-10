@@ -11,8 +11,6 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { ChatMessages } from "@/components/chat/chat-messages";
 import { useCampaign } from "@/lib/campaign-context";
 import { useStreaming } from "@/lib/streaming-context";
-import { saveChat } from "@/lib/services/chat-history";
-import { createClient } from "@/lib/supabase/client";
 
 const MIN_WIDTH = 360;
 const MAX_WIDTH_RATIO = 0.6;
@@ -152,13 +150,14 @@ function AgentPanelInner({
     messages: initialMessages,
     onFinish({ messages: allMessages }) {
       if (userId) {
-        saveChat(
-          createClient(),
-          userId,
-          chatId,
-          allMessages,
-          campaignId ?? undefined,
-        );
+        fetch(`/api/chats/${chatId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: allMessages,
+            campaignId: campaignId ?? undefined,
+          }),
+        }).catch((err) => console.error("[agent-panel] save failed:", err));
       }
     },
   });
