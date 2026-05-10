@@ -95,17 +95,17 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Run `pnpm setup` or paste keys into .env.local",
   },
   {
-    id: "anthropic",
-    name: "Anthropic",
+    id: "openrouter",
+    name: "OpenRouter",
     category: "ai",
     severity: "required",
-    feature: "Chat, enrichment, email drafts",
+    feature: "Chat, enrichment, email drafts (routes to any LLM via OpenRouter)",
     consequence:
       "Every chat request will fail with a 500. The agent and email composer are non-functional.",
-    envVars: ["ANTHROPIC_API_KEY"],
-    signupUrl: "https://console.anthropic.com",
-    keysUrl: "https://console.anthropic.com/settings/keys",
-    fixHint: "Add `ANTHROPIC_API_KEY=sk-ant-api...` to .env.local",
+    envVars: ["OPENROUTER_API_KEY"],
+    signupUrl: "https://openrouter.ai",
+    keysUrl: "https://openrouter.ai/keys",
+    fixHint: "Add `OPENROUTER_API_KEY=sk-or-...` to .env.local",
   },
 
   // ─── OPTIONAL ────────────────────────────────────────────────────────────
