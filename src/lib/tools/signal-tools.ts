@@ -2,10 +2,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { tool } from "ai";
 import { z } from "zod";
+import { eq, and, gte, desc } from "drizzle-orm";
 import { getRecipe, hasRecipe, listRecipeSlugs } from "@/lib/signals/recipes";
 import { executeSignal } from "@/lib/signals/executor";
 import { runRecipe } from "@/lib/signals/runner";
-import { createClient } from "@/lib/supabase/server";
+import { getScopedDb, schema } from "@/lib/db/scoped";
+import { adminDb as db } from "@/lib/db/admin";
 import type { Signal } from "@/lib/types/signal";
 
 export const getSignalAuthoringGuide = tool({
@@ -63,8 +65,6 @@ export const testSignalRecipe = tool({
       throw new Error("Provide either organizationId or domain");
     }
 
-    const supabase = await createClient();
-
     // Resolve company context
     let companyName: string;
     let companyDomain: string | null;
@@ -72,18 +72,17 @@ export const testSignalRecipe = tool({
     let organizationId: string;
 
     if (input.organizationId) {
-      const { data: org, error } = await supabase
-        .from("organizations")
-        .select("id, name, domain, url")
-        .eq("id", input.organizationId)
-        .maybeSingle();
-      if (error) throw new Error(`DB error: ${error.message}`);
+      const [org] = await db
+        .select({ id: schema.organizations.id, name: schema.organizations.name, domain: schema.organizations.domain, url: schema.organizations.url })
+        .from(schema.organizations)
+        .where(eq(schema.organizations.id, input.organizationId))
+        .limit(1);
       if (!org)
         throw new Error(`Organization not found: ${input.organizationId}`);
-      organizationId = org.id as string;
-      companyName = org.name as string;
-      companyDomain = (org.domain as string | null) ?? null;
-      companyWebsite = (org.url as string | null) ?? null;
+      organizationId = org.id;
+      companyName = org.name;
+      companyDomain = org.domain ?? null;
+      companyWebsite = org.url ?? null;
     } else {
       const domain = input
         .domain!.replace(/^https?:\/\//, "")
@@ -112,7 +111,6 @@ export const testSignalRecipe = tool({
             website: companyWebsite,
           },
         },
-        supabaseClient: supabase,
         onStep: (step, result) => {
           const preview =
             typeof result === "string"
@@ -128,19 +126,19 @@ export const testSignalRecipe = tool({
     let signal: Signal | null = null;
 
     if (input.signalId) {
-      const { data } = await supabase
-        .from("signals")
-        .select("*")
-        .eq("id", input.signalId)
-        .single();
-      signal = data as Signal | null;
+      const [data] = await db
+        .select()
+        .from(schema.signals)
+        .where(eq(schema.signals.id, input.signalId))
+        .limit(1);
+      signal = data as unknown as Signal | null;
     } else if (input.recipeSlug) {
-      const { data } = await supabase
-        .from("signals")
-        .select("*")
-        .eq("slug", input.recipeSlug)
-        .single();
-      signal = data as Signal | null;
+      const [data] = await db
+        .select()
+        .from(schema.signals)
+        .where(eq(schema.signals.slug, input.recipeSlug))
+        .limit(1);
+      signal = data as unknown as Signal | null;
     }
 
     if (!signal) {
@@ -186,28 +184,26 @@ export const getSignals = tool({
       .describe("Filter by category. Omit to get all signals."),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-    let query = supabase
-      .from("signals")
-      .select("id, name, category, description, is_builtin")
-      .order("is_builtin", { ascending: false })
-      .order("name");
+    const rows = await db
+      .select({
+        id: schema.signals.id,
+        name: schema.signals.name,
+        category: schema.signals.category,
+        description: schema.signals.description,
+        isBuiltin: schema.signals.isBuiltin,
+      })
+      .from(schema.signals)
+      .where(input.category ? eq(schema.signals.category, input.category) : undefined)
+      .orderBy(desc(schema.signals.isBuiltin), schema.signals.name);
 
-    if (input.category) {
-      query = query.eq("category", input.category);
-    }
-
-    const { data, error } = await query;
-    if (error) throw new Error(`Failed to list signals: ${error.message}`);
-    const signals = (data ?? []).map((s: Record<string, unknown>) => {
-      const desc = (s.description as string | null) ?? null;
+    const signals = rows.map((s) => {
+      const descText = s.description ?? null;
       return {
         id: s.id,
         name: s.name,
         category: s.category,
-        description:
-          desc && desc.length > 200 ? desc.slice(0, 200) + "…" : desc,
-        is_builtin: s.is_builtin,
+        description: descText && descText.length > 200 ? descText.slice(0, 200) + "…" : descText,
+        is_builtin: s.isBuiltin,
       };
     });
     return { signals };
@@ -221,14 +217,13 @@ export const getSignalDetail = tool({
     signalId: z.string().uuid().describe("signals.id"),
   }),
   execute: async ({ signalId }) => {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("signals")
-      .select("*")
-      .eq("id", signalId)
-      .single();
-    if (error || !data) {
-      return { error: `Signal not found: ${error?.message ?? "no rows"}` };
+    const [data] = await db
+      .select()
+      .from(schema.signals)
+      .where(eq(schema.signals.id, signalId))
+      .limit(1);
+    if (!data) {
+      return { error: `Signal not found` };
     }
     return data;
   },
@@ -241,44 +236,28 @@ export const getCampaignSignals = tool({
     campaignId: z.string().uuid().describe("Campaign ID"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const [allSignals, toggles] = await Promise.all([
+      db
+        .select({ id: schema.signals.id, name: schema.signals.name, category: schema.signals.category, description: schema.signals.description, isBuiltin: schema.signals.isBuiltin })
+        .from(schema.signals)
+        .orderBy(desc(schema.signals.isBuiltin), schema.signals.name),
+      db
+        .select({ signalId: schema.campaignSignals.signalId, enabled: schema.campaignSignals.enabled })
+        .from(schema.campaignSignals)
+        .where(eq(schema.campaignSignals.campaignId, input.campaignId)),
+    ]);
 
-    // Get all signals
-    const { data: allSignals, error: sigErr } = await supabase
-      .from("signals")
-      .select("*")
-      .order("is_builtin", { ascending: false })
-      .order("name");
-    if (sigErr) throw new Error(`Failed to list signals: ${sigErr.message}`);
+    const toggleMap = new Map(toggles.map((t) => [t.signalId, t.enabled]));
 
-    // Get campaign toggles
-    const { data: toggles, error: togErr } = await supabase
-      .from("campaign_signals")
-      .select("*")
-      .eq("campaign_id", input.campaignId);
-    if (togErr)
-      throw new Error(`Failed to get campaign signals: ${togErr.message}`);
-
-    const toggleMap = new Map(
-      (toggles ?? []).map((t: Record<string, unknown>) => [
-        t.signal_id as string,
-        t,
-      ]),
-    );
-
-    const result = (allSignals ?? []).map((s: Record<string, unknown>) => {
-      const toggle = toggleMap.get(s.id as string) as
-        | Record<string, unknown>
-        | undefined;
-      const desc = (s.description as string | null) ?? null;
+    const result = allSignals.map((s) => {
+      const descText = s.description ?? null;
       return {
         id: s.id,
         name: s.name,
         category: s.category,
-        description:
-          desc && desc.length > 200 ? desc.slice(0, 200) + "…" : desc,
-        is_builtin: s.is_builtin,
-        enabled: toggle ? (toggle.enabled as boolean) : false,
+        description: descText && descText.length > 200 ? descText.slice(0, 200) + "…" : descText,
+        is_builtin: s.isBuiltin,
+        enabled: toggleMap.get(s.id) ?? false,
       };
     });
 
@@ -297,22 +276,20 @@ export const toggleCampaignSignal = tool({
       .describe("Whether to enable (true) or disable (false) the signal"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
+    const [data] = await sdb.raw
+      .insert(schema.campaignSignals)
+      .values({
+        campaignId: input.campaignId,
+        signalId: input.signalId,
+        enabled: input.enabled,
+      })
+      .onConflictDoUpdate({
+        target: [schema.campaignSignals.campaignId, schema.campaignSignals.signalId],
+        set: { enabled: input.enabled },
+      })
+      .returning();
 
-    const { data, error } = await supabase
-      .from("campaign_signals")
-      .upsert(
-        {
-          campaign_id: input.campaignId,
-          signal_id: input.signalId,
-          enabled: input.enabled,
-        },
-        { onConflict: "campaign_id,signal_id" },
-      )
-      .select("*")
-      .single();
-
-    if (error) throw new Error(`Failed to toggle signal: ${error.message}`);
     return {
       campaignSignal: data,
       message: `Signal ${input.enabled ? "enabled" : "disabled"} for campaign`,
@@ -365,27 +342,26 @@ export const createSignal = tool({
       ),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-
-    const { data, error } = await supabase
-      .from("signals")
-      .insert({
+    const sdb = await getScopedDb();
+    const [data] = await sdb.raw
+      .insert(schema.signals)
+      .values({
+        clerkUserId: sdb.userId,
         name: input.name,
         slug: input.slug,
         description: input.description,
-        long_description: input.longDescription ?? null,
+        longDescription: input.longDescription ?? null,
         category: input.category,
         icon: input.icon ?? null,
-        execution_type: input.executionType,
-        tool_key: input.toolKey ?? null,
+        executionType: input.executionType,
+        toolKey: input.toolKey ?? null,
         config: input.config,
-        is_builtin: false,
-        is_public: false,
+        isBuiltin: false,
+        isPublic: false,
       })
-      .select("*")
-      .single();
+      .returning();
 
-    if (error) throw new Error(`Failed to create signal: ${error.message}`);
+    if (!data) throw new Error("Failed to create signal");
     return { signal: data, message: `Created signal "${input.name}"` };
   },
 });
@@ -427,36 +403,28 @@ export const updateSignal = tool({
       .describe("Replacement execution config (full object, not a merge)"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-    const patch: Record<string, unknown> = {};
+    const patch: Partial<typeof schema.signals.$inferInsert> = {};
     if (input.name !== undefined) patch.name = input.name;
     if (input.description !== undefined) patch.description = input.description;
-    if (input.longDescription !== undefined)
-      patch.long_description = input.longDescription;
+    if (input.longDescription !== undefined) patch.longDescription = input.longDescription;
     if (input.category !== undefined) patch.category = input.category;
     if (input.icon !== undefined) patch.icon = input.icon;
-    if (input.executionType !== undefined)
-      patch.execution_type = input.executionType;
-    if (input.toolKey !== undefined) patch.tool_key = input.toolKey;
+    if (input.executionType !== undefined) patch.executionType = input.executionType;
+    if (input.toolKey !== undefined) patch.toolKey = input.toolKey;
     if (input.config !== undefined) patch.config = input.config;
 
     if (Object.keys(patch).length === 0) {
       throw new Error("No fields provided to update");
     }
 
-    const { data, error } = await supabase
-      .from("signals")
-      .update(patch)
-      .eq("id", input.signalId)
-      .eq("is_builtin", false)
-      .select("*")
-      .single();
+    const [data] = await db
+      .update(schema.signals)
+      .set(patch)
+      .where(and(eq(schema.signals.id, input.signalId), eq(schema.signals.isBuiltin, false)))
+      .returning();
 
-    if (error) throw new Error(`Failed to update signal: ${error.message}`);
     if (!data)
-      throw new Error(
-        "Signal not found or is built-in (built-in signals cannot be edited)",
-      );
+      throw new Error("Signal not found or is built-in (built-in signals cannot be edited)");
     return { signal: data, message: `Updated signal "${data.name}"` };
   },
 });
@@ -469,17 +437,12 @@ export const makeSignalPublic = tool({
     isPublic: z.boolean().describe("true to publish, false to unpublish"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const [data] = await db
+      .update(schema.signals)
+      .set({ isPublic: input.isPublic })
+      .where(and(eq(schema.signals.id, input.signalId), eq(schema.signals.isBuiltin, false)))
+      .returning();
 
-    const { data, error } = await supabase
-      .from("signals")
-      .update({ is_public: input.isPublic })
-      .eq("id", input.signalId)
-      .eq("is_builtin", false)
-      .select("*")
-      .single();
-
-    if (error) throw new Error(`Failed to update signal: ${error.message}`);
     return {
       signal: data,
       message: `Signal ${input.isPublic ? "published" : "unpublished"}`,
@@ -524,26 +487,23 @@ export const getSignalResults = tool({
       };
     }
 
-    const supabase = await createClient();
-
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - input.maxAgeDays);
 
-    let query = supabase
-      .from("signal_results")
-      .select("*")
-      .eq("signal_id", input.signalId)
-      .eq("campaign_id", input.campaignId)
-      .gte("ran_at", cutoff.toISOString())
-      .order("ran_at", { ascending: false });
+    const results = await db
+      .select()
+      .from(schema.signalResults)
+      .where(
+        and(
+          eq(schema.signalResults.signalId, input.signalId),
+          eq(schema.signalResults.campaignId, input.campaignId!),
+          gte(schema.signalResults.ranAt, cutoff),
+          input.organizationId ? eq(schema.signalResults.organizationId, input.organizationId) : undefined,
+          input.personId ? eq(schema.signalResults.personId, input.personId) : undefined,
+        ),
+      )
+      .orderBy(desc(schema.signalResults.ranAt));
 
-    if (input.organizationId)
-      query = query.eq("organization_id", input.organizationId);
-    if (input.personId) query = query.eq("person_id", input.personId);
-
-    const { data, error } = await query;
-    if (error)
-      throw new Error(`Failed to get signal results: ${error.message}`);
-    return { results: data ?? [] };
+    return { results };
   },
 });

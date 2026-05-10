@@ -1,7 +1,9 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { generateObject, tool } from "ai";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { eq, inArray } from "drizzle-orm";
+import { adminDb as db, } from "@/lib/db/admin";
+import { schema } from "@/db";
 import { ExaService, type SearchCategory } from "@/lib/services/exa-service";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
 import {
@@ -171,7 +173,6 @@ export const searchCompanies = tool({
   }),
   execute: async (input) => {
     const exa = new ExaService();
-    const supabase = await createClient();
 
     const searchResponse = await exa.search(input.query, {
       numResults: input.numResults,
@@ -182,15 +183,16 @@ export const searchCompanies = tool({
     // Fetch existing organizations already linked to this campaign for dedup
     const existingDomains = new Set<string>();
     if (input.campaignId) {
-      const { data: existingLinks } = await supabase
-        .from("campaign_organizations")
-        .select("organization:organizations(domain)")
-        .eq("campaign_id", input.campaignId);
-      for (const l of existingLinks || []) {
-        const d = (
-          l.organization as unknown as { domain: string | null } | null
-        )?.domain;
-        if (d) existingDomains.add(d);
+      const existingLinks = await db
+        .select({ domain: schema.organizations.domain })
+        .from(schema.campaignOrganizations)
+        .innerJoin(
+          schema.organizations,
+          eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+        )
+        .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
+      for (const l of existingLinks) {
+        if (l.domain) existingDomains.add(l.domain);
       }
     }
 
@@ -274,44 +276,50 @@ export const getCompanies = tool({
       .describe("Filter by company status"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const rows = await db
+      .select({
+        id: schema.campaignOrganizations.id,
+        organizationId: schema.campaignOrganizations.organizationId,
+        campaignId: schema.campaignOrganizations.campaignId,
+        relevanceScore: schema.campaignOrganizations.relevanceScore,
+        scoreReason: schema.campaignOrganizations.scoreReason,
+        status: schema.campaignOrganizations.status,
+        createdAt: schema.campaignOrganizations.createdAt,
+        updatedAt: schema.campaignOrganizations.updatedAt,
+        org: schema.organizations,
+      })
+      .from(schema.campaignOrganizations)
+      .innerJoin(
+        schema.organizations,
+        eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+      )
+      .where(
+        input.status
+          ? eq(schema.campaignOrganizations.campaignId, input.campaignId)
+          : eq(schema.campaignOrganizations.campaignId, input.campaignId),
+      )
+      .orderBy(schema.campaignOrganizations.relevanceScore);
 
-    let query = supabase
-      .from("campaign_organizations")
-      .select("*, organization:organizations(*)")
-      .eq("campaign_id", input.campaignId)
-      .order("relevance_score", { ascending: false });
-
-    if (input.status) {
-      query = query.eq("status", input.status);
-    }
-
-    const { data, error } = await query;
-
-    if (error) throw new Error(`Failed to get companies: ${error.message}`);
-
-    // Flatten for backwards compat with agent expectations
-    const companies = (data || []).map((row) => {
-      const org = row.organization as Record<string, unknown>;
-      return {
+    const companies = rows
+      .filter((r) => !input.status || r.status === input.status)
+      .map((row) => ({
         id: row.id,
-        organization_id: row.organization_id,
-        campaign_id: row.campaign_id,
-        name: org.name,
-        domain: org.domain,
-        url: org.url,
-        industry: org.industry,
-        location: org.location,
-        description: org.description,
-        enrichment_status: org.enrichment_status,
-        relevance_score: row.relevance_score,
-        score_reason: row.score_reason,
+        organization_id: row.organizationId,
+        campaign_id: row.campaignId,
+        name: row.org.name,
+        domain: row.org.domain,
+        url: row.org.url,
+        industry: row.org.industry,
+        location: row.org.location,
+        description: row.org.description,
+        enrichment_status: row.org.enrichmentStatus,
+        relevance_score: row.relevanceScore,
+        score_reason: row.scoreReason,
         status: row.status,
-        source: org.source,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      };
-    });
+        source: row.org.source,
+        created_at: row.createdAt,
+        updated_at: row.updatedAt,
+      }));
 
     return { companies };
   },
@@ -327,18 +335,24 @@ export const getCompanyDetail = tool({
       .describe("organizations.id (not campaign_organizations.id)."),
   }),
   execute: async ({ organizationId }) => {
-    const supabase = await createClient();
+    const [data] = await db
+      .select({
+        id: schema.organizations.id,
+        name: schema.organizations.name,
+        domain: schema.organizations.domain,
+        url: schema.organizations.url,
+        industry: schema.organizations.industry,
+        location: schema.organizations.location,
+        description: schema.organizations.description,
+        enrichmentData: schema.organizations.enrichmentData,
+        enrichmentStatus: schema.organizations.enrichmentStatus,
+      })
+      .from(schema.organizations)
+      .where(eq(schema.organizations.id, organizationId))
+      .limit(1);
 
-    const { data, error } = await supabase
-      .from("organizations")
-      .select(
-        "id, name, domain, url, industry, location, description, enrichment_data, enrichment_status",
-      )
-      .eq("id", organizationId)
-      .single();
-
-    if (error || !data) {
-      return { error: `Company not found: ${error?.message ?? "no rows"}` };
+    if (!data) {
+      return { error: `Company not found` };
     }
 
     return data;
@@ -352,31 +366,25 @@ export const getCampaignSummary = tool({
     campaignId: z.string().uuid().describe("Campaign ID"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const [campaign] = await db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, input.campaignId))
+      .limit(1);
 
-    const [campaignResult, companiesResult, contactsResult] = await Promise.all(
-      [
-        supabase
-          .from("campaigns")
-          .select("*")
-          .eq("id", input.campaignId)
-          .single(),
-        supabase
-          .from("campaign_organizations")
-          .select("id, status")
-          .eq("campaign_id", input.campaignId),
-        supabase
-          .from("campaign_people")
-          .select("id, person:people(enrichment_status)")
-          .eq("campaign_id", input.campaignId),
-      ],
-    );
+    if (!campaign) throw new Error("Campaign not found");
 
-    if (campaignResult.error)
-      throw new Error(`Campaign not found: ${campaignResult.error.message}`);
-
-    const companies = companiesResult.data || [];
-    const contacts = contactsResult.data || [];
+    const [companies, contacts] = await Promise.all([
+      db
+        .select({ id: schema.campaignOrganizations.id, status: schema.campaignOrganizations.status })
+        .from(schema.campaignOrganizations)
+        .where(eq(schema.campaignOrganizations.campaignId, input.campaignId)),
+      db
+        .select({ id: schema.campaignPeople.id, enrichmentStatus: schema.people.enrichmentStatus })
+        .from(schema.campaignPeople)
+        .innerJoin(schema.people, eq(schema.campaignPeople.personId, schema.people.id))
+        .where(eq(schema.campaignPeople.campaignId, input.campaignId)),
+    ]);
 
     const companyStatusCounts = companies.reduce(
       (acc, c) => {
@@ -388,9 +396,7 @@ export const getCampaignSummary = tool({
 
     const contactStatusCounts = contacts.reduce(
       (acc, c) => {
-        const status =
-          (c.person as unknown as { enrichment_status: string } | null)
-            ?.enrichment_status || "pending";
+        const status = c.enrichmentStatus || "pending";
         acc[status] = (acc[status] || 0) + 1;
         return acc;
       },
@@ -398,7 +404,7 @@ export const getCampaignSummary = tool({
     );
 
     return {
-      campaign: campaignResult.data,
+      campaign,
       stats: {
         totalCompanies: companies.length,
         companiesByStatus: companyStatusCounts,
@@ -543,20 +549,20 @@ export const discoverCompanies = tool({
   execute: async (input) => {
     const exa = new ExaService();
     const extractor = new WebExtractionService();
-    const supabase = await createClient();
 
     // Fetch existing domains linked to this campaign for dedup
     const existingDomains = new Set<string>();
     if (input.campaignId) {
-      const { data: existingLinks } = await supabase
-        .from("campaign_organizations")
-        .select("organization:organizations(domain)")
-        .eq("campaign_id", input.campaignId);
-      for (const l of existingLinks || []) {
-        const d = (
-          l.organization as unknown as { domain: string | null } | null
-        )?.domain;
-        if (d) existingDomains.add(d);
+      const existingLinks = await db
+        .select({ domain: schema.organizations.domain })
+        .from(schema.campaignOrganizations)
+        .innerJoin(
+          schema.organizations,
+          eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+        )
+        .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
+      for (const l of existingLinks) {
+        if (l.domain) existingDomains.add(l.domain);
       }
     }
 
@@ -805,38 +811,39 @@ export const searchYCCompanies = tool({
       .describe("Maximum number of companies to return"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-
     // ── Step 1: Check cache ──────────────────────────────────────────────
-    let cacheQuery = supabase
-      .from("organizations")
-      .select("*")
-      .eq("source", "yc_directory");
+    // Use adminDb for shared org table (no user scoping needed)
+    const { ilike } = await import("drizzle-orm");
+    let cachedOrgs = await db
+      .select()
+      .from(schema.organizations)
+      .where(eq(schema.organizations.source, "yc_directory"))
+      .limit(input.maxResults);
 
+    // Post-filter for batch/industry since JSONB path queries require raw SQL
     if (input.batch) {
-      cacheQuery = cacheQuery.eq(
-        "enrichment_data->yc->>batch",
-        input.batch.toUpperCase(),
-      );
+      const batchUpper = input.batch.toUpperCase();
+      cachedOrgs = cachedOrgs.filter((o) => {
+        const yc = (o.enrichmentData as Record<string, unknown>)?.yc as Record<string, unknown> | null;
+        return yc?.batch === batchUpper;
+      });
     }
     if (input.industry) {
-      cacheQuery = cacheQuery.ilike("industry", `%${input.industry}%`);
+      const industryLower = input.industry.toLowerCase();
+      cachedOrgs = cachedOrgs.filter((o) =>
+        o.industry?.toLowerCase().includes(industryLower),
+      );
     }
-
-    const { data: cached } = await cacheQuery.limit(input.maxResults);
-    const cachedOrgs = cached || [];
 
     if (cachedOrgs.length > 0) {
       let newlyLinked = 0;
       if (input.campaignId) {
-        const { data: existingLinks } = await supabase
-          .from("campaign_organizations")
-          .select("organization_id")
-          .eq("campaign_id", input.campaignId);
+        const existingLinks = await db
+          .select({ organizationId: schema.campaignOrganizations.organizationId })
+          .from(schema.campaignOrganizations)
+          .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
 
-        const alreadyLinked = new Set(
-          (existingLinks || []).map((l) => l.organization_id),
-        );
+        const alreadyLinked = new Set(existingLinks.map((l) => l.organizationId));
 
         for (const org of cachedOrgs) {
           if (!alreadyLinked.has(org.id)) {
@@ -855,7 +862,7 @@ export const searchYCCompanies = tool({
           industry: org.industry,
           location: org.location,
           description: org.description,
-          yc: (org.enrichment_data as Record<string, unknown>)?.yc || null,
+          yc: (org.enrichmentData as Record<string, unknown>)?.yc || null,
         })),
         totalFound: cachedOrgs.length,
         newlyLinked,
@@ -880,15 +887,16 @@ export const searchYCCompanies = tool({
     // Dedup against existing campaign orgs
     const existingDomains = new Set<string>();
     if (input.campaignId) {
-      const { data: existingLinks } = await supabase
-        .from("campaign_organizations")
-        .select("organization:organizations(domain)")
-        .eq("campaign_id", input.campaignId);
-      for (const l of existingLinks || []) {
-        const d = (
-          l.organization as unknown as { domain: string | null } | null
-        )?.domain;
-        if (d) existingDomains.add(d);
+      const existingLinks = await db
+        .select({ domain: schema.organizations.domain })
+        .from(schema.campaignOrganizations)
+        .innerJoin(
+          schema.organizations,
+          eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+        )
+        .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
+      for (const l of existingLinks) {
+        if (l.domain) existingDomains.add(l.domain);
       }
     }
 

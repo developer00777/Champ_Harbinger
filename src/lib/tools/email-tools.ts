@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { createClient, getSupabaseAndUser } from "@/lib/supabase/server";
+import { eq, and } from "drizzle-orm";
+import { adminDb as db } from "@/lib/db/admin";
+import { schema } from "@/db";
 import { ExaService } from "@/lib/services/exa-service";
 import { sendMessage } from "@/lib/services/agentmail-service";
 import { trackUsage } from "@/lib/services/cost-tracker";
@@ -11,6 +13,7 @@ import {
   getOrgPattern,
   inferPattern,
   isRolePrefix,
+  makeEmailPatternDb,
   mxCheck,
   recomputeOrgPattern,
   recordVerifiedEmail,
@@ -34,47 +37,53 @@ export async function findEmailForPerson(personId: string): Promise<{
   reason?: string;
   personId: string;
 }> {
-  const supabase = await createClient();
+  const [person] = await db
+    .select({
+      id: schema.people.id,
+      name: schema.people.name,
+      title: schema.people.title,
+      workEmail: schema.people.workEmail,
+      personalEmail: schema.people.personalEmail,
+      organizationId: schema.people.organizationId,
+      workEmailSource: schema.people.workEmailSource,
+      workEmailConfidence: schema.people.workEmailConfidence,
+    })
+    .from(schema.people)
+    .where(eq(schema.people.id, personId))
+    .limit(1);
 
-  const { data: person, error: personErr } = await supabase
-    .from("people")
-    .select(
-      "id, name, title, work_email, personal_email, organization_id, work_email_source, work_email_confidence",
-    )
-    .eq("id", personId)
-    .single();
-
-  if (personErr || !person) {
+  if (!person) {
     return { email: null, reason: "Person not found.", personId };
   }
 
-  if (person.work_email) {
+  if (person.workEmail) {
     return {
-      email: person.work_email,
-      source: person.work_email_source ?? "existing",
-      confidence: person.work_email_confidence ?? undefined,
+      email: person.workEmail,
+      source: person.workEmailSource ?? "existing",
+      confidence: person.workEmailConfidence ?? undefined,
       personId,
     };
   }
-  if (person.personal_email) {
-    return { email: person.personal_email, source: "existing", personId };
+  if (person.personalEmail) {
+    return { email: person.personalEmail, source: "existing", personId };
   }
 
   let domain: string | null = null;
-  if (person.organization_id) {
-    const { data: org } = await supabase
-      .from("organizations")
-      .select("domain, name")
-      .eq("id", person.organization_id)
-      .single();
+  if (person.organizationId) {
+    const [org] = await db
+      .select({ domain: schema.organizations.domain })
+      .from(schema.organizations)
+      .where(eq(schema.organizations.id, person.organizationId))
+      .limit(1);
     domain = org?.domain ?? null;
   }
 
   const { first, last } = splitName(person.name);
+  const epDb = makeEmailPatternDb(db);
 
   // ── 1) Pattern-first: if the org has a confident pattern, derive + MX-check.
-  if (domain && person.organization_id && first) {
-    const orgPattern = await getOrgPattern(supabase, person.organization_id);
+  if (domain && person.organizationId && first) {
+    const orgPattern = await getOrgPattern(epDb, person.organizationId);
     if (
       orgPattern?.pattern &&
       orgPattern.confidence >= PATTERN_CONFIDENCE_THRESHOLD
@@ -89,14 +98,14 @@ export async function findEmailForPerson(personId: string): Promise<{
         if (mxOk) {
           const confidence =
             orgPattern.confidence * PATTERN_DERIVED_CONFIDENCE_FACTOR;
-          await supabase
-            .from("people")
-            .update({
-              work_email: derived,
-              work_email_source: "pattern_derived",
-              work_email_confidence: confidence,
+          await db
+            .update(schema.people)
+            .set({
+              workEmail: derived,
+              workEmailSource: "pattern_derived",
+              workEmailConfidence: confidence,
             })
-            .eq("id", personId);
+            .where(eq(schema.people.id, personId));
           return {
             email: derived,
             source: "pattern_derived",
@@ -155,28 +164,34 @@ export async function findEmailForPerson(personId: string): Promise<{
   }
 
   // ── 3) On-the-fly inference: if Exa whiffed, try inferring the pattern from
-  //       any verified emails on the org RIGHT NOW (covers the case where the
-  //       org has verified emails but the cached pattern hasn't been recomputed
-  //       or sits below the confidence threshold).
-  if (!foundEmail && domain && person.organization_id && first && last) {
-    const { data: orgPeople } = await supabase
-      .from("people")
-      .select("name, work_email, work_email_source, work_email_verified_at")
-      .eq("organization_id", person.organization_id)
-      .not("work_email", "is", null)
-      .not("work_email_verified_at", "is", null);
+  //       any verified emails on the org RIGHT NOW.
+  if (!foundEmail && domain && person.organizationId && first && last) {
+    const orgPeople = await db
+      .select({
+        name: schema.people.name,
+        workEmail: schema.people.workEmail,
+        workEmailSource: schema.people.workEmailSource,
+        workEmailVerifiedAt: schema.people.workEmailVerifiedAt,
+      })
+      .from(schema.people)
+      .where(
+        and(
+          eq(schema.people.organizationId, person.organizationId),
+        ),
+      );
 
     const evidence: VerifiedEmail[] = [];
-    for (const p of orgPeople ?? []) {
-      if (!p.work_email || !p.work_email_source) continue;
-      if (p.work_email_source === "pattern_derived") continue;
+    for (const p of orgPeople) {
+      if (!p.workEmail || !p.workEmailSource) continue;
+      if (p.workEmailSource === "pattern_derived") continue;
+      if (!p.workEmailVerifiedAt) continue;
       const split = splitName(p.name);
       if (!split.first || !split.last) continue;
       evidence.push({
-        email: p.work_email,
+        email: p.workEmail,
         firstName: split.first,
         lastName: split.last,
-        source: p.work_email_source,
+        source: p.workEmailSource as VerifiedEmail["source"],
       });
     }
 
@@ -192,17 +207,17 @@ export async function findEmailForPerson(personId: string): Promise<{
         ) {
           const confidence =
             inferred.confidence * PATTERN_DERIVED_CONFIDENCE_FACTOR;
-          await supabase
-            .from("people")
-            .update({
-              work_email: derived,
-              work_email_source: "pattern_derived",
-              work_email_confidence: confidence,
+          await db
+            .update(schema.people)
+            .set({
+              workEmail: derived,
+              workEmailSource: "pattern_derived",
+              workEmailConfidence: confidence,
             })
-            .eq("id", personId);
+            .where(eq(schema.people.id, personId));
           // Refresh the org's cached pattern so subsequent lookups in a bulk
           // run hit step 1 instead of re-doing this query + Exa search.
-          await recomputeOrgPattern(supabase, person.organization_id);
+          await recomputeOrgPattern(epDb, person.organizationId);
           return {
             email: derived,
             source: "pattern_derived",
@@ -214,9 +229,7 @@ export async function findEmailForPerson(personId: string): Promise<{
     }
   }
 
-  // ── 4) Final fallback: blind {first}.{last}@domain when nothing else worked.
-  // Goes through applyPattern (not raw interpolation) so the alphanumeric
-  // stripping + edge-case handling matches the rest of the file.
+  // ── 4) Final fallback: blind {first}.{last}@domain.
   if (!foundEmail && domain && first && last) {
     const blind = applyPattern("{first}.{last}", first, last, domain);
     if (
@@ -225,14 +238,14 @@ export async function findEmailForPerson(personId: string): Promise<{
       emailMatchesName(blind, first, last) &&
       (await mxCheck(domain))
     ) {
-      await supabase
-        .from("people")
-        .update({
-          work_email: blind,
-          work_email_source: "pattern_derived",
-          work_email_confidence: 0.2,
+      await db
+        .update(schema.people)
+        .set({
+          workEmail: blind,
+          workEmailSource: "pattern_derived",
+          workEmailConfidence: 0.2,
         })
-        .eq("id", personId);
+        .where(eq(schema.people.id, personId));
       return {
         email: blind,
         source: "pattern_derived",
@@ -251,7 +264,7 @@ export async function findEmailForPerson(personId: string): Promise<{
   }
 
   // Exa hit — record as verified-source with the right weight.
-  await recordVerifiedEmail(supabase, {
+  await recordVerifiedEmail(epDb, {
     personId,
     email: foundEmail,
     source: "exa_search",
@@ -343,23 +356,10 @@ export const writeEmail = tool({
       .describe("Explanation of why the email was written this way."),
   }),
   execute: async (input) => {
-    const ctx = await getSupabaseAndUser();
-    if (!ctx) {
-      return {
-        error:
-          "No authenticated session available in tool context. Ask the user to sign in.",
-      };
-    }
-    const { supabase, user } = ctx;
+    const { getCurrentUser } = await import("@/lib/auth");
+    const { userId, orgId } = await getCurrentUser();
 
-    const { data: campaignRow } = await supabase
-      .from("campaigns")
-      .select("user_id")
-      .eq("id", input.campaignId)
-      .single();
-    const userId: string = campaignRow?.user_id ?? user.id;
-
-    const result = await saveDraft(supabase, { ...input, userId });
+    const result = await saveDraft({ ...input, userId, orgId });
 
     if (!result.ok) {
       return { error: result.error };
@@ -385,15 +385,13 @@ export const sendEmail = tool({
     draftId: z.string().uuid().describe("Draft ID to send."),
   }),
   execute: async ({ draftId }) => {
-    const supabase = await createClient();
+    const [draft] = await db
+      .select()
+      .from(schema.emailDrafts)
+      .where(eq(schema.emailDrafts.id, draftId))
+      .limit(1);
 
-    const { data: draft, error: draftErr } = await supabase
-      .from("email_drafts")
-      .select("*")
-      .eq("id", draftId)
-      .single();
-
-    if (draftErr || !draft) {
+    if (!draft) {
       return { error: "Draft not found." };
     }
 
@@ -403,12 +401,17 @@ export const sendEmail = tool({
       };
     }
 
-    const { data: settings } = await supabase
-      .from("user_settings")
-      .select("agentmail_inbox_id, from_name, reply_to_email")
-      .single();
+    const [settings] = await db
+      .select({
+        agentmailInboxId: schema.userSettings.agentmailInboxId,
+        fromName: schema.userSettings.fromName,
+        replyToEmail: schema.userSettings.replyToEmail,
+      })
+      .from(schema.userSettings)
+      .where(eq(schema.userSettings.clerkUserId, draft.clerkUserId))
+      .limit(1);
 
-    if (!settings?.agentmail_inbox_id) {
+    if (!settings?.agentmailInboxId) {
       return {
         error:
           "Email is not configured. Go to Settings > Email and select an AgentMail inbox first.",
@@ -418,11 +421,11 @@ export const sendEmail = tool({
     let messageId: string;
     let threadId: string | null = null;
     try {
-      const result = await sendMessage(settings.agentmail_inbox_id, {
-        to: draft.to_email,
+      const result = await sendMessage(settings.agentmailInboxId, {
+        to: draft.toEmail,
         subject: draft.subject,
-        html: draft.body_html,
-        text: draft.body_text ?? undefined,
+        html: draft.bodyHtml,
+        text: draft.bodyText ?? undefined,
       });
       messageId = result.messageId ?? crypto.randomUUID();
       threadId = result.threadId ?? null;
@@ -431,47 +434,48 @@ export const sendEmail = tool({
       return { error: `Failed to send email: ${msg}` };
     }
 
-    const now = new Date().toISOString();
+    const now = new Date();
 
-    await supabase.from("sent_emails").insert({
-      agentmail_message_id: messageId,
-      agentmail_thread_id: threadId,
-      draft_id: draftId,
-      campaign_people_id: draft.campaign_people_id,
-      campaign_id: draft.campaign_id,
-      person_id: draft.person_id,
-      user_id: draft.user_id,
-      to_email: draft.to_email,
-      from_email: settings.agentmail_inbox_id,
+    await db.insert(schema.sentEmails).values({
+      agentmailMessageId: messageId,
+      agentmailThreadId: threadId,
+      draftId,
+      campaignPeopleId: draft.campaignPeopleId,
+      campaignId: draft.campaignId,
+      personId: draft.personId,
+      clerkUserId: draft.clerkUserId,
+      clerkOrgId: draft.clerkOrgId,
+      toEmail: draft.toEmail,
+      fromEmail: settings.agentmailInboxId,
       subject: draft.subject,
       status: "sent",
-      sent_at: now,
+      sentAt: now,
     });
 
-    await supabase
-      .from("email_drafts")
-      .update({ status: "sent", sent_at: now, updated_at: now })
-      .eq("id", draftId);
+    await db
+      .update(schema.emailDrafts)
+      .set({ status: "sent", sentAt: now, updatedAt: now })
+      .where(eq(schema.emailDrafts.id, draftId));
 
-    await supabase
-      .from("campaign_people")
-      .update({ outreach_status: "sent" })
-      .eq("id", draft.campaign_people_id);
+    await db
+      .update(schema.campaignPeople)
+      .set({ outreachStatus: "sent" })
+      .where(eq(schema.campaignPeople.id, draft.campaignPeopleId));
 
     trackUsage({
       service: "agentmail",
       operation: "send-email",
       estimated_cost_usd: 0.0004,
-      campaign_id: draft.campaign_id,
+      campaign_id: draft.campaignId,
       metadata: {
         draftId,
-        to: draft.to_email,
+        to: draft.toEmail,
       },
     });
 
     return {
       emailId: messageId,
-      to: draft.to_email,
+      to: draft.toEmail,
       subject: draft.subject,
       status: "sent",
     };
@@ -490,24 +494,31 @@ export const listDrafts = tool({
       .describe("Filter drafts by campaign ID."),
   }),
   execute: async ({ campaignId }) => {
-    const supabase = await createClient();
+    const { getScopedDb } = await import("@/lib/db/scoped");
+    const sdb = await getScopedDb();
 
-    let query = supabase
-      .from("email_drafts")
-      .select(
-        "id, campaign_id, person_id, to_email, subject, status, created_at",
+    const rows = await sdb.raw
+      .select({
+        id: schema.emailDrafts.id,
+        campaignId: schema.emailDrafts.campaignId,
+        personId: schema.emailDrafts.personId,
+        toEmail: schema.emailDrafts.toEmail,
+        subject: schema.emailDrafts.subject,
+        status: schema.emailDrafts.status,
+        createdAt: schema.emailDrafts.createdAt,
+      })
+      .from(schema.emailDrafts)
+      .where(
+        and(
+          eq(schema.emailDrafts.status, "draft"),
+          campaignId
+            ? eq(schema.emailDrafts.campaignId, campaignId)
+            : eq(schema.emailDrafts.clerkUserId, sdb.userId),
+        ),
       )
-      .eq("status", "draft")
-      .order("created_at", { ascending: false });
+      .orderBy(schema.emailDrafts.createdAt);
 
-    if (campaignId) {
-      query = query.eq("campaign_id", campaignId);
-    }
-
-    const { data, error } = await query;
-    if (error) return { error: error.message };
-
-    return { drafts: data ?? [], count: data?.length ?? 0 };
+    return { drafts: rows, count: rows.length };
   },
 });
 
@@ -519,18 +530,16 @@ export const discardDraft = tool({
     draftId: z.string().uuid().describe("Draft ID to discard."),
   }),
   execute: async ({ draftId }) => {
-    const supabase = await createClient();
+    await db
+      .update(schema.emailDrafts)
+      .set({ status: "discarded", updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.emailDrafts.id, draftId),
+          eq(schema.emailDrafts.status, "draft"),
+        ),
+      );
 
-    const { error } = await supabase
-      .from("email_drafts")
-      .update({
-        status: "discarded",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", draftId)
-      .eq("status", "draft");
-
-    if (error) return { error: error.message };
     return { draftId, status: "discarded" };
   },
 });
@@ -550,82 +559,82 @@ export const sendBulkEmails = tool({
       ),
   }),
   execute: async ({ campaignId, draftIds }) => {
-    const supabase = await createClient();
+    const { inArray: drizzleInArray } = await import("drizzle-orm");
 
-    let query = supabase
-      .from("email_drafts")
-      .select("*")
-      .eq("campaign_id", campaignId)
-      .eq("status", "draft");
+    const drafts = await db
+      .select()
+      .from(schema.emailDrafts)
+      .where(
+        and(
+          eq(schema.emailDrafts.campaignId, campaignId),
+          eq(schema.emailDrafts.status, "draft"),
+          draftIds && draftIds.length > 0
+            ? drizzleInArray(schema.emailDrafts.id, draftIds)
+            : undefined,
+        ),
+      );
 
-    if (draftIds && draftIds.length > 0) {
-      query = query.in("id", draftIds);
-    }
-
-    const { data: drafts, error } = await query;
-    if (error) return { error: error.message };
-    if (!drafts || drafts.length === 0) {
+    if (drafts.length === 0) {
       return { error: "No drafts found to send." };
     }
 
-    const { data: settings } = await supabase
-      .from("user_settings")
-      .select("agentmail_inbox_id")
-      .single();
+    const [settings] = await db
+      .select({ agentmailInboxId: schema.userSettings.agentmailInboxId })
+      .from(schema.userSettings)
+      .where(eq(schema.userSettings.clerkUserId, drafts[0].clerkUserId))
+      .limit(1);
 
-    if (!settings?.agentmail_inbox_id) {
-      return {
-        error: "Email not configured. Go to Settings > Email first.",
-      };
+    if (!settings?.agentmailInboxId) {
+      return { error: "Email not configured. Go to Settings > Email first." };
     }
 
-    const results: Array<{ draftId: string; status: string; error?: string }> =
-      [];
+    const results: Array<{ draftId: string; status: string; error?: string }> = [];
 
     for (const draft of drafts) {
       try {
-        const result = await sendMessage(settings.agentmail_inbox_id, {
-          to: draft.to_email,
+        const result = await sendMessage(settings.agentmailInboxId, {
+          to: draft.toEmail,
           subject: draft.subject,
-          html: draft.body_html,
-          text: draft.body_text ?? undefined,
+          html: draft.bodyHtml,
+          text: draft.bodyText ?? undefined,
         });
 
         const messageId = result.messageId ?? crypto.randomUUID();
         const threadId = result.threadId ?? null;
-        const now = new Date().toISOString();
+        const now = new Date();
 
-        await supabase.from("sent_emails").insert({
-          agentmail_message_id: messageId,
-          agentmail_thread_id: threadId,
-          draft_id: draft.id,
-          campaign_people_id: draft.campaign_people_id,
-          campaign_id: draft.campaign_id,
-          person_id: draft.person_id,
-          user_id: draft.user_id,
-          to_email: draft.to_email,
-          from_email: settings.agentmail_inbox_id,
+        await db.insert(schema.sentEmails).values({
+          agentmailMessageId: messageId,
+          agentmailThreadId: threadId,
+          draftId: draft.id,
+          campaignPeopleId: draft.campaignPeopleId,
+          campaignId: draft.campaignId,
+          personId: draft.personId,
+          clerkUserId: draft.clerkUserId,
+          clerkOrgId: draft.clerkOrgId,
+          toEmail: draft.toEmail,
+          fromEmail: settings.agentmailInboxId,
           subject: draft.subject,
           status: "sent",
-          sent_at: now,
+          sentAt: now,
         });
 
-        await supabase
-          .from("email_drafts")
-          .update({ status: "sent", sent_at: now, updated_at: now })
-          .eq("id", draft.id);
+        await db
+          .update(schema.emailDrafts)
+          .set({ status: "sent", sentAt: now, updatedAt: now })
+          .where(eq(schema.emailDrafts.id, draft.id));
 
-        await supabase
-          .from("campaign_people")
-          .update({ outreach_status: "sent" })
-          .eq("id", draft.campaign_people_id);
+        await db
+          .update(schema.campaignPeople)
+          .set({ outreachStatus: "sent" })
+          .where(eq(schema.campaignPeople.id, draft.campaignPeopleId));
 
         trackUsage({
           service: "agentmail",
           operation: "send-email",
           estimated_cost_usd: 0.0004,
           campaign_id: campaignId,
-          metadata: { draftId: draft.id, to: draft.to_email },
+          metadata: { draftId: draft.id, to: draft.toEmail },
         });
 
         results.push({ draftId: draft.id, status: "sent" });

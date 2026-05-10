@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { eq, and } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
 import type { Signal } from "@/lib/types/signal";
 
 /**
@@ -6,17 +7,20 @@ import type { Signal } from "@/lib/types/signal";
  * Returns enabled signals joined from campaign_signals + signals.
  */
 export async function getActiveSignals(campaignId: string): Promise<Signal[]> {
-  const supabase = await createClient();
+  const sdb = await getScopedDb();
 
-  const { data, error } = await supabase
-    .from("campaign_signals")
-    .select("signal_id, signals(*)")
-    .eq("campaign_id", campaignId)
-    .eq("enabled", true);
+  const rows = await sdb.raw
+    .select({
+      signal: schema.signals,
+    })
+    .from(schema.campaignSignals)
+    .innerJoin(schema.signals, eq(schema.campaignSignals.signalId, schema.signals.id))
+    .where(
+      and(
+        eq(schema.campaignSignals.campaignId, campaignId),
+        eq(schema.campaignSignals.enabled, true),
+      ),
+    );
 
-  if (error || !data) return [];
-
-  return data
-    .map((row: Record<string, unknown>) => row.signals as Signal | null)
-    .filter((s): s is Signal => s !== null);
+  return rows.map((r) => r.signal as unknown as Signal);
 }

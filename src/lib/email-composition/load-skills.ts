@@ -1,5 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-
+import { eq, or, and } from "drizzle-orm";
+import { db, schema } from "@/db";
 import type { EmailSkill } from "@/lib/types/email-skill";
 
 export interface LoadSkillsInput {
@@ -15,49 +15,72 @@ export interface LoadSkillsInput {
  * user, so the most specific attachment wins in the de-dupe.
  */
 export async function loadActiveEmailSkills(
-  supabase: SupabaseClient,
+  _unused: unknown,
   { userId, profileId, campaignId }: LoadSkillsInput,
+): Promise<EmailSkill[]>;
+export async function loadActiveEmailSkills(
+  { userId, profileId, campaignId }: LoadSkillsInput,
+): Promise<EmailSkill[]>;
+export async function loadActiveEmailSkills(
+  firstArg: unknown,
+  secondArg?: LoadSkillsInput,
 ): Promise<EmailSkill[]> {
-  const conditions: string[] = [
-    `and(scope_type.eq.user,scope_id.eq.${userId})`,
+  // Support both (db, opts) and (opts) call signatures
+  const opts: LoadSkillsInput = secondArg ?? (firstArg as LoadSkillsInput);
+  const { userId, profileId, campaignId } = opts;
+
+  const conditions = [
+    and(
+      eq(schema.emailSkillAttachments.scopeType, "user"),
+      eq(schema.emailSkillAttachments.scopeId, userId),
+    ),
   ];
+
   if (profileId) {
-    conditions.push(`and(scope_type.eq.profile,scope_id.eq.${profileId})`);
+    conditions.push(
+      and(
+        eq(schema.emailSkillAttachments.scopeType, "profile"),
+        eq(schema.emailSkillAttachments.scopeId, profileId),
+      ),
+    );
   }
+
   if (campaignId) {
-    conditions.push(`and(scope_type.eq.campaign,scope_id.eq.${campaignId})`);
+    conditions.push(
+      and(
+        eq(schema.emailSkillAttachments.scopeType, "campaign"),
+        eq(schema.emailSkillAttachments.scopeId, campaignId),
+      ),
+    );
   }
 
-  const { data, error } = await supabase
-    .from("email_skill_attachments")
-    .select("scope_type, skill:email_skills(*)")
-    .eq("enabled", true)
-    .or(conditions.join(","));
-
-  if (error || !data) return [];
-
-  const byId = new Map<string, EmailSkill>();
-  const priority: Record<string, number> = { campaign: 0, profile: 1, user: 2 };
-  const rows = (
-    data as unknown as Array<{
-      scope_type: string;
-      skill: EmailSkill | EmailSkill[] | null;
-    }>
-  )
-    .map((r) => ({
-      scope_type: r.scope_type,
-      skill: Array.isArray(r.skill) ? (r.skill[0] ?? null) : r.skill,
-    }))
-    .filter(
-      (r): r is { scope_type: string; skill: EmailSkill } => r.skill !== null,
+  const rows = await db
+    .select({
+      scopeType: schema.emailSkillAttachments.scopeType,
+      skill: schema.emailSkills,
+    })
+    .from(schema.emailSkillAttachments)
+    .innerJoin(
+      schema.emailSkills,
+      eq(schema.emailSkillAttachments.skillId, schema.emailSkills.id),
     )
-    .sort(
-      (a, b) => (priority[a.scope_type] ?? 99) - (priority[b.scope_type] ?? 99),
+    .where(
+      and(
+        eq(schema.emailSkillAttachments.enabled, true),
+        or(...conditions),
+      ),
     );
 
-  for (const row of rows) {
+  const priority: Record<string, number> = { campaign: 0, profile: 1, user: 2 };
+  const sorted = rows.sort(
+    (a, b) =>
+      (priority[a.scopeType] ?? 99) - (priority[b.scopeType] ?? 99),
+  );
+
+  const byId = new Map<string, EmailSkill>();
+  for (const row of sorted) {
     if (!byId.has(row.skill.id)) {
-      byId.set(row.skill.id, row.skill);
+      byId.set(row.skill.id, row.skill as unknown as EmailSkill);
     }
   }
 

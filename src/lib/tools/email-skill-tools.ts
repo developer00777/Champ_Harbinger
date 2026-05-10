@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { createClient, getSupabaseAndUser } from "@/lib/supabase/server";
+import { eq, and, or, desc } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
+import { db } from "@/db";
 
 const scopeEnum = z.enum(["user", "profile", "campaign"]);
 
@@ -22,38 +24,47 @@ export const listEmailSkills = tool({
       .describe("If provided with scopeId, returns which skills are attached."),
     scopeId: z
       .string()
-      .uuid()
       .optional()
       .describe("Scope ID to check attachments against."),
   }),
   execute: async ({ scopeType, scopeId }) => {
-    const supabase = await createClient();
-    const { data: skills, error } = await supabase
-      .from("email_skills")
-      .select("id, name, slug, description, instructions, is_builtin, user_id")
-      .order("is_builtin", { ascending: false })
-      .order("name");
-    if (error) throw new Error(`Failed to list skills: ${error.message}`);
+    const sdb = await getScopedDb();
+
+    const skills = await sdb.raw
+      .select({
+        id: schema.emailSkills.id,
+        name: schema.emailSkills.name,
+        slug: schema.emailSkills.slug,
+        description: schema.emailSkills.description,
+        isBuiltin: schema.emailSkills.isBuiltin,
+        clerkUserId: schema.emailSkills.clerkUserId,
+      })
+      .from(schema.emailSkills)
+      .orderBy(desc(schema.emailSkills.isBuiltin), schema.emailSkills.name);
 
     let attached: Set<string> = new Set();
     if (scopeType && scopeId) {
-      const { data: attachments } = await supabase
-        .from("email_skill_attachments")
-        .select("skill_id, enabled")
-        .eq("scope_type", scopeType)
-        .eq("scope_id", scopeId)
-        .eq("enabled", true);
-      attached = new Set((attachments ?? []).map((a) => a.skill_id as string));
+      const attachments = await sdb.raw
+        .select({ skillId: schema.emailSkillAttachments.skillId })
+        .from(schema.emailSkillAttachments)
+        .where(
+          and(
+            eq(schema.emailSkillAttachments.scopeType, scopeType),
+            eq(schema.emailSkillAttachments.scopeId, scopeId),
+            eq(schema.emailSkillAttachments.enabled, true),
+          ),
+        );
+      attached = new Set(attachments.map((a) => a.skillId));
     }
 
     return {
-      skills: (skills ?? []).map((s) => ({
+      skills: skills.map((s) => ({
         id: s.id,
         name: s.name,
         slug: s.slug,
         description: s.description,
-        isBuiltin: s.is_builtin,
-        attached: attached.has(s.id as string),
+        isBuiltin: s.isBuiltin,
+        attached: attached.has(s.id),
       })),
     };
   },
@@ -66,14 +77,14 @@ export const getEmailSkillDetail = tool({
     skillId: z.string().uuid().describe("email_skills.id"),
   }),
   execute: async ({ skillId }) => {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("email_skills")
-      .select("*")
-      .eq("id", skillId)
-      .single();
-    if (error || !data) {
-      return { error: `Skill not found: ${error?.message ?? "no rows"}` };
+    const [data] = await db
+      .select()
+      .from(schema.emailSkills)
+      .where(eq(schema.emailSkills.id, skillId))
+      .limit(1);
+
+    if (!data) {
+      return { error: "Skill not found" };
     }
     return data;
   },
@@ -106,23 +117,21 @@ export const createEmailSkill = tool({
       ),
   }),
   execute: async (input) => {
-    const ctx = await getSupabaseAndUser();
-    if (!ctx) return { error: "Not authenticated." };
-    const { supabase, user } = ctx;
+    const sdb = await getScopedDb();
 
-    const { data, error } = await supabase
-      .from("email_skills")
-      .insert({
-        user_id: user.id,
+    const [data] = await sdb.raw
+      .insert(schema.emailSkills)
+      .values({
+        clerkUserId: sdb.userId,
         name: input.name,
         slug: input.slug ?? slugify(input.name),
         description: input.description ?? null,
         instructions: input.instructions,
-        is_builtin: false,
+        isBuiltin: false,
       })
-      .select("*")
-      .single();
-    if (error) throw new Error(`Failed to create skill: ${error.message}`);
+      .returning();
+
+    if (!data) throw new Error("Failed to create skill");
     return { skill: data, message: `Created skill "${input.name}"` };
   },
 });
@@ -137,8 +146,7 @@ export const updateEmailSkill = tool({
     instructions: z.string().optional(),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-    const patch: Record<string, unknown> = {};
+    const patch: Partial<typeof schema.emailSkills.$inferInsert> = {};
     if (input.name !== undefined) patch.name = input.name;
     if (input.description !== undefined) patch.description = input.description;
     if (input.instructions !== undefined)
@@ -148,14 +156,17 @@ export const updateEmailSkill = tool({
       return { error: "No fields provided to update." };
     }
 
-    const { data, error } = await supabase
-      .from("email_skills")
-      .update(patch)
-      .eq("id", input.skillId)
-      .eq("is_builtin", false)
-      .select("*")
-      .single();
-    if (error) throw new Error(`Failed to update skill: ${error.message}`);
+    const [data] = await db
+      .update(schema.emailSkills)
+      .set(patch)
+      .where(
+        and(
+          eq(schema.emailSkills.id, input.skillId),
+          eq(schema.emailSkills.isBuiltin, false),
+        ),
+      )
+      .returning();
+
     if (!data) {
       return {
         error:
@@ -172,13 +183,14 @@ export const deleteEmailSkill = tool({
     skillId: z.string().uuid(),
   }),
   execute: async ({ skillId }) => {
-    const supabase = await createClient();
-    const { error } = await supabase
-      .from("email_skills")
-      .delete()
-      .eq("id", skillId)
-      .eq("is_builtin", false);
-    if (error) throw new Error(`Failed to delete skill: ${error.message}`);
+    await db
+      .delete(schema.emailSkills)
+      .where(
+        and(
+          eq(schema.emailSkills.id, skillId),
+          eq(schema.emailSkills.isBuiltin, false),
+        ),
+      );
     return { skillId, message: "Skill deleted." };
   },
 });
@@ -191,28 +203,30 @@ export const toggleEmailSkill = tool({
     scopeType: scopeEnum,
     scopeId: z
       .string()
-      .uuid()
       .describe(
         "Scope ID: the user's auth id for 'user', profile id for 'profile', campaign id for 'campaign'.",
       ),
     enabled: z.boolean().default(true),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("email_skill_attachments")
-      .upsert(
-        {
-          skill_id: input.skillId,
-          scope_type: input.scopeType,
-          scope_id: input.scopeId,
-          enabled: input.enabled,
-        },
-        { onConflict: "skill_id,scope_type,scope_id" },
-      )
-      .select("*")
-      .single();
-    if (error) throw new Error(`Failed to toggle skill: ${error.message}`);
+    const [data] = await db
+      .insert(schema.emailSkillAttachments)
+      .values({
+        skillId: input.skillId,
+        scopeType: input.scopeType,
+        scopeId: input.scopeId,
+        enabled: input.enabled,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.emailSkillAttachments.skillId,
+          schema.emailSkillAttachments.scopeType,
+          schema.emailSkillAttachments.scopeId,
+        ],
+        set: { enabled: input.enabled },
+      })
+      .returning();
+
     return {
       attachment: data,
       message: `Skill ${input.enabled ? "attached" : "detached"} at ${input.scopeType} scope.`,

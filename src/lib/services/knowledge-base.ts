@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { eq, ilike } from "drizzle-orm";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
 import type { Organization, Person } from "@/lib/types/campaign";
 
 /**
@@ -6,7 +8,7 @@ import type { Organization, Person } from "@/lib/types/campaign";
  * e.g. "Žunič" → "Zunic", "Müller" → "Muller"
  */
 function stripDiacritics(str: string): string {
-  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return str.normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
 /**
@@ -45,20 +47,18 @@ export async function findOrCreateOrganization(data: {
   description?: string | null;
   source?: string | null;
 }): Promise<Organization> {
-  const supabase = await createClient();
   const normalizedDomain = data.domain ? normalizeDomain(data.domain) : null;
 
   // Try dedup by domain first
   if (normalizedDomain) {
-    const { data: existing } = await supabase
-      .from("organizations")
-      .select("*")
-      .eq("domain", normalizedDomain)
-      .maybeSingle();
+    const [existing] = await adminDb
+      .select()
+      .from(schema.organizations)
+      .where(eq(schema.organizations.domain, normalizedDomain))
+      .limit(1);
 
     if (existing) {
-      // Update base fields if we have new info
-      const updates: Record<string, unknown> = {};
+      const updates: Partial<typeof schema.organizations.$inferInsert> = {};
       if (data.industry && !existing.industry) updates.industry = data.industry;
       if (data.location && !existing.location) updates.location = data.location;
       if (data.description && !existing.description)
@@ -66,57 +66,63 @@ export async function findOrCreateOrganization(data: {
       if (data.url && !existing.url) updates.url = data.url;
 
       if (Object.keys(updates).length > 0) {
-        await supabase
-          .from("organizations")
-          .update(updates)
-          .eq("id", existing.id);
+        await adminDb
+          .update(schema.organizations)
+          .set(updates)
+          .where(eq(schema.organizations.id, existing.id));
       }
 
-      return existing as Organization;
+      return existing as unknown as Organization;
     }
   }
 
   // Fallback: match by name if no domain
   if (!normalizedDomain) {
-    const { data: existing } = await supabase
-      .from("organizations")
-      .select("*")
-      .ilike("name", data.name)
-      .maybeSingle();
+    const [existing] = await adminDb
+      .select()
+      .from(schema.organizations)
+      .where(ilike(schema.organizations.name, data.name))
+      .limit(1);
 
-    if (existing) return existing as Organization;
+    if (existing) return existing as unknown as Organization;
   }
 
   // Create new
-  const { data: created, error } = await supabase
-    .from("organizations")
-    .insert({
-      name: data.name,
-      domain: normalizedDomain,
-      url:
-        data.url || (normalizedDomain ? `https://${normalizedDomain}` : null),
-      industry: data.industry || null,
-      location: data.location || null,
-      description: data.description || null,
-      source: data.source || null,
-    })
-    .select("*")
-    .single();
+  try {
+    const [created] = await adminDb
+      .insert(schema.organizations)
+      .values({
+        name: data.name,
+        domain: normalizedDomain ?? undefined,
+        url:
+          data.url || (normalizedDomain ? `https://${normalizedDomain}` : null),
+        industry: data.industry || null,
+        location: data.location || null,
+        description: data.description || null,
+        source: data.source || null,
+      })
+      .returning();
 
-  if (error) {
+    if (!created) throw new Error("Insert returned no rows");
+    return created as unknown as Organization;
+  } catch (err: unknown) {
     // Handle race condition: another request may have inserted the same domain
-    if (error.code === "23505" && normalizedDomain) {
-      const { data: existing } = await supabase
-        .from("organizations")
-        .select("*")
-        .eq("domain", normalizedDomain)
-        .single();
-      if (existing) return existing as Organization;
+    if (
+      normalizedDomain &&
+      err instanceof Error &&
+      err.message.includes("23505")
+    ) {
+      const [existing] = await adminDb
+        .select()
+        .from(schema.organizations)
+        .where(eq(schema.organizations.domain, normalizedDomain))
+        .limit(1);
+      if (existing) return existing as unknown as Organization;
     }
-    throw new Error(`Failed to create organization: ${error.message}`);
+    throw new Error(
+      `Failed to create organization: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
-
-  return created as Organization;
 }
 
 /**
@@ -133,104 +139,113 @@ export async function findOrCreatePerson(data: {
   organization_id?: string | null;
   source?: string | null;
 }): Promise<Person> {
-  const supabase = await createClient();
   const normalizedLinkedin = data.linkedin_url
     ? normalizeLinkedInUrl(data.linkedin_url)
     : null;
 
   // Try dedup by LinkedIn URL first
   if (normalizedLinkedin) {
-    const { data: existing } = await supabase
-      .from("people")
-      .select("*")
-      .eq("linkedin_url", normalizedLinkedin)
-      .maybeSingle();
+    const [existing] = await adminDb
+      .select()
+      .from(schema.people)
+      .where(eq(schema.people.linkedinUrl, normalizedLinkedin))
+      .limit(1);
 
     if (existing) {
-      // Update fields if we have newer info
-      const updates: Record<string, unknown> = {};
+      const updates: Partial<typeof schema.people.$inferInsert> = {};
       if (data.title && !existing.title) updates.title = data.title;
-      if (data.work_email && !existing.work_email)
-        updates.work_email = data.work_email;
-      if (data.personal_email && !existing.personal_email)
-        updates.personal_email = data.personal_email;
-      if (data.twitter_url && !existing.twitter_url)
-        updates.twitter_url = data.twitter_url;
-      if (data.organization_id && !existing.organization_id)
-        updates.organization_id = data.organization_id;
+      if (data.work_email && !existing.workEmail)
+        updates.workEmail = data.work_email;
+      if (data.personal_email && !existing.personalEmail)
+        updates.personalEmail = data.personal_email;
+      if (data.twitter_url && !existing.twitterUrl)
+        updates.twitterUrl = data.twitter_url;
+      if (data.organization_id && !existing.organizationId)
+        updates.organizationId = data.organization_id;
 
       if (Object.keys(updates).length > 0) {
-        await supabase.from("people").update(updates).eq("id", existing.id);
+        await adminDb
+          .update(schema.people)
+          .set(updates)
+          .where(eq(schema.people.id, existing.id));
       }
 
-      return existing as Person;
+      return existing as unknown as Person;
     }
   }
 
   // Fallback: match by name + organization (diacritics-insensitive)
   if (data.organization_id) {
-    const { data: orgPeople } = await supabase
-      .from("people")
-      .select("*")
-      .eq("organization_id", data.organization_id);
+    const orgPeople = await adminDb
+      .select()
+      .from(schema.people)
+      .where(eq(schema.people.organizationId, data.organization_id));
 
-    if (orgPeople && orgPeople.length > 0) {
+    if (orgPeople.length > 0) {
       const incomingNorm = stripDiacritics(data.name).toLowerCase();
       const match = orgPeople.find(
         (p) => stripDiacritics(p.name).toLowerCase() === incomingNorm,
       );
       if (match) {
-        // Merge in any new data (linkedin URL, email, etc.)
-        const updates: Record<string, unknown> = {};
-        if (normalizedLinkedin && !match.linkedin_url)
-          updates.linkedin_url = normalizedLinkedin;
+        const updates: Partial<typeof schema.people.$inferInsert> = {};
+        if (normalizedLinkedin && !match.linkedinUrl)
+          updates.linkedinUrl = normalizedLinkedin;
         if (data.title && !match.title) updates.title = data.title;
-        if (data.work_email && !match.work_email)
-          updates.work_email = data.work_email;
-        if (data.personal_email && !match.personal_email)
-          updates.personal_email = data.personal_email;
-        if (data.twitter_url && !match.twitter_url)
-          updates.twitter_url = data.twitter_url;
+        if (data.work_email && !match.workEmail)
+          updates.workEmail = data.work_email;
+        if (data.personal_email && !match.personalEmail)
+          updates.personalEmail = data.personal_email;
+        if (data.twitter_url && !match.twitterUrl)
+          updates.twitterUrl = data.twitter_url;
 
         if (Object.keys(updates).length > 0) {
-          await supabase.from("people").update(updates).eq("id", match.id);
+          await adminDb
+            .update(schema.people)
+            .set(updates)
+            .where(eq(schema.people.id, match.id));
         }
 
-        return match as Person;
+        return match as unknown as Person;
       }
     }
   }
 
   // Create new
-  const { data: created, error } = await supabase
-    .from("people")
-    .insert({
-      name: data.name,
-      linkedin_url: normalizedLinkedin,
-      work_email: data.work_email || null,
-      personal_email: data.personal_email || null,
-      twitter_url: data.twitter_url || null,
-      title: data.title || null,
-      organization_id: data.organization_id || null,
-      source: data.source || null,
-    })
-    .select("*")
-    .single();
+  try {
+    const [created] = await adminDb
+      .insert(schema.people)
+      .values({
+        name: data.name,
+        linkedinUrl: normalizedLinkedin ?? undefined,
+        workEmail: data.work_email || null,
+        personalEmail: data.personal_email || null,
+        twitterUrl: data.twitter_url || null,
+        title: data.title || null,
+        organizationId: data.organization_id || null,
+        source: data.source || null,
+      })
+      .returning();
 
-  if (error) {
+    if (!created) throw new Error("Insert returned no rows");
+    return created as unknown as Person;
+  } catch (err: unknown) {
     // Handle race condition on linkedin_url unique constraint
-    if (error.code === "23505" && normalizedLinkedin) {
-      const { data: existing } = await supabase
-        .from("people")
-        .select("*")
-        .eq("linkedin_url", normalizedLinkedin)
-        .single();
-      if (existing) return existing as Person;
+    if (
+      normalizedLinkedin &&
+      err instanceof Error &&
+      err.message.includes("23505")
+    ) {
+      const [existing] = await adminDb
+        .select()
+        .from(schema.people)
+        .where(eq(schema.people.linkedinUrl, normalizedLinkedin))
+        .limit(1);
+      if (existing) return existing as unknown as Person;
     }
-    throw new Error(`Failed to create person: ${error.message}`);
+    throw new Error(
+      `Failed to create person: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
-
-  return created as Person;
 }
 
 /**
@@ -240,21 +255,24 @@ export async function linkOrganizationToCampaign(
   organizationId: string,
   campaignId: string,
 ): Promise<{ id: string }> {
-  const supabase = await createClient();
+  const [data] = await adminDb
+    .insert(schema.campaignOrganizations)
+    .values({ campaignId, organizationId })
+    .onConflictDoNothing()
+    .returning({ id: schema.campaignOrganizations.id });
 
-  const { data, error } = await supabase
-    .from("campaign_organizations")
-    .upsert(
-      { campaign_id: campaignId, organization_id: organizationId },
-      { onConflict: "campaign_id,organization_id" },
-    )
-    .select("id")
-    .single();
-
-  if (error)
-    throw new Error(
-      `Failed to link organization to campaign: ${error.message}`,
-    );
+  if (!data) {
+    // Already existed — fetch the id
+    const [existing] = await adminDb
+      .select({ id: schema.campaignOrganizations.id })
+      .from(schema.campaignOrganizations)
+      .where(
+        eq(schema.campaignOrganizations.campaignId, campaignId),
+      )
+      .limit(1);
+    if (!existing) throw new Error("Failed to link organization to campaign");
+    return existing;
+  }
   return data;
 }
 
@@ -265,19 +283,21 @@ export async function linkPersonToCampaign(
   personId: string,
   campaignId: string,
 ): Promise<{ id: string }> {
-  const supabase = await createClient();
+  const [data] = await adminDb
+    .insert(schema.campaignPeople)
+    .values({ campaignId, personId })
+    .onConflictDoNothing()
+    .returning({ id: schema.campaignPeople.id });
 
-  const { data, error } = await supabase
-    .from("campaign_people")
-    .upsert(
-      { campaign_id: campaignId, person_id: personId },
-      { onConflict: "campaign_id,person_id" },
-    )
-    .select("id")
-    .single();
-
-  if (error)
-    throw new Error(`Failed to link person to campaign: ${error.message}`);
+  if (!data) {
+    const [existing] = await adminDb
+      .select({ id: schema.campaignPeople.id })
+      .from(schema.campaignPeople)
+      .where(eq(schema.campaignPeople.campaignId, campaignId))
+      .limit(1);
+    if (!existing) throw new Error("Failed to link person to campaign");
+    return existing;
+  }
   return data;
 }
 
@@ -291,19 +311,19 @@ export async function mergeEnrichmentData(
   newData: Record<string, unknown>,
   status: "enriched" | "failed" = "enriched",
 ): Promise<void> {
-  const supabase = await createClient();
+  const tbl =
+    table === "organizations" ? schema.organizations : schema.people;
+  const idCol = table === "organizations" ? schema.organizations.id : schema.people.id;
 
-  // Fetch existing enrichment_data
-  const { data: existing } = await supabase
-    .from(table)
-    .select("enrichment_data")
-    .eq("id", id)
-    .single();
+  const [existing] = await adminDb
+    .select({ enrichmentData: (tbl as typeof schema.organizations).enrichmentData })
+    .from(tbl as typeof schema.organizations)
+    .where(eq(idCol, id))
+    .limit(1);
 
   const existingData =
-    (existing?.enrichment_data as Record<string, unknown>) || {};
+    (existing?.enrichmentData as Record<string, unknown>) || {};
 
-  // Additive merge: new keys overwrite, but don't null-out existing keys
   const merged: Record<string, unknown> = { ...existingData };
   for (const [key, value] of Object.entries(newData)) {
     if (key === "errors") {
@@ -317,15 +337,15 @@ export async function mergeEnrichmentData(
     }
   }
 
-  await supabase
-    .from(table)
-    .update({
-      enrichment_data: merged,
-      enrichment_status: status,
-      last_enriched_at:
-        status === "enriched" ? new Date().toISOString() : undefined,
+  await adminDb
+    .update(tbl as typeof schema.organizations)
+    .set({
+      enrichmentData: merged,
+      enrichmentStatus: status,
+      lastEnrichedAt:
+        status === "enriched" ? new Date() : undefined,
     })
-    .eq("id", id);
+    .where(eq(idCol, id));
 }
 
 /**
@@ -337,20 +357,19 @@ export async function isRecentlyEnriched(
   id: string,
   maxAgeDays: number = 7,
 ): Promise<boolean> {
-  const supabase = await createClient();
+  const tbl =
+    table === "organizations" ? schema.organizations : schema.people;
+  const idCol = table === "organizations" ? schema.organizations.id : schema.people.id;
 
-  const { data } = await supabase
-    .from(table)
-    .select("enrichment_data")
-    .eq("id", id)
-    .single();
+  const [data] = await adminDb
+    .select({ enrichmentData: (tbl as typeof schema.organizations).enrichmentData })
+    .from(tbl as typeof schema.organizations)
+    .where(eq(idCol, id))
+    .limit(1);
 
   if (!data) return false;
 
-  // Check for the enrichedAt key inside enrichment_data -- this is set
-  // specifically by the company/contact enrichment routes, not by other
-  // enrichment sources (YC scraper, hiring scraper, etc.)
-  const enrichmentData = data.enrichment_data as Record<string, unknown> | null;
+  const enrichmentData = data.enrichmentData as Record<string, unknown> | null;
   const enrichedAt = enrichmentData?.enrichedAt as string | undefined;
   if (!enrichedAt) return false;
 

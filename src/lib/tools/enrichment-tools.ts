@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { eq, inArray, and } from "drizzle-orm";
+import { adminDb as db } from "@/lib/db/admin";
+import { schema } from "@/db";
 import { parseLinkedInTitle } from "@/lib/utils";
 import { ExaService } from "@/lib/services/exa-service";
 import { filterRelevantResults } from "@/lib/services/relevance-filter";
@@ -52,7 +54,6 @@ export const searchPeople = tool({
   }),
   execute: async (input) => {
     const exa = new ExaService();
-    const supabase = await createClient();
 
     const searchResponse = await exa.search(input.query, {
       numResults: input.numResults,
@@ -63,26 +64,24 @@ export const searchPeople = tool({
     // Resolve organization_id if companyId (campaign_organizations link) is provided
     let organizationId: string | null = null;
     if (input.companyId) {
-      const { data: link } = await supabase
-        .from("campaign_organizations")
-        .select("organization_id")
-        .eq("id", input.companyId)
-        .single();
-      organizationId = link?.organization_id || null;
+      const [link] = await db
+        .select({ organizationId: schema.campaignOrganizations.organizationId })
+        .from(schema.campaignOrganizations)
+        .where(eq(schema.campaignOrganizations.id, input.companyId))
+        .limit(1);
+      organizationId = link?.organizationId || null;
     }
 
     // Fetch existing linkedin_urls already linked to this campaign for dedup
     const existingUrls = new Set<string>();
     if (input.campaignId) {
-      const { data: existingLinks } = await supabase
-        .from("campaign_people")
-        .select("person:people(linkedin_url)")
-        .eq("campaign_id", input.campaignId);
-      for (const l of existingLinks || []) {
-        const url = (
-          l.person as unknown as { linkedin_url: string | null } | null
-        )?.linkedin_url;
-        if (url) existingUrls.add(url);
+      const existingLinks = await db
+        .select({ linkedinUrl: schema.people.linkedinUrl })
+        .from(schema.campaignPeople)
+        .innerJoin(schema.people, eq(schema.campaignPeople.personId, schema.people.id))
+        .where(eq(schema.campaignPeople.campaignId, input.campaignId));
+      for (const l of existingLinks) {
+        if (l.linkedinUrl) existingUrls.add(l.linkedinUrl);
       }
     }
 
@@ -123,16 +122,16 @@ export const searchPeople = tool({
 
       // Store initial search data if person is new (no enrichment yet)
       if (person.enrichment_status === "pending") {
-        await supabase
-          .from("people")
-          .update({
-            enrichment_data: {
+        await db
+          .update(schema.people)
+          .set({
+            enrichmentData: {
               searchQuery: input.query,
               rawTitle: result.title,
               text: result.text?.slice(0, 1000),
             },
           })
-          .eq("id", person.id);
+          .where(eq(schema.people.id, person.id));
       }
 
       if (input.campaignId) {
@@ -186,44 +185,55 @@ async function enrichContactById(
   skipped?: boolean;
   errors?: string[];
 }> {
-  const supabase = await createClient();
-
   // Check recency -- skip if recently enriched
   const recent = await isRecentlyEnriched("people", personId);
   if (recent) {
-    const { data: person } = await supabase
-      .from("people")
-      .select("enrichment_data")
-      .eq("id", personId)
-      .single();
+    const [person] = await db
+      .select({ enrichmentData: schema.people.enrichmentData })
+      .from(schema.people)
+      .where(eq(schema.people.id, personId))
+      .limit(1);
     return {
       contactId: personId,
       status: "enriched",
       summary: summarizeContactEnrichment(
-        (person?.enrichment_data as Record<string, unknown>) || {},
+        (person?.enrichmentData as Record<string, unknown>) || {},
       ),
       skipped: true,
     };
   }
 
-  const { data: person } = await supabase
-    .from("people")
-    .select(
-      "name, title, linkedin_url, twitter_url, organization:organizations(name)",
-    )
-    .eq("id", personId)
-    .single();
+  const [personRow] = await db
+    .select({
+      name: schema.people.name,
+      title: schema.people.title,
+      linkedinUrl: schema.people.linkedinUrl,
+      twitterUrl: schema.people.twitterUrl,
+      organizationId: schema.people.organizationId,
+    })
+    .from(schema.people)
+    .where(eq(schema.people.id, personId))
+    .limit(1);
 
+  let companyName: string | null = null;
+  if (personRow?.organizationId) {
+    const [org] = await db
+      .select({ name: schema.organizations.name })
+      .from(schema.organizations)
+      .where(eq(schema.organizations.id, personRow.organizationId))
+      .limit(1);
+    companyName = org?.name ?? null;
+  }
+
+  const person = personRow;
   const contactName = person?.name || "Unknown";
-  const companyName =
-    (person?.organization as unknown as { name?: string } | null)?.name || null;
-  const linkedinFinal = linkedinUrl || person?.linkedin_url || undefined;
-  const twitterFinal = twitterUrl || person?.twitter_url || undefined;
+  const linkedinFinal = linkedinUrl || person?.linkedinUrl || undefined;
+  const twitterFinal = twitterUrl || person?.twitterUrl || undefined;
 
-  await supabase
-    .from("people")
-    .update({ enrichment_status: "in_progress" })
-    .eq("id", personId);
+  await db
+    .update(schema.people)
+    .set({ enrichmentStatus: "in_progress" })
+    .where(eq(schema.people.id, personId));
 
   const enrichmentData: Record<string, unknown> = {};
   const errors: string[] = [];
@@ -278,29 +288,22 @@ async function enrichContactById(
     // Collect URLs already in the company's enrichment data so we don't
     // show the same links on both the company and contact cards.
     const companyUrls = new Set<string>();
-    if (person?.organization) {
-      const orgName = (person.organization as unknown as { name?: string })
-        ?.name;
-      if (orgName) {
-        const { data: orgRow } = await supabase
-          .from("organizations")
-          .select("enrichment_data")
-          .eq("name", orgName)
-          .maybeSingle();
+    if (companyName) {
+      const [orgRow] = await db
+        .select({ enrichmentData: schema.organizations.enrichmentData })
+        .from(schema.organizations)
+        .where(eq(schema.organizations.name, companyName))
+        .limit(1);
 
-        const orgEnrichment = orgRow?.enrichment_data as Record<
-          string,
-          unknown
-        > | null;
-        if (orgEnrichment) {
-          const searches = orgEnrichment.searches as
-            | Array<{ results: Array<{ url: string }> }>
-            | undefined;
-          if (searches) {
-            for (const s of searches) {
-              for (const r of s.results) {
-                if (r.url) companyUrls.add(r.url);
-              }
+      const orgEnrichment = orgRow?.enrichmentData as Record<string, unknown> | null;
+      if (orgEnrichment) {
+        const searches = orgEnrichment.searches as
+          | Array<{ results: Array<{ url: string }> }>
+          | undefined;
+        if (searches) {
+          for (const s of searches) {
+            for (const r of s.results) {
+              if (r.url) companyUrls.add(r.url);
             }
           }
         }
@@ -396,13 +399,13 @@ async function enrichContactById(
 
   // ── Email discovery ──────────────────────────────────────────────────
   // If the contact has no email after enrichment, try to find one.
-  const { data: personAfter } = await supabase
-    .from("people")
-    .select("work_email, personal_email")
-    .eq("id", personId)
-    .single();
+  const [personAfter] = await db
+    .select({ workEmail: schema.people.workEmail, personalEmail: schema.people.personalEmail })
+    .from(schema.people)
+    .where(eq(schema.people.id, personId))
+    .limit(1);
 
-  if (!personAfter?.work_email && !personAfter?.personal_email) {
+  if (!personAfter?.workEmail && !personAfter?.personalEmail) {
     try {
       const { findEmailForPerson } = await import("@/lib/tools/email-tools");
       const emailResult = await findEmailForPerson(personId);
@@ -810,25 +813,23 @@ export const scrapeJobListingsBatch = tool({
 });
 
 async function resolveOrganizationId(idOrLinkId: string): Promise<string> {
-  const supabase = await createClient();
-
   // Try as organization ID first
-  const { data: directOrg } = await supabase
-    .from("organizations")
-    .select("id")
-    .eq("id", idOrLinkId)
-    .maybeSingle();
+  const [directOrg] = await db
+    .select({ id: schema.organizations.id })
+    .from(schema.organizations)
+    .where(eq(schema.organizations.id, idOrLinkId))
+    .limit(1);
 
   if (directOrg) return directOrg.id;
 
   // Try as campaign_organizations link ID
-  const { data: link } = await supabase
-    .from("campaign_organizations")
-    .select("organization_id")
-    .eq("id", idOrLinkId)
-    .maybeSingle();
+  const [link] = await db
+    .select({ organizationId: schema.campaignOrganizations.organizationId })
+    .from(schema.campaignOrganizations)
+    .where(eq(schema.campaignOrganizations.id, idOrLinkId))
+    .limit(1);
 
-  if (link) return link.organization_id;
+  if (link) return link.organizationId;
 
   throw new Error(`Organization not found for ID: ${idOrLinkId}`);
 }
@@ -868,47 +869,44 @@ async function enrichCompanyById(
   icp?: Record<string, unknown>;
   errors?: string[];
 }> {
-  const supabase = await createClient();
   const organizationId = await resolveOrganizationId(companyIdOrLinkId);
 
   // Check recency -- skip if recently enriched
   const recent = await isRecentlyEnriched("organizations", organizationId);
   if (recent) {
-    const { data: org } = await supabase
-      .from("organizations")
-      .select("name, domain, enrichment_data")
-      .eq("id", organizationId)
-      .single();
+    const [org] = await db
+      .select({ name: schema.organizations.name, domain: schema.organizations.domain, enrichmentData: schema.organizations.enrichmentData })
+      .from(schema.organizations)
+      .where(eq(schema.organizations.id, organizationId))
+      .limit(1);
     return {
       companyId: organizationId,
       companyName: org?.name || "Unknown",
       domain: org?.domain || null,
       summary: summarizeCompanyEnrichment(
-        (org?.enrichment_data as Record<string, unknown>) || {},
+        (org?.enrichmentData as Record<string, unknown>) || {},
       ),
       skipped: true,
     };
   }
 
-  const { data: org, error: orgError } = await supabase
-    .from("organizations")
-    .select("*")
-    .eq("id", organizationId)
-    .single();
+  const [org] = await db
+    .select()
+    .from(schema.organizations)
+    .where(eq(schema.organizations.id, organizationId))
+    .limit(1);
 
-  if (orgError || !org) {
-    throw new Error(
-      `Organization not found: ${orgError?.message || "Unknown"}`,
-    );
+  if (!org) {
+    throw new Error(`Organization not found`);
   }
 
   let icp: Record<string, unknown> | null = null;
   if (campaignId) {
-    const { data: campaign } = await supabase
-      .from("campaigns")
-      .select("icp")
-      .eq("id", campaignId)
-      .single();
+    const [campaign] = await db
+      .select({ icp: schema.campaigns.icp })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
     icp = (campaign?.icp as Record<string, unknown>) || null;
   }
 
@@ -1164,17 +1162,16 @@ export const findContacts = tool({
       );
     }
 
-    const supabase = await createClient();
     const exa = new ExaService();
 
     // Resolve target titles from campaign ICP or explicit input
     let targetTitles: string[] = input.titles || [];
     if (targetTitles.length === 0 && input.campaignId) {
-      const { data: campaign } = await supabase
-        .from("campaigns")
-        .select("icp")
-        .eq("id", input.campaignId)
-        .single();
+      const [campaign] = await db
+        .select({ icp: schema.campaigns.icp })
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, input.campaignId))
+        .limit(1);
       const campaignIcp = campaign?.icp as Record<string, unknown> | null;
       targetTitles = (campaignIcp?.targetTitles as string[] | undefined) || [];
     }
@@ -1198,30 +1195,39 @@ export const findContacts = tool({
     };
 
     if (input.companyId) {
-      const { data: link, error: linkError } = await supabase
-        .from("campaign_organizations")
-        .select(
-          "organization_id, organization:organizations(name, domain, industry, location, description)",
-        )
-        .eq("id", input.companyId)
-        .single();
-      if (linkError || !link) {
-        throw new Error(
-          `Company not found: ${linkError?.message || "Unknown"}`,
-        );
+      const [link] = await db
+        .select({
+          organizationId: schema.campaignOrganizations.organizationId,
+          name: schema.organizations.name,
+          domain: schema.organizations.domain,
+          industry: schema.organizations.industry,
+          location: schema.organizations.location,
+          description: schema.organizations.description,
+        })
+        .from(schema.campaignOrganizations)
+        .innerJoin(schema.organizations, eq(schema.campaignOrganizations.organizationId, schema.organizations.id))
+        .where(eq(schema.campaignOrganizations.id, input.companyId))
+        .limit(1);
+      if (!link) {
+        throw new Error(`Company not found`);
       }
-      orgId = link.organization_id;
-      org = link.organization as unknown as typeof org;
+      orgId = link.organizationId;
+      org = { name: link.name, domain: link.domain, industry: link.industry, location: link.location, description: link.description };
     } else {
-      const { data: orgData, error: orgError } = await supabase
-        .from("organizations")
-        .select("id, name, domain, industry, location, description")
-        .eq("id", input.organizationId!)
-        .single();
-      if (orgError || !orgData) {
-        throw new Error(
-          `Organization not found: ${orgError?.message || "Unknown"}`,
-        );
+      const [orgData] = await db
+        .select({
+          id: schema.organizations.id,
+          name: schema.organizations.name,
+          domain: schema.organizations.domain,
+          industry: schema.organizations.industry,
+          location: schema.organizations.location,
+          description: schema.organizations.description,
+        })
+        .from(schema.organizations)
+        .where(eq(schema.organizations.id, input.organizationId!))
+        .limit(1);
+      if (!orgData) {
+        throw new Error(`Organization not found`);
       }
       orgId = orgData.id;
       org = orgData;
@@ -1230,15 +1236,13 @@ export const findContacts = tool({
     // Dedup against existing contacts (by LinkedIn URL)
     const existingUrls = new Set<string>();
     if (input.campaignId) {
-      const { data: existingLinks } = await supabase
-        .from("campaign_people")
-        .select("person:people(linkedin_url)")
-        .eq("campaign_id", input.campaignId);
-      for (const l of existingLinks || []) {
-        const url = (
-          l.person as unknown as { linkedin_url: string | null } | null
-        )?.linkedin_url;
-        if (url) existingUrls.add(url);
+      const existingLinks = await db
+        .select({ linkedinUrl: schema.people.linkedinUrl })
+        .from(schema.campaignPeople)
+        .innerJoin(schema.people, eq(schema.campaignPeople.personId, schema.people.id))
+        .where(eq(schema.campaignPeople.campaignId, input.campaignId));
+      for (const l of existingLinks) {
+        if (l.linkedinUrl) existingUrls.add(l.linkedinUrl);
       }
     }
 
@@ -1269,11 +1273,15 @@ export const findContacts = tool({
           });
 
           if (dp.email) {
-            await recordVerifiedEmail(supabase, {
-              personId: person.id,
-              email: dp.email,
-              source: "team_page",
-            });
+            const { makeEmailPatternDb } = await import("@/lib/services/email-pattern");
+            await (await import("@/lib/services/email-pattern")).recordVerifiedEmail(
+              makeEmailPatternDb(db),
+              {
+                personId: person.id,
+                email: dp.email,
+                source: "team_page",
+              },
+            );
           }
 
           if (input.campaignId) {
@@ -1427,73 +1435,76 @@ export const getContacts = tool({
       .describe("Filter by campaign-organization link ID"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const { desc: drizzleDesc } = await import("drizzle-orm");
 
-    const query = supabase
-      .from("campaign_people")
-      .select(
-        "id, person_id, campaign_id, outreach_status, priority_score, score_reason, created_at, updated_at, person:people(name, title, work_email, personal_email, linkedin_url, twitter_url, enrichment_status, source, organization_id, organization:organizations(name, domain, industry))",
-      )
-      .eq("campaign_id", input.campaignId)
-      .order("priority_score", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false });
-
-    const { data, error } = await query;
-
-    if (error) throw new Error(`Failed to get contacts: ${error.message}`);
-
-    let results = data || [];
+    let rows = await db
+      .select({
+        id: schema.campaignPeople.id,
+        personId: schema.campaignPeople.personId,
+        campaignId: schema.campaignPeople.campaignId,
+        outreachStatus: schema.campaignPeople.outreachStatus,
+        priorityScore: schema.campaignPeople.priorityScore,
+        scoreReason: schema.campaignPeople.scoreReason,
+        createdAt: schema.campaignPeople.createdAt,
+        updatedAt: schema.campaignPeople.updatedAt,
+        name: schema.people.name,
+        title: schema.people.title,
+        workEmail: schema.people.workEmail,
+        personalEmail: schema.people.personalEmail,
+        linkedinUrl: schema.people.linkedinUrl,
+        twitterUrl: schema.people.twitterUrl,
+        enrichmentStatus: schema.people.enrichmentStatus,
+        source: schema.people.source,
+        organizationId: schema.people.organizationId,
+        orgName: schema.organizations.name,
+        orgDomain: schema.organizations.domain,
+        orgIndustry: schema.organizations.industry,
+      })
+      .from(schema.campaignPeople)
+      .innerJoin(schema.people, eq(schema.campaignPeople.personId, schema.people.id))
+      .leftJoin(schema.organizations, eq(schema.people.organizationId, schema.organizations.id))
+      .where(eq(schema.campaignPeople.campaignId, input.campaignId))
+      .orderBy(drizzleDesc(schema.campaignPeople.priorityScore), drizzleDesc(schema.campaignPeople.createdAt));
 
     // Filter by enrichment status (lives on the person record)
     if (input.enrichmentStatus) {
-      results = results.filter(
-        (r) =>
-          (r.person as unknown as { enrichment_status: string } | null)
-            ?.enrichment_status === input.enrichmentStatus,
-      );
+      rows = rows.filter((r) => r.enrichmentStatus === input.enrichmentStatus);
     }
 
     // Filter by company (campaign_organizations link)
     if (input.companyId) {
-      // Get the organization_id for this campaign_organizations link
-      const { data: link } = await supabase
-        .from("campaign_organizations")
-        .select("organization_id")
-        .eq("id", input.companyId)
-        .single();
+      const [link] = await db
+        .select({ organizationId: schema.campaignOrganizations.organizationId })
+        .from(schema.campaignOrganizations)
+        .where(eq(schema.campaignOrganizations.id, input.companyId))
+        .limit(1);
 
       if (link) {
-        results = results.filter(
-          (r) =>
-            (r.person as unknown as { organization_id: string | null } | null)
-              ?.organization_id === link.organization_id,
-        );
+        rows = rows.filter((r) => r.organizationId === link.organizationId);
       }
     }
 
-    // Flatten for backwards compat
-    const contacts = results.map((row) => {
-      const person = row.person as unknown as Record<string, unknown>;
-      return {
-        id: row.id,
-        person_id: row.person_id,
-        campaign_id: row.campaign_id,
-        name: person.name,
-        title: person.title,
-        work_email: person.work_email,
-        personal_email: person.personal_email,
-        linkedin_url: person.linkedin_url,
-        twitter_url: person.twitter_url,
-        enrichment_status: person.enrichment_status,
-        outreach_status: row.outreach_status,
-        priority_score: row.priority_score,
-        score_reason: row.score_reason,
-        source: person.source,
-        company: person.organization || null,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      };
-    });
+    const contacts = rows.map((row) => ({
+      id: row.id,
+      person_id: row.personId,
+      campaign_id: row.campaignId,
+      name: row.name,
+      title: row.title,
+      work_email: row.workEmail,
+      personal_email: row.personalEmail,
+      linkedin_url: row.linkedinUrl,
+      twitter_url: row.twitterUrl,
+      enrichment_status: row.enrichmentStatus,
+      outreach_status: row.outreachStatus,
+      priority_score: row.priorityScore,
+      score_reason: row.scoreReason,
+      source: row.source,
+      company: row.orgName
+        ? { name: row.orgName, domain: row.orgDomain, industry: row.orgIndustry }
+        : null,
+      created_at: row.createdAt,
+      updated_at: row.updatedAt,
+    }));
 
     return { contacts };
   },
@@ -1509,31 +1520,57 @@ export const getContactDetail = tool({
       .describe("People table ID (person_id, not campaign_people.id)."),
   }),
   execute: async ({ personId }) => {
-    const supabase = await createClient();
+    const [data] = await db
+      .select({
+        id: schema.people.id,
+        name: schema.people.name,
+        title: schema.people.title,
+        workEmail: schema.people.workEmail,
+        personalEmail: schema.people.personalEmail,
+        linkedinUrl: schema.people.linkedinUrl,
+        twitterUrl: schema.people.twitterUrl,
+        enrichmentStatus: schema.people.enrichmentStatus,
+        enrichmentData: schema.people.enrichmentData,
+        orgId: schema.organizations.id,
+        orgName: schema.organizations.name,
+        orgDomain: schema.organizations.domain,
+        orgIndustry: schema.organizations.industry,
+        orgLocation: schema.organizations.location,
+        orgDescription: schema.organizations.description,
+        orgEnrichmentData: schema.organizations.enrichmentData,
+        orgEnrichmentStatus: schema.organizations.enrichmentStatus,
+      })
+      .from(schema.people)
+      .leftJoin(schema.organizations, eq(schema.people.organizationId, schema.organizations.id))
+      .where(eq(schema.people.id, personId))
+      .limit(1);
 
-    const { data, error } = await supabase
-      .from("people")
-      .select(
-        "id, name, title, work_email, personal_email, linkedin_url, twitter_url, enrichment_status, enrichment_data, organization:organizations(id, name, domain, industry, location, description, enrichment_data, enrichment_status)",
-      )
-      .eq("id", personId)
-      .single();
-
-    if (error || !data) {
-      return { error: `Contact not found: ${error?.message ?? "no rows"}` };
+    if (!data) {
+      return { error: `Contact not found` };
     }
 
     return {
       id: data.id,
       name: data.name,
       title: data.title,
-      work_email: data.work_email,
-      personal_email: data.personal_email,
-      linkedin_url: data.linkedin_url,
-      twitter_url: data.twitter_url,
-      enrichment_status: data.enrichment_status,
-      enrichment_data: data.enrichment_data,
-      company: data.organization ?? null,
+      work_email: data.workEmail,
+      personal_email: data.personalEmail,
+      linkedin_url: data.linkedinUrl,
+      twitter_url: data.twitterUrl,
+      enrichment_status: data.enrichmentStatus,
+      enrichment_data: data.enrichmentData,
+      company: data.orgId
+        ? {
+            id: data.orgId,
+            name: data.orgName,
+            domain: data.orgDomain,
+            industry: data.orgIndustry,
+            location: data.orgLocation,
+            description: data.orgDescription,
+            enrichment_data: data.orgEnrichmentData,
+            enrichment_status: data.orgEnrichmentStatus,
+          }
+        : null,
     };
   },
 });
@@ -1548,40 +1585,41 @@ export const deleteCompanies = tool({
       .describe("Array of campaign-organization link IDs to remove"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-
     // Get organization_ids to unlink their people too
-    const { data: links } = await supabase
-      .from("campaign_organizations")
-      .select("organization_id, campaign_id")
-      .in("id", input.companyIds);
+    const links = await db
+      .select({
+        organizationId: schema.campaignOrganizations.organizationId,
+        campaignId: schema.campaignOrganizations.campaignId,
+      })
+      .from(schema.campaignOrganizations)
+      .where(inArray(schema.campaignOrganizations.id, input.companyIds));
 
-    if (links && links.length > 0) {
-      const campaignId = links[0].campaign_id;
-      const orgIds = links.map((l) => l.organization_id);
+    if (links.length > 0) {
+      const campaignId = links[0].campaignId;
+      const orgIds = links.map((l) => l.organizationId);
 
       // Get person_ids at these orgs
-      const { data: people } = await supabase
-        .from("people")
-        .select("id")
-        .in("organization_id", orgIds);
+      const people = await db
+        .select({ id: schema.people.id })
+        .from(schema.people)
+        .where(inArray(schema.people.organizationId, orgIds));
 
-      if (people && people.length > 0) {
+      if (people.length > 0) {
         const personIds = people.map((p) => p.id);
-        await supabase
-          .from("campaign_people")
-          .delete()
-          .eq("campaign_id", campaignId)
-          .in("person_id", personIds);
+        await db
+          .delete(schema.campaignPeople)
+          .where(
+            and(
+              eq(schema.campaignPeople.campaignId, campaignId),
+              inArray(schema.campaignPeople.personId, personIds),
+            ),
+          );
       }
     }
 
-    const { error } = await supabase
-      .from("campaign_organizations")
-      .delete()
-      .in("id", input.companyIds);
-
-    if (error) throw new Error(`Failed to unlink companies: ${error.message}`);
+    await db
+      .delete(schema.campaignOrganizations)
+      .where(inArray(schema.campaignOrganizations.id, input.companyIds));
 
     return {
       deleted: input.companyIds.length,
@@ -1600,14 +1638,9 @@ export const deleteContacts = tool({
       .describe("Array of campaign-people link IDs to remove"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-
-    const { error } = await supabase
-      .from("campaign_people")
-      .delete()
-      .in("id", input.contactIds);
-
-    if (error) throw new Error(`Failed to unlink contacts: ${error.message}`);
+    await db
+      .delete(schema.campaignPeople)
+      .where(inArray(schema.campaignPeople.id, input.contactIds));
 
     return {
       deleted: input.contactIds.length,
@@ -1639,16 +1672,14 @@ export const scoreCompany = tool({
       ),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-    const { error } = await supabase
-      .from("campaign_organizations")
-      .update({
-        relevance_score: input.score,
-        score_reason: input.reason,
+    await db
+      .update(schema.campaignOrganizations)
+      .set({
+        relevanceScore: String(input.score),
+        scoreReason: input.reason,
       })
-      .eq("id", input.companyId);
+      .where(eq(schema.campaignOrganizations.id, input.companyId));
 
-    if (error) throw new Error(`Failed to score company: ${error.message}`);
     return {
       companyId: input.companyId,
       score: input.score,
@@ -1677,16 +1708,14 @@ export const scoreContact = tool({
       ),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-    const { error } = await supabase
-      .from("campaign_people")
-      .update({
-        priority_score: input.score,
-        score_reason: input.reason,
+    await db
+      .update(schema.campaignPeople)
+      .set({
+        priorityScore: String(input.score),
+        scoreReason: input.reason,
       })
-      .eq("id", input.contactId);
+      .where(eq(schema.campaignPeople.id, input.contactId));
 
-    if (error) throw new Error(`Failed to score contact: ${error.message}`);
     return {
       contactId: input.contactId,
       score: input.score,
@@ -1708,14 +1737,10 @@ export const updateCompanyStatus = tool({
       .describe("New status to set"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-
-    const { error } = await supabase
-      .from("campaign_organizations")
-      .update({ status: input.status })
-      .in("id", input.companyIds);
-
-    if (error) throw new Error(`Failed to update companies: ${error.message}`);
+    await db
+      .update(schema.campaignOrganizations)
+      .set({ status: input.status })
+      .where(inArray(schema.campaignOrganizations.id, input.companyIds));
 
     return {
       updated: input.companyIds.length,
@@ -1770,19 +1795,18 @@ export const getGoogleReviews = tool({
     }
 
     if (input.campaignId) {
-      const supabase = await createClient();
-      const { data: signal } = await supabase
-        .from("signals")
-        .select("id")
-        .eq("slug", "google-reviews")
-        .maybeSingle();
+      const [signal] = await db
+        .select({ id: schema.signals.id })
+        .from(schema.signals)
+        .where(eq(schema.signals.slug, "google-reviews"))
+        .limit(1);
 
       if (signal) {
-        await supabase.from("signal_results").insert({
-          signal_id: signal.id,
-          campaign_id: input.campaignId,
-          organization_id: input.organizationId,
-          output: result,
+        await db.insert(schema.signalResults).values({
+          signalId: signal.id,
+          campaignId: input.campaignId,
+          organizationId: input.organizationId,
+          output: result as Record<string, unknown>,
           status: result.found ? "success" : "failed",
         });
       }

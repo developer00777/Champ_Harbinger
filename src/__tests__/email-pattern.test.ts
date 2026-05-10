@@ -1,4 +1,3 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,39 +11,20 @@ import {
   recordVerifiedEmail,
   splitName,
   type EmailSource,
-  type VerifiedEmail,
+  type EmailPatternDbAdapter,
+  type PersonRow,
+  type OrgRow,
 } from "@/lib/services/email-pattern";
 
-// ─── Fake Supabase ────────────────────────────────────────────────────────
+// ─── Fake Db adapter ──────────────────────────────────────────────────────────
 //
-// Minimal in-memory stub of the SupabaseClient surface used by
-// recordVerifiedEmail / recordBounce / recomputeOrgPattern. Implements:
-//   .from(table).select(cols).eq(...).maybeSingle()       → { data, error }
-//   .from(table).select(cols).eq(...).not(...).then(...) → { data: row[], error }
-//   .from(table).update(values).eq(...)                  → mutates in-memory rows
+// Minimal in-memory stub of the EmailPatternDbAdapter interface used by
+// recordVerifiedEmail / recordBounce / recomputeOrgPattern.
 
-interface PersonRow {
-  id: string;
-  name: string;
-  organization_id: string | null;
-  work_email: string | null;
-  work_email_source: EmailSource | null;
-  work_email_confidence: number | null;
-  work_email_verified_at: string | null;
-}
-interface OrgRow {
-  id: string;
-  email_pattern: string | null;
-  email_pattern_confidence: number | null;
-  email_pattern_evidence_count: number;
-  email_pattern_bounce_count: number;
-  email_pattern_updated_at: string | null;
-}
-
-function createFakeSupabase(initial: {
+function createFakeDb(initial: {
   people?: Partial<PersonRow>[];
   organizations?: Partial<OrgRow>[];
-}) {
+}): { adapter: EmailPatternDbAdapter; tables: { people: PersonRow[]; organizations: OrgRow[] } } {
   const tables = {
     people: (initial.people ?? []).map((p) => ({
       id: "",
@@ -67,61 +47,32 @@ function createFakeSupabase(initial: {
     })) as OrgRow[],
   };
 
-  function chain(table: keyof typeof tables) {
-    type Mode = "select" | "update";
-    let mode: Mode = "select";
-    let single = false;
-    let updates: Record<string, unknown> = {};
-    const preds: Array<(r: Record<string, unknown>) => boolean> = [];
+  const adapter: EmailPatternDbAdapter = {
+    async getPeopleForOrg(orgId) {
+      return tables.people.filter(
+        (p) =>
+          p.organization_id === orgId &&
+          p.work_email !== null &&
+          p.work_email_verified_at !== null,
+      );
+    },
+    async getPerson(personId) {
+      return tables.people.find((p) => p.id === personId) ?? null;
+    },
+    async updatePerson(personId, updates) {
+      const p = tables.people.find((p) => p.id === personId);
+      if (p) Object.assign(p, updates);
+    },
+    async getOrg(orgId) {
+      return tables.organizations.find((o) => o.id === orgId) ?? null;
+    },
+    async updateOrg(orgId, updates) {
+      const o = tables.organizations.find((o) => o.id === orgId);
+      if (o) Object.assign(o, updates);
+    },
+  };
 
-    const c: Record<string, unknown> & PromiseLike<unknown> = {
-      select(_cols?: string) {
-        mode = "select";
-        return c;
-      },
-      update(values: Record<string, unknown>) {
-        mode = "update";
-        updates = values;
-        return c;
-      },
-      eq(col: string, val: unknown) {
-        preds.push((r) => r[col] === val);
-        return c;
-      },
-      not(col: string, _op: string, val: unknown) {
-        preds.push((r) => r[col] !== val);
-        return c;
-      },
-      limit(_n: number) {
-        return c;
-      },
-      order(_col: string, _opts?: unknown) {
-        return c;
-      },
-      maybeSingle() {
-        single = true;
-        return c;
-      },
-      then(onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) {
-        const rows = tables[table] as unknown as Record<string, unknown>[];
-        if (mode === "update") {
-          for (const r of rows) {
-            if (preds.every((p) => p(r))) Object.assign(r, updates);
-          }
-          return Promise.resolve({ data: null, error: null }).then(onF, onR);
-        }
-        const matches = rows.filter((r) => preds.every((p) => p(r)));
-        const data = single ? (matches[0] ?? null) : matches;
-        return Promise.resolve({ data, error: null }).then(onF, onR);
-      },
-    } as unknown as Record<string, unknown> & PromiseLike<unknown>;
-    return c;
-  }
-
-  const client = {
-    from: (table: string) => chain(table as keyof typeof tables),
-  } as unknown as SupabaseClient;
-  return { client, tables };
+  return { adapter, tables };
 }
 
 // ─── splitName ────────────────────────────────────────────────────────────
@@ -251,12 +202,12 @@ describe("inferPattern", () => {
   });
 
   it("finds the right pattern from a single team-page email", () => {
-    const emails: VerifiedEmail[] = [
+    const emails = [
       {
         email: "jane.doe@acme.com",
         firstName: "Jane",
         lastName: "Doe",
-        source: "team_page",
+        source: "team_page" as EmailSource,
       },
     ];
     const result = inferPattern(emails);
@@ -266,25 +217,10 @@ describe("inferPattern", () => {
   });
 
   it("aggregates multiple matching emails", () => {
-    const emails: VerifiedEmail[] = [
-      {
-        email: "jane.doe@acme.com",
-        firstName: "Jane",
-        lastName: "Doe",
-        source: "team_page",
-      },
-      {
-        email: "bob.smith@acme.com",
-        firstName: "Bob",
-        lastName: "Smith",
-        source: "team_page",
-      },
-      {
-        email: "lee.jones@acme.com",
-        firstName: "Lee",
-        lastName: "Jones",
-        source: "send_confirmed",
-      },
+    const emails = [
+      { email: "jane.doe@acme.com", firstName: "Jane", lastName: "Doe", source: "team_page" as EmailSource },
+      { email: "bob.smith@acme.com", firstName: "Bob", lastName: "Smith", source: "team_page" as EmailSource },
+      { email: "lee.jones@acme.com", firstName: "Lee", lastName: "Jones", source: "send_confirmed" as EmailSource },
     ];
     const result = inferPattern(emails);
     expect(result.pattern).toBe("{first}.{last}");
@@ -293,55 +229,31 @@ describe("inferPattern", () => {
   });
 
   it("ignores role-prefix addresses entirely", () => {
-    const emails: VerifiedEmail[] = [
-      {
-        email: "it@acme.com",
-        firstName: "Jane",
-        lastName: "Doe",
-        source: "team_page",
-      },
+    const emails = [
+      { email: "it@acme.com", firstName: "Jane", lastName: "Doe", source: "team_page" as EmailSource },
     ];
     expect(inferPattern(emails).pattern).toBeNull();
   });
 
   it("favors send_confirmed evidence over scraped emails when patterns conflict", () => {
-    const emails: VerifiedEmail[] = [
-      // 1 scraped email matching {first}.{last} (weight 0.7)
-      {
-        email: "jane.doe@acme.com",
-        firstName: "Jane",
-        lastName: "Doe",
-        source: "team_page",
-      },
-      // 1 send-confirmed email matching {first} (weight 0.95)
-      {
-        email: "bob@acme.com",
-        firstName: "Bob",
-        lastName: "Smith",
-        source: "send_confirmed",
-      },
+    const emails = [
+      { email: "jane.doe@acme.com", firstName: "Jane", lastName: "Doe", source: "team_page" as EmailSource },
+      { email: "bob@acme.com", firstName: "Bob", lastName: "Smith", source: "send_confirmed" as EmailSource },
     ];
     const result = inferPattern(emails);
     expect(result.pattern).toBe("{first}");
-    // confidence = 0.95 / (0.7 + 0.95)
     expect(result.confidence).toBeGreaterThan(0.5);
     expect(result.confidence).toBeLessThan(1);
   });
 
   it("ignores pattern_derived sources (no feedback loop)", () => {
-    const emails: VerifiedEmail[] = [
-      {
-        email: "jane.doe@acme.com",
-        firstName: "Jane",
-        lastName: "Doe",
-        source: "pattern_derived",
-      },
+    const emails = [
+      { email: "jane.doe@acme.com", firstName: "Jane", lastName: "Doe", source: "pattern_derived" as EmailSource },
     ];
     expect(inferPattern(emails).pattern).toBeNull();
   });
 
   it("includes every known pattern in scoring", () => {
-    // Sanity check that KNOWN_PATTERNS hasn't drifted from the test cases above.
     expect(KNOWN_PATTERNS).toContain("{first}.{last}");
     expect(KNOWN_PATTERNS).toContain("{first}");
   });
@@ -349,15 +261,34 @@ describe("inferPattern", () => {
 
 // ─── mxCheck ──────────────────────────────────────────────────────────────
 
+describe("mxCheck", () => {
+  it("returns true when DNS returns at least one MX record", async () => {
+    const resolver = vi
+      .fn()
+      .mockResolvedValue([{ exchange: "smtp.example.com", priority: 10 }]);
+    expect(await mxCheck("acme.com", resolver)).toBe(true);
+  });
+
+  it("returns false when DNS lookup throws (NXDOMAIN, etc.)", async () => {
+    const resolver = vi.fn().mockRejectedValue(new Error("NXDOMAIN"));
+    expect(await mxCheck("nope.invalid", resolver)).toBe(false);
+  });
+
+  it("returns false when DNS returns zero MX records", async () => {
+    const resolver = vi.fn().mockResolvedValue([]);
+    expect(await mxCheck("noemail.example.com", resolver)).toBe(false);
+  });
+});
+
 // ─── recordVerifiedEmail ──────────────────────────────────────────────────
 
 describe("recordVerifiedEmail", () => {
   it("skips role-prefix addresses (does not write)", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [{ id: "p1", name: "Jane Doe", organization_id: "o1" }],
       organizations: [{ id: "o1" }],
     });
-    await recordVerifiedEmail(client, {
+    await recordVerifiedEmail(adapter, {
       personId: "p1",
       email: "it@acme.com",
       source: "team_page",
@@ -367,11 +298,11 @@ describe("recordVerifiedEmail", () => {
   });
 
   it("writes a new email when person has none", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [{ id: "p1", name: "Jane Doe", organization_id: "o1" }],
       organizations: [{ id: "o1" }],
     });
-    await recordVerifiedEmail(client, {
+    await recordVerifiedEmail(adapter, {
       personId: "p1",
       email: "Jane.Doe@Acme.com",
       source: "team_page",
@@ -383,7 +314,7 @@ describe("recordVerifiedEmail", () => {
   });
 
   it("does NOT downgrade send_confirmed → team_page on a different email", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -396,7 +327,7 @@ describe("recordVerifiedEmail", () => {
       ],
       organizations: [{ id: "o1" }],
     });
-    await recordVerifiedEmail(client, {
+    await recordVerifiedEmail(adapter, {
       personId: "p1",
       email: "jane.doe@acme.com",
       source: "team_page",
@@ -406,7 +337,7 @@ describe("recordVerifiedEmail", () => {
   });
 
   it("upgrades team_page → user_entered for the same email", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -419,7 +350,7 @@ describe("recordVerifiedEmail", () => {
       ],
       organizations: [{ id: "o1" }],
     });
-    await recordVerifiedEmail(client, {
+    await recordVerifiedEmail(adapter, {
       personId: "p1",
       email: "jane@acme.com",
       source: "user_entered",
@@ -429,8 +360,7 @@ describe("recordVerifiedEmail", () => {
   });
 
   it("keeps the stronger source on a same-email refresh with weaker source", async () => {
-    // Same email, weaker incoming source: refresh verified_at, keep stronger source.
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -443,7 +373,7 @@ describe("recordVerifiedEmail", () => {
       ],
       organizations: [{ id: "o1" }],
     });
-    await recordVerifiedEmail(client, {
+    await recordVerifiedEmail(adapter, {
       personId: "p1",
       email: "jane@acme.com",
       source: "team_page",
@@ -458,13 +388,13 @@ describe("recordVerifiedEmail", () => {
 
 describe("recordBounce", () => {
   it("no-ops when person not found", async () => {
-    const { client, tables } = createFakeSupabase({});
-    await recordBounce(client, { personId: "missing", email: "x@y.com" });
+    const { adapter, tables } = createFakeDb({});
+    await recordBounce(adapter, { personId: "missing", email: "x@y.com" });
     expect(tables.people).toHaveLength(0);
   });
 
   it("no-ops when bounced email differs from stored work_email", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -478,11 +408,10 @@ describe("recordBounce", () => {
       ],
       organizations: [{ id: "o1" }],
     });
-    await recordBounce(client, {
+    await recordBounce(adapter, {
       personId: "p1",
       email: "different@acme.com",
     });
-    // Untouched
     expect(tables.people[0].work_email_verified_at).toBe(
       "2026-04-25T00:00:00Z",
     );
@@ -490,7 +419,7 @@ describe("recordBounce", () => {
   });
 
   it("clears verified_at + confidence on the person", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -504,13 +433,13 @@ describe("recordBounce", () => {
       ],
       organizations: [{ id: "o1" }],
     });
-    await recordBounce(client, { personId: "p1", email: "jane@acme.com" });
+    await recordBounce(adapter, { personId: "p1", email: "jane@acme.com" });
     expect(tables.people[0].work_email_verified_at).toBeNull();
     expect(tables.people[0].work_email_confidence).toBe(0);
   });
 
   it("does NOT touch the org pattern when source != pattern_derived", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -531,14 +460,14 @@ describe("recordBounce", () => {
         },
       ],
     });
-    await recordBounce(client, { personId: "p1", email: "jane@acme.com" });
+    await recordBounce(adapter, { personId: "p1", email: "jane@acme.com" });
     expect(tables.organizations[0].email_pattern).toBe("{first}.{last}");
     expect(tables.organizations[0].email_pattern_confidence).toBeCloseTo(0.9);
     expect(tables.organizations[0].email_pattern_bounce_count).toBe(0);
   });
 
   it("halves the pattern confidence when bounce ratio crosses 0.3", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -558,15 +487,14 @@ describe("recordBounce", () => {
         },
       ],
     });
-    await recordBounce(client, { personId: "p1", email: "jane@acme.com" });
-    // 1/3 = 0.33 → halve: 0.4
+    await recordBounce(adapter, { personId: "p1", email: "jane@acme.com" });
     expect(tables.organizations[0].email_pattern).toBe("{first}.{last}");
     expect(tables.organizations[0].email_pattern_confidence).toBeCloseTo(0.4);
     expect(tables.organizations[0].email_pattern_bounce_count).toBe(1);
   });
 
   it("clears the pattern entirely when bounce ratio crosses 0.5", async () => {
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -586,21 +514,14 @@ describe("recordBounce", () => {
         },
       ],
     });
-    await recordBounce(client, { personId: "p1", email: "jane@acme.com" });
-    // 1/1 = 1.0 → clear
+    await recordBounce(adapter, { personId: "p1", email: "jane@acme.com" });
     expect(tables.organizations[0].email_pattern).toBeNull();
     expect(tables.organizations[0].email_pattern_confidence).toBe(0);
     expect(tables.organizations[0].email_pattern_bounce_count).toBe(1);
   });
 
   it("does NOT wipe a pattern when evidence_count is 0 even after recompute", async () => {
-    // Cached pattern exists but evidence_count is 0 (stale cache, no
-    // verifiable people in the org). Bounce should bump count but leave the
-    // pattern intact since recomputeOrgPattern would also see 0 evidence
-    // and write null — meaning we end up not finding any votes for the
-    // existing pattern. Behavior here: don't apply the ratio rule, just
-    // bump the bounce count.
-    const { client, tables } = createFakeSupabase({
+    const { adapter, tables } = createFakeDb({
       people: [
         {
           id: "p1",
@@ -620,29 +541,7 @@ describe("recordBounce", () => {
         },
       ],
     });
-    await recordBounce(client, { personId: "p1", email: "jane@acme.com" });
-    // After recompute: no other verified people in the org, so pattern
-    // becomes null + evidence stays 0. Bounce count bumps to 1, but the
-    // ratio branch is skipped because evidence is still 0.
+    await recordBounce(adapter, { personId: "p1", email: "jane@acme.com" });
     expect(tables.organizations[0].email_pattern_bounce_count).toBe(1);
-  });
-});
-
-describe("mxCheck", () => {
-  it("returns true when DNS returns at least one MX record", async () => {
-    const resolver = vi
-      .fn()
-      .mockResolvedValue([{ exchange: "smtp.example.com", priority: 10 }]);
-    expect(await mxCheck("acme.com", resolver)).toBe(true);
-  });
-
-  it("returns false when DNS lookup throws (NXDOMAIN, etc.)", async () => {
-    const resolver = vi.fn().mockRejectedValue(new Error("NXDOMAIN"));
-    expect(await mxCheck("nope.invalid", resolver)).toBe(false);
-  });
-
-  it("returns false when DNS returns zero MX records", async () => {
-    const resolver = vi.fn().mockResolvedValue([]);
-    expect(await mxCheck("noemail.example.com", resolver)).toBe(false);
   });
 });

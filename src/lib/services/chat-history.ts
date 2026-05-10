@@ -1,5 +1,7 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { eq, desc } from "drizzle-orm";
 import type { UIMessage } from "ai";
+import type { Db } from "@/db";
+import { schema } from "@/db";
 
 // ---------------------------------------------------------------------------
 // Title generation (pure function, no LLM call)
@@ -33,31 +35,42 @@ export interface ChatSummary {
 }
 
 export async function saveChat(
-  supabase: SupabaseClient,
+  db: Db,
   userId: string,
   chatId: string,
   messages: UIMessage[],
   campaignId?: string,
 ): Promise<void> {
   const title = generateTitle(messages);
+  const now = new Date();
 
-  const { error } = await supabase.from("chats").upsert(
-    {
-      id: chatId,
-      title,
-      campaign_id: campaignId ?? null,
-      messages: JSON.parse(JSON.stringify(messages)),
-      updated_at: new Date().toISOString(),
-      user_id: userId,
-    },
-    { onConflict: "id" },
-  );
-
-  if (error) console.error("[chat-history] save failed:", error.message);
+  try {
+    await db
+      .insert(schema.chats)
+      .values({
+        id: chatId as unknown as undefined,
+        clerkUserId: userId,
+        title,
+        campaignId: campaignId ?? null,
+        messages: JSON.parse(JSON.stringify(messages)),
+        updatedAt: now,
+        createdAt: now,
+      })
+      .onConflictDoUpdate({
+        target: schema.chats.id,
+        set: {
+          title,
+          messages: JSON.parse(JSON.stringify(messages)),
+          updatedAt: now,
+        },
+      });
+  } catch (err) {
+    console.error("[chat-history] save failed:", err);
+  }
 }
 
 export async function loadChat(
-  supabase: SupabaseClient,
+  db: Db,
   chatId: string,
 ): Promise<{
   id: string;
@@ -65,54 +78,69 @@ export async function loadChat(
   campaign_id: string | null;
   messages: UIMessage[];
 } | null> {
-  const { data, error } = await supabase
-    .from("chats")
-    .select("id, title, campaign_id, messages")
-    .eq("id", chatId)
-    .single();
+  const [data] = await db
+    .select({
+      id: schema.chats.id,
+      title: schema.chats.title,
+      campaign_id: schema.chats.campaignId,
+      messages: schema.chats.messages,
+    })
+    .from(schema.chats)
+    .where(eq(schema.chats.id, chatId))
+    .limit(1);
 
-  if (error || !data) return null;
-  return data as {
-    id: string;
-    title: string;
-    campaign_id: string | null;
-    messages: UIMessage[];
+  if (!data) return null;
+  return {
+    id: data.id,
+    title: data.title,
+    campaign_id: data.campaign_id ?? null,
+    messages: (data.messages as UIMessage[]) ?? [],
   };
 }
 
 export async function loadCampaignChat(
-  supabase: SupabaseClient,
+  db: Db,
   campaignId: string,
 ): Promise<{ id: string; messages: UIMessage[] } | null> {
-  const { data } = await supabase
-    .from("chats")
-    .select("id, messages")
-    .eq("campaign_id", campaignId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .single();
+  const [data] = await db
+    .select({
+      id: schema.chats.id,
+      messages: schema.chats.messages,
+    })
+    .from(schema.chats)
+    .where(eq(schema.chats.campaignId, campaignId))
+    .orderBy(desc(schema.chats.updatedAt))
+    .limit(1);
 
   if (!data) return null;
-  return data as { id: string; messages: UIMessage[] };
+  return { id: data.id, messages: (data.messages as UIMessage[]) ?? [] };
 }
 
 export async function listChats(
-  supabase: SupabaseClient,
+  db: Db,
+  userId: string,
   limit = 30,
 ): Promise<ChatSummary[]> {
-  const { data, error } = await supabase
-    .from("chats")
-    .select("id, title, campaign_id, updated_at")
-    .order("updated_at", { ascending: false })
+  const rows = await db
+    .select({
+      id: schema.chats.id,
+      title: schema.chats.title,
+      campaign_id: schema.chats.campaignId,
+      updated_at: schema.chats.updatedAt,
+    })
+    .from(schema.chats)
+    .where(eq(schema.chats.clerkUserId, userId))
+    .orderBy(desc(schema.chats.updatedAt))
     .limit(limit);
 
-  if (error || !data) return [];
-  return data as ChatSummary[];
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    campaign_id: r.campaign_id ?? null,
+    updated_at: r.updated_at.toISOString(),
+  }));
 }
 
-export async function deleteChat(
-  supabase: SupabaseClient,
-  chatId: string,
-): Promise<void> {
-  await supabase.from("chats").delete().eq("id", chatId);
+export async function deleteChat(db: Db, chatId: string): Promise<void> {
+  await db.delete(schema.chats).where(eq(schema.chats.id, chatId));
 }

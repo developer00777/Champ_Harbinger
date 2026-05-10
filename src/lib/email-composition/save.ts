@@ -1,7 +1,9 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { eq, and } from "drizzle-orm";
+import { db, schema } from "@/db";
 
 export type SaveDraftInput = {
   userId: string;
+  orgId?: string | null;
   campaignId: string;
   personId: string;
   subject: string;
@@ -29,22 +31,38 @@ export type SaveDraftResult =
  * Inserts an email_drafts row. Shared by writeEmail (ad-hoc) and
  * draftEmailsForSequence (fan-out). Returns a discriminated union so
  * callers decide how to surface errors.
+ *
+ * Accepts an optional first `_unused` argument for backwards compatibility
+ * with callers that used to pass a SupabaseClient as the first argument.
  */
 export async function saveDraft(
-  supabase: SupabaseClient,
+  _unused: unknown,
   input: SaveDraftInput,
+): Promise<SaveDraftResult>;
+export async function saveDraft(
+  input: SaveDraftInput,
+): Promise<SaveDraftResult>;
+export async function saveDraft(
+  firstArg: unknown,
+  secondArg?: SaveDraftInput,
 ): Promise<SaveDraftResult> {
-  const { data: person } = await supabase
-    .from("people")
-    .select("id, name, work_email, personal_email")
-    .eq("id", input.personId)
-    .single();
+  const input: SaveDraftInput = secondArg ?? (firstArg as SaveDraftInput);
+
+  const [person] = await db
+    .select({
+      id: schema.people.id,
+      workEmail: schema.people.workEmail,
+      personalEmail: schema.people.personalEmail,
+    })
+    .from(schema.people)
+    .where(eq(schema.people.id, input.personId))
+    .limit(1);
 
   if (!person) {
     return { ok: false, error: "Person not found." };
   }
 
-  const toEmail = person.work_email ?? person.personal_email;
+  const toEmail = person.workEmail ?? person.personalEmail;
   if (!toEmail) {
     return {
       ok: false,
@@ -53,12 +71,16 @@ export async function saveDraft(
     };
   }
 
-  const { data: cp } = await supabase
-    .from("campaign_people")
-    .select("id")
-    .eq("campaign_id", input.campaignId)
-    .eq("person_id", input.personId)
-    .single();
+  const [cp] = await db
+    .select({ id: schema.campaignPeople.id })
+    .from(schema.campaignPeople)
+    .where(
+      and(
+        eq(schema.campaignPeople.campaignId, input.campaignId),
+        eq(schema.campaignPeople.personId, input.personId),
+      ),
+    )
+    .limit(1);
 
   if (!cp) {
     return {
@@ -67,38 +89,46 @@ export async function saveDraft(
     };
   }
 
-  const { data: draft, error } = await supabase
-    .from("email_drafts")
-    .insert({
-      user_id: input.userId,
-      campaign_id: input.campaignId,
-      person_id: input.personId,
-      campaign_people_id: cp.id,
-      to_email: toEmail,
-      subject: input.subject,
-      body_html: input.bodyHtml,
-      body_text: input.bodyText ?? null,
-      status: "draft",
-      sequence_id: input.sequenceId ?? null,
-      sequence_step_id: input.sequenceStepId ?? null,
-      enrollment_id: input.enrollmentId ?? null,
-      ai_reasoning: input.aiReasoning ?? null,
-      review_status: input.sequenceId ? "pending" : "approved",
-    })
-    .select("id, to_email, subject")
-    .single();
+  try {
+    const [draft] = await db
+      .insert(schema.emailDrafts)
+      .values({
+        clerkUserId: input.userId,
+        clerkOrgId: input.orgId ?? null,
+        campaignId: input.campaignId,
+        personId: input.personId,
+        campaignPeopleId: cp.id,
+        toEmail,
+        subject: input.subject,
+        bodyHtml: input.bodyHtml,
+        bodyText: input.bodyText ?? null,
+        status: "draft",
+        sequenceId: input.sequenceId ?? null,
+        sequenceStepId: input.sequenceStepId ?? null,
+        enrollmentId: input.enrollmentId ?? null,
+        aiReasoning: input.aiReasoning ?? null,
+        reviewStatus: input.sequenceId ? "pending" : "approved",
+      })
+      .returning({
+        id: schema.emailDrafts.id,
+        toEmail: schema.emailDrafts.toEmail,
+        subject: schema.emailDrafts.subject,
+      });
 
-  if (error || !draft) {
+    if (!draft) {
+      return { ok: false, error: "Failed to save draft: no rows returned" };
+    }
+
+    return {
+      ok: true,
+      draftId: draft.id,
+      to: draft.toEmail,
+      subject: draft.subject,
+    };
+  } catch (err) {
     return {
       ok: false,
-      error: `Failed to save draft: ${error?.message ?? "unknown error"}`,
+      error: `Failed to save draft: ${err instanceof Error ? err.message : "unknown error"}`,
     };
   }
-
-  return {
-    ok: true,
-    draftId: draft.id,
-    to: draft.to_email,
-    subject: draft.subject,
-  };
 }

@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
 import {
   linkPersonToCampaign,
   mergeEnrichmentData,
@@ -70,14 +71,15 @@ async function findOrCreateGitHubPerson(profile: {
   starred_at?: string;
   source: string;
 }): Promise<string> {
-  const supabase = await createClient();
+  const { adminDb: ghDb } = await import("@/lib/db/admin");
+  const { schema: ghSchema } = await import("@/db");
 
   // Dedup by github_url
-  const { data: existing } = await supabase
-    .from("people")
-    .select("id, enrichment_data")
-    .eq("github_url", profile.github_url)
-    .maybeSingle();
+  const [existing] = await ghDb
+    .select({ id: ghSchema.people.id, enrichmentData: ghSchema.people.enrichmentData })
+    .from(ghSchema.people)
+    .where(eq(ghSchema.people.githubUrl, profile.github_url))
+    .limit(1);
 
   // Build github enrichment data -- store everything
   const githubData: Record<string, unknown> = {
@@ -105,35 +107,35 @@ async function findOrCreateGitHubPerson(profile: {
   const name = profile.name || profile.username;
   const bio = profile.raw?.bio != null ? String(profile.raw.bio) : null;
 
-  const { data: created, error } = await supabase
-    .from("people")
-    .insert({
-      name,
-      github_url: profile.github_url,
-      personal_email: profile.email ?? null,
-      twitter_url: twitterUrl,
-      title: bio?.slice(0, 200) ?? null,
-      source: profile.source,
-      enrichment_data: { github: githubData },
-      enrichment_status: hasFullProfile ? "enriched" : "pending",
-      last_enriched_at: hasFullProfile ? new Date().toISOString() : null,
-    })
-    .select("id")
-    .single();
+  try {
+    const [created] = await ghDb
+      .insert(ghSchema.people)
+      .values({
+        name,
+        githubUrl: profile.github_url,
+        personalEmail: profile.email ?? null,
+        twitterUrl,
+        title: bio?.slice(0, 200) ?? null,
+        source: profile.source,
+        enrichmentData: { github: githubData },
+        enrichmentStatus: hasFullProfile ? "enriched" : "pending",
+        lastEnrichedAt: hasFullProfile ? new Date() : null,
+      })
+      .returning({ id: ghSchema.people.id });
 
-  if (error) {
-    if (error.code === "23505") {
-      const { data: raceHit } = await supabase
-        .from("people")
-        .select("id")
-        .eq("github_url", profile.github_url)
-        .single();
+    if (!created) throw new Error("Insert returned no rows");
+    return created.id;
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("23505")) {
+      const [raceHit] = await ghDb
+        .select({ id: ghSchema.people.id })
+        .from(ghSchema.people)
+        .where(eq(ghSchema.people.githubUrl, profile.github_url))
+        .limit(1);
       if (raceHit) return raceHit.id;
     }
-    throw new Error(`Failed to create person: ${error.message}`);
+    throw new Error(`Failed to create person: ${err instanceof Error ? err.message : String(err)}`);
   }
-
-  return created.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,18 +296,18 @@ export const fetchGitHubStargazers = tool({
 
     // 4. Store in signal_results
     if (input.campaignId) {
-      const supabase = await createClient();
-      const { data: signal } = await supabase
-        .from("signals")
-        .select("id")
-        .eq("slug", "github-stargazers")
-        .maybeSingle();
+      const sdb = await getScopedDb();
+      const [signal] = await sdb.raw
+        .select({ id: schema.signals.id })
+        .from(schema.signals)
+        .where(eq(schema.signals.slug, "github-stargazers"))
+        .limit(1);
 
       if (signal) {
-        await supabase.from("signal_results").insert({
-          signal_id: signal.id,
-          campaign_id: input.campaignId,
-          organization_id: input.companyId ?? null,
+        await sdb.raw.insert(schema.signalResults).values({
+          signalId: signal.id,
+          campaignId: input.campaignId,
+          organizationId: input.companyId ?? null,
           output: {
             repository: output.repository,
             total_stars: output.total_stars,
