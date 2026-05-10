@@ -412,7 +412,7 @@ export default function ProfilePage() {
               id="notes"
               value={form.notes ?? ""}
               onChange={(e) => update("notes", e.target.value)}
-              placeholder="Anything else Signal should know -- target market, differentiators, constraints, tone preferences, etc."
+              placeholder="Anything else ChampHarbinger should know -- target market, differentiators, constraints, tone preferences, etc."
               rows={4}
             />
           </div>

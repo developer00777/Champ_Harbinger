@@ -259,7 +259,7 @@ export default function OutreachPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Outreach</h1>
             <p className="text-muted-foreground text-sm">
-              Signal-driven email sequences across all campaigns.
+              Buying-signal-driven email sequences across all campaigns.
             </p>
           </div>
         </div>

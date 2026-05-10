@@ -219,7 +219,7 @@ export function EmailSettings() {
           <Input
             id="from-name"
             type="text"
-            placeholder="e.g. Alex from Signal"
+            placeholder="e.g. Alex from ChampHarbinger"
             value={fromName}
             onChange={(e) => setFromName(e.target.value)}
           />

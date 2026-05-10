@@ -73,7 +73,7 @@ export default function SettingsPage() {
           <TabsContent value="integrations">
             <SettingsSection
               title="Integrations"
-              description="Status of every external service Signal can talk to. Add missing keys to .env.local and restart the dev server to unlock more features."
+              description="Status of every external service ChampHarbinger can talk to. Add missing keys to .env.local and restart the dev server to unlock more features."
             >
               <IntegrationsPanel />
             </SettingsSection>

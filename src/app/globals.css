@@ -8,6 +8,25 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* Champions Group brand palette */
+  --color-champions-orange: #F26722;
+  --color-champions-deep-orange: #D94F0A;
+  --color-champions-bright-orange: #FF8544;
+  --color-champions-soft-peach: #FFF4EC;
+  --color-champions-warm-tint: #FFE8D6;
+  --color-champions-ink: #1A1A1A;
+  --color-champions-ink-soft: #2E2E2E;
+  --color-champions-warm-gray: #6B6B6B;
+  --color-champions-border: #E5E7EB;
+  --color-champions-off-white: #FAFAFA;
+  --color-champions-light-gray: #F5F5F5;
+
+  /* Champions Group gradient utilities */
+  --background-image-champions-gradient: linear-gradient(135deg, #F26722 0%, #D94F0A 100%);
+  --background-image-warm-sunset: linear-gradient(135deg, #FF8544 0%, #F26722 100%);
+  --background-image-peach-wash: linear-gradient(180deg, #FFF4EC 0%, #FFFFFF 100%);
+  --background-image-orange-fade: linear-gradient(180deg, #F26722 0%, #FFE8D6 100%);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-inter);
@@ -54,6 +73,20 @@
 }
 
 :root {
+  /* Champions Group CSS custom properties */
+  --cg-orange: #F26722;
+  --cg-deep-orange: #D94F0A;
+  --cg-bright-orange: #FF8544;
+  --cg-soft-peach: #FFF4EC;
+  --cg-warm-tint: #FFE8D6;
+  --cg-ink: #1A1A1A;
+  --cg-ink-soft: #2E2E2E;
+  --cg-white: #FFFFFF;
+  --cg-warm-gray: #6B6B6B;
+  --cg-border: #E5E7EB;
+  --cg-light-gray: #F5F5F5;
+  --cg-off-white: #FAFAFA;
+
   --radius: 0.625rem;
   --background: oklch(0.99 0.002 260);
   --foreground: oklch(0.2 0.02 260);
@@ -61,8 +94,9 @@
   --card-foreground: oklch(0.2 0.02 260);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.2 0.02 260);
-  --primary: oklch(0.56 0.23 265);
-  --primary-foreground: oklch(0.99 0.002 260);
+  /* Champions orange #F26722 ≈ oklch(0.67 0.18 39) */
+  --primary: oklch(0.67 0.18 39);
+  --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.96 0.004 260);
   --secondary-foreground: oklch(0.2 0.02 260);
   --muted: oklch(0.96 0.004 260);
@@ -75,20 +109,20 @@
   --destructive-foreground: oklch(0.99 0.002 260);
   --border: oklch(0.92 0.006 260);
   --input: oklch(0.92 0.006 260);
-  --ring: oklch(0.56 0.23 265);
-  --chart-1: oklch(0.56 0.23 265);
+  --ring: oklch(0.67 0.18 39);
+  --chart-1: oklch(0.67 0.18 39);
   --chart-2: oklch(0.7 0.21 355);
   --chart-3: oklch(0.72 0.14 255);
   --chart-4: oklch(0.55 0.2 350);
   --chart-5: oklch(0.82 0.08 245);
   --sidebar: oklch(0.985 0.003 260);
   --sidebar-foreground: oklch(0.2 0.02 260);
-  --sidebar-primary: oklch(0.56 0.23 265);
-  --sidebar-primary-foreground: oklch(0.99 0.002 260);
+  --sidebar-primary: oklch(0.67 0.18 39);
+  --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.96 0.004 260);
   --sidebar-accent-foreground: oklch(0.2 0.02 260);
   --sidebar-border: oklch(0.92 0.006 260);
-  --sidebar-ring: oklch(0.56 0.23 265);
+  --sidebar-ring: oklch(0.67 0.18 39);
 }
 
 .dark {
@@ -98,7 +132,8 @@
   --card-foreground: oklch(0.96 0.004 260);
   --popover: oklch(0.21 0.01 260);
   --popover-foreground: oklch(0.96 0.004 260);
-  --primary: oklch(0.66 0.22 265);
+  /* Champions bright-orange #FF8544 for dark mode primary */
+  --primary: oklch(0.73 0.16 42);
   --primary-foreground: oklch(0.16 0.008 260);
   --secondary: oklch(0.28 0.01 260);
   --secondary-foreground: oklch(0.96 0.004 260);
@@ -112,20 +147,20 @@
   --destructive-foreground: oklch(0.96 0.004 260);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.66 0.22 265);
-  --chart-1: oklch(0.66 0.22 265);
+  --ring: oklch(0.73 0.16 42);
+  --chart-1: oklch(0.73 0.16 42);
   --chart-2: oklch(0.75 0.21 355);
   --chart-3: oklch(0.78 0.14 250);
   --chart-4: oklch(0.6 0.2 350);
   --chart-5: oklch(0.85 0.08 245);
   --sidebar: oklch(0.19 0.008 260);
   --sidebar-foreground: oklch(0.96 0.004 260);
-  --sidebar-primary: oklch(0.66 0.22 265);
+  --sidebar-primary: oklch(0.73 0.16 42);
   --sidebar-primary-foreground: oklch(0.16 0.008 260);
   --sidebar-accent: oklch(0.28 0.01 260);
   --sidebar-accent-foreground: oklch(0.96 0.004 260);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.66 0.22 265);
+  --sidebar-ring: oklch(0.73 0.16 42);
 }
 
 @layer base {

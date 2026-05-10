@@ -54,7 +54,7 @@ export function ChatMessages({
           <div>
             <h3 className="text-lg font-semibold">How can I help?</h3>
             <p className="text-muted-foreground mt-1 text-sm">
-              I&apos;m Signal, your AI assistant. Ask me anything or pick a
+              I&apos;m ChampHarbinger, your AI outreach assistant. Ask me anything or pick a
               suggestion below.
             </p>
           </div>

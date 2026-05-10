@@ -85,10 +85,10 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<SafeLink href="/" />}>
               <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                <span className="text-sm font-bold">S</span>
+                <span className="text-sm font-bold">CH</span>
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">Signal</span>
+                <span className="truncate font-semibold">ChampHarbinger</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -135,7 +135,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton
               render={
-                <a href="mailto:jaysahnan31@gmail.com?subject=Signal%20feedback" />
+                <a href="mailto:hello@championsgroup.com?subject=ChampHarbinger%20feedback" />
               }
               tooltip="Feedback"
               aria-label="Give feedback"
