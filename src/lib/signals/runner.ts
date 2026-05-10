@@ -1,4 +1,5 @@
-import { anthropic } from "@ai-sdk/anthropic";
+import { getModel } from "@/lib/ai/provider";
+import { Models } from "@/lib/ai/models";
 import { generateObject, jsonSchema } from "ai";
 import { eq, desc, gte, and } from "drizzle-orm";
 import { getScopedDb, schema } from "@/lib/db/scoped";
@@ -179,7 +180,7 @@ async function executeStep(
         return null;
       }
       const { object } = await generateObject({
-        model: anthropic(step.model ?? "claude-haiku-4-5-20251001"),
+        model: getModel(step.model ?? Models.classification),
         schema: jsonSchema(step.schema),
         prompt: `${step.prompt}\n\n---\n\n${source.slice(0, 30_000)}`,
       });

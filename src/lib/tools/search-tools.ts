@@ -1,4 +1,5 @@
-import { anthropic } from "@ai-sdk/anthropic";
+import { getModel } from "@/lib/ai/provider";
+import { Models } from "@/lib/ai/models";
 import { generateObject, tool } from "ai";
 import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
@@ -655,7 +656,7 @@ export const discoverCompanies = tool({
       .join("\n\n");
 
     const { object: extracted, usage } = await generateObject({
-      model: anthropic("claude-haiku-4-5-20251001"),
+      model: getModel(Models.classification),
       schema: z.object({
         companies: z.array(
           z.object({

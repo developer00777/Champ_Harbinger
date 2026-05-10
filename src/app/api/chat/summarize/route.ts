@@ -1,4 +1,5 @@
-import { anthropic } from "@ai-sdk/anthropic";
+import { getModel } from "@/lib/ai/provider";
+import { Models } from "@/lib/ai/models";
 import { generateText } from "ai";
 
 import {
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
   }
 
   const { text: title, usage } = await generateText({
-    model: anthropic("claude-haiku-4-5-20251001"),
+    model: getModel(Models.classification),
     system:
       "Summarize this conversation in 6-10 words as a short title. No quotes, no punctuation at the end. Be specific about the topic, not generic.",
     prompt: lines.join("\n"),

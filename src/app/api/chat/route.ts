@@ -1,4 +1,4 @@
-import { anthropic } from "@ai-sdk/anthropic";
+import { getModel } from "@/lib/ai/provider";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       const result = streamText({
-        model: anthropic("claude-sonnet-4-6"),
+        model: getModel(),
         system: systemPrompt,
         messages: modelMessages,
         tools: allTools,

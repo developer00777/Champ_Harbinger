@@ -1,6 +1,7 @@
-import { anthropic } from "@ai-sdk/anthropic";
 import { generateObject } from "ai";
 import { z } from "zod";
+import { getModel } from "@/lib/ai/provider";
+import { Models } from "@/lib/ai/models";
 
 import {
   estimateClaudeCostFromUsage,
@@ -12,7 +13,6 @@ import {
   wrapUntrusted,
 } from "@/lib/prompt-safety";
 
-const MODEL_ID = "claude-haiku-4-5-20251001";
 const MODEL_LABEL = "haiku";
 
 interface SearchResultLike {
@@ -41,7 +41,7 @@ export async function summarizeWebsite(input: {
 
   try {
     const { object, usage } = await generateObject({
-      model: anthropic(MODEL_ID),
+      model: getModel(Models.classification),
       schema: z.object({
         summary: z
           .string()
@@ -95,7 +95,7 @@ export async function summarizeSearchResults<T extends SearchResultLike>(
 
   try {
     const { object, usage } = await generateObject({
-      model: anthropic(MODEL_ID),
+      model: getModel(Models.classification),
       schema: z.object({
         summaries: z.array(
           z.object({
