@@ -34,7 +34,7 @@ import {
 const navItems = [
   {
     title: "Overview",
-    url: "/",
+    url: "/dashboard",
     icon: LayoutDashboard,
   },
   {
@@ -83,7 +83,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<SafeLink href="/" />}>
+            <SidebarMenuButton size="lg" render={<SafeLink href="/dashboard" />}>
               <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
                 <span className="text-sm font-bold">CH</span>
               </div>

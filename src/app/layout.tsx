@@ -6,10 +6,7 @@ import { shadcn } from "@clerk/ui/themes";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { DashboardShell } from "@/components/dashboard-shell";
-import { MissingKeyBannerStack } from "@/components/missing-key-banner-stack";
 import { PostHogIdentify } from "@/components/posthog-identify";
-import { StreamingProvider } from "@/lib/streaming-context";
 import "./globals.css";
 
 const inter = Inter({
@@ -19,13 +16,19 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "ChampHarbinger",
-  description: "A Champions Group product. Detect buying signals before they become deals.",
+  description: "Detect buying signals before they become deals. A Champions Group product.",
   icons: {
     icon: "/favicon.svg",
     apple: "/apple-touch-icon.png",
   },
 };
 
+/**
+ * Root layout — wraps every route in the app.
+ * Auth-gated pages are in src/app/(app)/ and get DashboardShell via (app)/layout.tsx.
+ * Public marketing pages are in src/app/(marketing)/ and get MarketingHeader/Footer.
+ * Both route groups handle their own structural layout; the root stays minimal.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -44,14 +47,10 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <StreamingProvider>
-              <TooltipProvider>
-                <DashboardShell banner={<MissingKeyBannerStack />}>
-                  {children}
-                </DashboardShell>
-                <Toaster richColors />
-              </TooltipProvider>
-            </StreamingProvider>
+            <TooltipProvider>
+              {children}
+              <Toaster richColors />
+            </TooltipProvider>
           </ThemeProvider>
         </ClerkProvider>
       </body>
