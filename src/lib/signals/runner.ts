@@ -1,11 +1,13 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { generateObject, jsonSchema } from "ai";
-import { createClient } from "@/lib/supabase/server";
+import { eq, desc, gte, and } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
 import { withTimeout } from "@/lib/utils/timeout";
 import { structuralDiff } from "./diff";
 import { jsonSchemaToZod } from "./json-schema-to-zod";
 import { resolveArgs, resolvePath, renderTemplate } from "./paths";
 import { getRecipeTool } from "./tool-registry";
+import type { Db } from "@/db";
 
 const STAGEHAND_INIT_TIMEOUT_MS = 60_000;
 import type {
@@ -20,7 +22,9 @@ import type {
 export interface RunRecipeOptions {
   recipe: SignalRecipe;
   context: RecipeContext;
-  supabaseClient?: Awaited<ReturnType<typeof createClient>>;
+  /** @deprecated Pass db instead. Kept for backward compatibility with callers. */
+  supabaseClient?: unknown;
+  db?: Db;
   onStep?: (step: RecipeStep, result: unknown) => void;
 }
 
@@ -28,7 +32,7 @@ export async function runRecipe(
   options: RunRecipeOptions,
 ): Promise<{ output: SignalOutput; steps: StepResults }> {
   const { recipe, context, onStep } = options;
-  const supabase = options.supabaseClient ?? (await createClient());
+  const db = options.db ?? (await getScopedDb()).raw;
   const steps: StepResults = {};
   const scope = buildScope(context, steps);
 
@@ -36,7 +40,7 @@ export async function runRecipe(
     const result = await executeStep(step, scope, {
       signalId: context.signalId,
       organizationId: context.organizationId,
-      supabase,
+      db,
     });
     steps[step.id] = result;
     onStep?.(step, result);
@@ -59,7 +63,7 @@ async function executeStep(
   env: {
     signalId: string;
     organizationId: string;
-    supabase: Awaited<ReturnType<typeof createClient>>;
+    db: Db;
   },
 ): Promise<unknown> {
   switch (step.kind) {
@@ -147,19 +151,22 @@ async function executeStep(
       }
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - (step.maxAgeDays ?? 90));
-      const { data } = await env.supabase
-        .from("signal_results")
-        .select("output, ran_at")
-        .eq("signal_id", env.signalId)
-        .eq("organization_id", env.organizationId)
-        .gte("ran_at", cutoff.toISOString())
-        .order("ran_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const [data] = await env.db
+        .select({ output: schema.signalResults.output, ranAt: schema.signalResults.ranAt })
+        .from(schema.signalResults)
+        .where(
+          and(
+            eq(schema.signalResults.signalId, env.signalId),
+            eq(schema.signalResults.organizationId, env.organizationId),
+            gte(schema.signalResults.ranAt, cutoff),
+          ),
+        )
+        .orderBy(desc(schema.signalResults.ranAt))
+        .limit(1);
       if (!data) return { present: false, value: null };
       const output = data.output as Record<string, unknown>;
       const value = step.path ? resolvePath(output, step.path) : output;
-      return { present: true, value, ran_at: data.ran_at };
+      return { present: true, value, ran_at: data.ranAt };
     }
     case "diff": {
       const baseline = resolvePath(scope, step.baseline);

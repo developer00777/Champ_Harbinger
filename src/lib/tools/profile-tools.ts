@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { eq, desc } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
 
 export const updateUserProfile = tool({
   description:
@@ -39,42 +40,53 @@ export const updateUserProfile = tool({
       ),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
     const { profileId, ...rest } = input;
 
-    const fields: Record<string, string> = {};
-    for (const [key, value] of Object.entries(rest)) {
-      if (value !== undefined) fields[key] = value;
-    }
+    const fields: Partial<typeof schema.userProfile.$inferInsert> = {};
+    if (rest.label !== undefined) fields.label = rest.label;
+    if (rest.name !== undefined) fields.name = rest.name;
+    if (rest.email !== undefined) fields.email = rest.email;
+    if (rest.role_title !== undefined) fields.roleTitle = rest.role_title;
+    if (rest.company_name !== undefined) fields.companyName = rest.company_name;
+    if (rest.company_url !== undefined) fields.companyUrl = rest.company_url;
+    if (rest.personal_url !== undefined) fields.personalUrl = rest.personal_url;
+    if (rest.linkedin_url !== undefined) fields.linkedinUrl = rest.linkedin_url;
+    if (rest.twitter_url !== undefined) fields.twitterUrl = rest.twitter_url;
+    if (rest.offering_summary !== undefined)
+      fields.offeringSummary = rest.offering_summary;
+    if (rest.notes !== undefined) fields.notes = rest.notes;
 
     if (Object.keys(fields).length === 0) {
       return { error: "No fields provided to update." };
     }
 
     if (profileId) {
-      const { error } = await supabase
-        .from("user_profile")
-        .update(fields)
-        .eq("id", profileId);
-      if (error) throw new Error(`Failed to update profile: ${error.message}`);
+      await sdb.raw
+        .update(schema.userProfile)
+        .set(fields)
+        .where(eq(schema.userProfile.id, profileId));
 
-      const { data: profile } = await supabase
-        .from("user_profile")
-        .select("*")
-        .eq("id", profileId)
-        .single();
+      const [profile] = await sdb.raw
+        .select()
+        .from(schema.userProfile)
+        .where(eq(schema.userProfile.id, profileId))
+        .limit(1);
 
       return { profile, action: "updated", updated: Object.keys(fields) };
     }
 
     // Create new profile
-    const { data: profile, error } = await supabase
-      .from("user_profile")
-      .insert(fields)
-      .select("*")
-      .single();
+    const [profile] = await sdb.raw
+      .insert(schema.userProfile)
+      .values({
+        ...fields,
+        clerkUserId: sdb.userId,
+        clerkOrgId: sdb.orgId,
+      })
+      .returning();
 
-    if (error) throw new Error(`Failed to create profile: ${error.message}`);
+    if (!profile) throw new Error("Failed to create profile");
     return { profile, action: "created", updated: Object.keys(fields) };
   },
 });
@@ -95,34 +107,34 @@ export const getUserProfile = tool({
       .describe("Campaign ID -- returns the profile linked to this campaign."),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
 
     // By specific profile ID
     if (input.profileId) {
-      const { data, error } = await supabase
-        .from("user_profile")
-        .select("*")
-        .eq("id", input.profileId)
-        .single();
+      const [data] = await sdb.raw
+        .select()
+        .from(schema.userProfile)
+        .where(eq(schema.userProfile.id, input.profileId))
+        .limit(1);
 
-      if (error) throw new Error(`Failed to get profile: ${error.message}`);
+      if (!data) throw new Error("Profile not found");
       return { profile: data };
     }
 
     // By campaign's linked profile
     if (input.campaignId) {
-      const { data: campaign } = await supabase
-        .from("campaigns")
-        .select("profile_id")
-        .eq("id", input.campaignId)
-        .single();
+      const [campaign] = await sdb.raw
+        .select({ profileId: schema.campaigns.profileId })
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, input.campaignId))
+        .limit(1);
 
-      if (campaign?.profile_id) {
-        const { data } = await supabase
-          .from("user_profile")
-          .select("*")
-          .eq("id", campaign.profile_id)
-          .single();
+      if (campaign?.profileId) {
+        const [data] = await sdb.raw
+          .select()
+          .from(schema.userProfile)
+          .where(eq(schema.userProfile.id, campaign.profileId))
+          .limit(1);
 
         if (data) return { profile: data };
       }
@@ -134,15 +146,13 @@ export const getUserProfile = tool({
       };
     }
 
-    // Fallback: most recent
-    const { data, error } = await supabase
-      .from("user_profile")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) throw new Error(`Failed to get profile: ${error.message}`);
+    // Fallback: most recent profile for this user
+    const [data] = await sdb.raw
+      .select()
+      .from(schema.userProfile)
+      .where(sdb.scope(schema.userProfile))
+      .orderBy(desc(schema.userProfile.createdAt))
+      .limit(1);
 
     if (!data) {
       return {
@@ -161,15 +171,14 @@ export const listProfiles = tool({
     "List all user profiles. Each profile represents a different seller identity the user can link to campaigns.",
   inputSchema: z.object({}),
   execute: async () => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
 
-    const { data, error } = await supabase
-      .from("user_profile")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const data = await sdb.raw
+      .select()
+      .from(schema.userProfile)
+      .where(sdb.scope(schema.userProfile))
+      .orderBy(desc(schema.userProfile.createdAt));
 
-    if (error) throw new Error(`Failed to list profiles: ${error.message}`);
-
-    return { profiles: data ?? [] };
+    return { profiles: data };
   },
 });

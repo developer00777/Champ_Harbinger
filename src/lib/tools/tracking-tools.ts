@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { eq, and, desc, inArray } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
 import { getQStashClient, getBaseUrl } from "@/lib/services/qstash";
 import { SCHEDULE_INTERVALS } from "@/lib/types/tracking";
 import type { Schedule } from "@/lib/types/tracking";
@@ -43,7 +44,7 @@ export const createTracking = tool({
     intent: z
       .string()
       .describe(
-        "Plain-English description of what changes should flag the company/person as ready to contact. Each run, an LLM compares fresh diffs against this intent to decide whether to fire outreach. Example: 'Flag as ready when they post 2+ senior engineering or DevOps roles, or announce a Series B or later.'",
+        "Plain-English description of what changes should flag the company/person as ready to contact.",
       ),
   }),
   execute: async (input) => {
@@ -51,42 +52,48 @@ export const createTracking = tool({
       throw new Error("Either organizationId or personId is required");
     }
 
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
     const interval =
       SCHEDULE_INTERVALS[input.schedule as Schedule] ??
       SCHEDULE_INTERVALS.weekly;
 
-    const { data: config, error } = await supabase
-      .from("tracking_configs")
-      .insert({
-        campaign_id: input.campaignId,
-        organization_id: input.organizationId ?? null,
-        person_id: input.personId ?? null,
-        signal_id: input.signalId,
+    const [config] = await sdb.raw
+      .insert(schema.trackingConfigs)
+      .values({
+        campaignId: input.campaignId,
+        organizationId: input.organizationId ?? null,
+        personId: input.personId ?? null,
+        signalId: input.signalId,
         schedule: input.schedule,
         intent: input.intent,
         status: "active",
-        next_run_at: new Date(Date.now() + interval).toISOString(),
+        nextRunAt: new Date(Date.now() + interval),
       })
-      .select("*")
-      .single();
+      .returning();
 
-    if (error)
-      throw new Error(`Failed to create tracking config: ${error.message}`);
+    if (!config) throw new Error("Failed to create tracking config");
 
     // Set readiness_tag to 'monitoring' on the junction table
     if (input.organizationId) {
-      await supabase
-        .from("campaign_organizations")
-        .update({ readiness_tag: "monitoring" })
-        .eq("campaign_id", input.campaignId)
-        .eq("organization_id", input.organizationId);
+      await sdb.raw
+        .update(schema.campaignOrganizations)
+        .set({ readinessTag: "monitoring" })
+        .where(
+          and(
+            eq(schema.campaignOrganizations.campaignId, input.campaignId),
+            eq(schema.campaignOrganizations.organizationId, input.organizationId),
+          ),
+        );
     } else if (input.personId) {
-      await supabase
-        .from("campaign_people")
-        .update({ readiness_tag: "monitoring" })
-        .eq("campaign_id", input.campaignId)
-        .eq("person_id", input.personId);
+      await sdb.raw
+        .update(schema.campaignPeople)
+        .set({ readinessTag: "monitoring" })
+        .where(
+          and(
+            eq(schema.campaignPeople.campaignId, input.campaignId),
+            eq(schema.campaignPeople.personId, input.personId),
+          ),
+        );
     }
 
     // Dispatch immediate baseline run via QStash
@@ -94,7 +101,7 @@ export const createTracking = tool({
 
     return {
       trackingConfig: config,
-      message: `Tracking created with baseline run dispatched. Signal will then run ${input.schedule}. Next check: ${config.next_run_at}.`,
+      message: `Tracking created with baseline run dispatched. Signal will then run ${input.schedule}.`,
     };
   },
 });
@@ -111,98 +118,98 @@ export const bulkCreateTracking = tool({
     intent: z
       .string()
       .describe(
-        "Plain-English description of what changes should flag a company as ready to contact. Applied to every tracked organization.",
+        "Plain-English description of what changes should flag a company as ready to contact.",
       ),
     status: z
       .enum(["qualified", "discovered", "all"])
       .default("qualified")
-      .describe(
-        "Only track organizations with this status (default: qualified)",
-      ),
+      .describe("Only track organizations with this status"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
 
     // Get organizations in this campaign
-    let query = supabase
-      .from("campaign_organizations")
-      .select("organization_id")
-      .eq("campaign_id", input.campaignId);
+    const orgsQuery = sdb.raw
+      .select({ organizationId: schema.campaignOrganizations.organizationId })
+      .from(schema.campaignOrganizations)
+      .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
 
-    if (input.status !== "all") {
-      query = query.eq("status", input.status);
-    }
+    const orgs = input.status !== "all"
+      ? await sdb.raw
+          .select({ organizationId: schema.campaignOrganizations.organizationId })
+          .from(schema.campaignOrganizations)
+          .where(
+            and(
+              eq(schema.campaignOrganizations.campaignId, input.campaignId),
+              eq(schema.campaignOrganizations.status, input.status),
+            ),
+          )
+      : await orgsQuery;
 
-    const { data: orgs, error: orgErr } = await query;
-    if (orgErr)
-      throw new Error(`Failed to list organizations: ${orgErr.message}`);
-    if (!orgs || orgs.length === 0) {
+    if (orgs.length === 0) {
       return { created: 0, message: "No matching organizations found" };
     }
 
     // Check for existing tracking configs to avoid duplicates
-    const { data: existing } = await supabase
-      .from("tracking_configs")
-      .select("organization_id")
-      .eq("campaign_id", input.campaignId)
-      .eq("signal_id", input.signalId);
+    const existing = await sdb.raw
+      .select({ organizationId: schema.trackingConfigs.organizationId })
+      .from(schema.trackingConfigs)
+      .where(
+        and(
+          eq(schema.trackingConfigs.campaignId, input.campaignId),
+          eq(schema.trackingConfigs.signalId, input.signalId),
+        ),
+      );
 
-    const existingOrgIds = new Set(
-      (existing || []).map((e: Record<string, unknown>) => e.organization_id),
-    );
+    const existingOrgIds = new Set(existing.map((e) => e.organizationId));
 
     const interval =
       SCHEDULE_INTERVALS[input.schedule as Schedule] ??
       SCHEDULE_INTERVALS.weekly;
-    const nextRun = new Date(Date.now() + interval).toISOString();
+    const nextRun = new Date(Date.now() + interval);
 
     const toCreate = orgs
-      .filter(
-        (o: Record<string, unknown>) =>
-          !existingOrgIds.has(o.organization_id as string),
-      )
-      .map((o: Record<string, unknown>) => ({
-        campaign_id: input.campaignId,
-        organization_id: o.organization_id,
-        person_id: null,
-        signal_id: input.signalId,
+      .filter((o) => !existingOrgIds.has(o.organizationId))
+      .map((o) => ({
+        campaignId: input.campaignId,
+        organizationId: o.organizationId,
+        personId: null,
+        signalId: input.signalId,
         schedule: input.schedule,
         intent: input.intent,
         status: "active",
-        next_run_at: nextRun,
+        nextRunAt: nextRun,
       }));
 
     if (toCreate.length === 0) {
       return {
         created: 0,
         skipped: orgs.length,
-        message:
-          "All organizations already have tracking configs for this signal",
+        message: "All organizations already have tracking configs for this signal",
       };
     }
 
-    const { data: created, error } = await supabase
-      .from("tracking_configs")
-      .insert(toCreate)
-      .select("id, organization_id");
-
-    if (error)
-      throw new Error(`Failed to bulk create tracking: ${error.message}`);
+    const created = await sdb.raw
+      .insert(schema.trackingConfigs)
+      .values(toCreate)
+      .returning({ id: schema.trackingConfigs.id, organizationId: schema.trackingConfigs.organizationId });
 
     // Set readiness_tag to 'monitoring' for all tracked orgs
-    const orgIds = toCreate.map(
-      (c: Record<string, unknown>) => c.organization_id,
-    );
-    await supabase
-      .from("campaign_organizations")
-      .update({ readiness_tag: "monitoring" })
-      .eq("campaign_id", input.campaignId)
-      .in("organization_id", orgIds);
+    const orgIds = toCreate.map((c) => c.organizationId!).filter(Boolean) as string[];
+    if (orgIds.length > 0) {
+      await sdb.raw
+        .update(schema.campaignOrganizations)
+        .set({ readinessTag: "monitoring" })
+        .where(
+          and(
+            eq(schema.campaignOrganizations.campaignId, input.campaignId),
+            inArray(schema.campaignOrganizations.organizationId, orgIds),
+          ),
+        );
+    }
 
-    // Dispatch baseline runs (max 5 concurrent to avoid overwhelming)
-    const configIds = (created ?? []).map(
-      (c: Record<string, unknown>) => c.id as string,
-    );
+    // Dispatch baseline runs (max 5 concurrent)
+    const configIds = created.map((c) => c.id);
     const batchSize = 5;
     for (let i = 0; i < configIds.length; i += batchSize) {
       const batch = configIds.slice(i, i + batchSize);
@@ -212,7 +219,7 @@ export const bulkCreateTracking = tool({
     return {
       created: toCreate.length,
       skipped: orgs.length - toCreate.length,
-      message: `Created ${toCreate.length} tracking configs with baseline runs dispatched. Scheduled runs start ${input.schedule}.`,
+      message: `Created ${toCreate.length} tracking configs with baseline runs dispatched.`,
     };
   },
 });
@@ -228,44 +235,46 @@ export const getTrackingConfigs = tool({
       .describe("Filter by tracking status"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
 
-    let query = supabase
-      .from("tracking_configs")
-      .select(
-        "*, organization:organizations(name, domain), person:people(name, linkedin_url), signal:signals(name, slug, category)",
-      )
-      .eq("campaign_id", input.campaignId)
-      .order("created_at", { ascending: false });
+    const whereClause = input.status
+      ? and(
+          eq(schema.trackingConfigs.campaignId, input.campaignId),
+          eq(schema.trackingConfigs.status, input.status),
+        )
+      : eq(schema.trackingConfigs.campaignId, input.campaignId);
 
-    if (input.status) {
-      query = query.eq("status", input.status);
-    }
+    const configs = await sdb.raw
+      .select()
+      .from(schema.trackingConfigs)
+      .where(whereClause)
+      .orderBy(desc(schema.trackingConfigs.createdAt));
 
-    const { data: configs, error } = await query;
-    if (error)
-      throw new Error(`Failed to list tracking configs: ${error.message}`);
+    const configIds = configs.map((c) => c.id);
 
-    // Fetch latest change for each config
-    const configIds = (configs || []).map((c: Record<string, unknown>) => c.id);
-    const { data: latestChanges } = await supabase
-      .from("tracking_changes")
-      .select("tracking_config_id, description, change_type, detected_at")
-      .in("tracking_config_id", configIds)
-      .order("detected_at", { ascending: false });
+    const latestChanges = configIds.length > 0
+      ? await sdb.raw
+          .select({
+            trackingConfigId: schema.trackingChanges.trackingConfigId,
+            description: schema.trackingChanges.description,
+            changeType: schema.trackingChanges.changeType,
+            detectedAt: schema.trackingChanges.detectedAt,
+          })
+          .from(schema.trackingChanges)
+          .where(inArray(schema.trackingChanges.trackingConfigId, configIds))
+          .orderBy(desc(schema.trackingChanges.detectedAt))
+      : [];
 
-    // Group to get latest per config
-    const changeMap = new Map<string, Record<string, unknown>>();
-    for (const change of latestChanges || []) {
-      const cid = change.tracking_config_id as string;
-      if (!changeMap.has(cid)) {
-        changeMap.set(cid, change);
+    const changeMap = new Map<string, (typeof latestChanges)[0]>();
+    for (const change of latestChanges) {
+      if (!changeMap.has(change.trackingConfigId)) {
+        changeMap.set(change.trackingConfigId, change);
       }
     }
 
-    const result = (configs || []).map((c: Record<string, unknown>) => ({
+    const result = configs.map((c) => ({
       ...c,
-      latestChange: changeMap.get(c.id as string) || null,
+      latestChange: changeMap.get(c.id) || null,
     }));
 
     return { configs: result };
@@ -286,34 +295,27 @@ export const getTrackingHistory = tool({
       .describe("Max number of changes to return"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
 
-    const [changesResult, snapshotsResult] = await Promise.all([
-      supabase
-        .from("tracking_changes")
-        .select("*")
-        .eq("tracking_config_id", input.trackingConfigId)
-        .order("detected_at", { ascending: false })
+    const [changes, snapshots] = await Promise.all([
+      sdb.raw
+        .select()
+        .from(schema.trackingChanges)
+        .where(eq(schema.trackingChanges.trackingConfigId, input.trackingConfigId))
+        .orderBy(desc(schema.trackingChanges.detectedAt))
         .limit(input.limit),
-      supabase
-        .from("tracking_snapshots")
-        .select("snapshot_data, captured_at")
-        .eq("tracking_config_id", input.trackingConfigId)
-        .order("captured_at", { ascending: false })
+      sdb.raw
+        .select({
+          snapshotData: schema.trackingSnapshots.snapshotData,
+          capturedAt: schema.trackingSnapshots.capturedAt,
+        })
+        .from(schema.trackingSnapshots)
+        .where(eq(schema.trackingSnapshots.trackingConfigId, input.trackingConfigId))
+        .orderBy(desc(schema.trackingSnapshots.capturedAt))
         .limit(input.limit),
     ]);
 
-    if (changesResult.error)
-      throw new Error(`Failed to get changes: ${changesResult.error.message}`);
-    if (snapshotsResult.error)
-      throw new Error(
-        `Failed to get snapshots: ${snapshotsResult.error.message}`,
-      );
-
-    return {
-      changes: changesResult.data || [],
-      snapshots: snapshotsResult.data || [],
-    };
+    return { changes, snapshots };
   },
 });
 
@@ -326,48 +328,37 @@ export const updateTracking = tool({
       .enum(["daily", "weekly", "biweekly", "monthly"])
       .optional()
       .describe("New schedule"),
-    intent: z
-      .string()
-      .optional()
-      .describe(
-        "New plain-English intent describing what changes should fire outreach",
-      ),
+    intent: z.string().optional().describe("New plain-English intent"),
     status: z
       .enum(["active", "paused", "completed"])
       .optional()
       .describe("New status"),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
 
-    const updates: Record<string, unknown> = {};
+    const updates: Partial<typeof schema.trackingConfigs.$inferInsert> = {};
     if (input.schedule) {
       updates.schedule = input.schedule;
-      // Recalculate next_run_at
       const interval =
         SCHEDULE_INTERVALS[input.schedule as Schedule] ??
         SCHEDULE_INTERVALS.weekly;
-      updates.next_run_at = new Date(Date.now() + interval).toISOString();
+      updates.nextRunAt = new Date(Date.now() + interval);
     }
-    if (input.intent !== undefined) {
-      updates.intent = input.intent;
-    }
-    if (input.status) {
-      updates.status = input.status;
-    }
+    if (input.intent !== undefined) updates.intent = input.intent;
+    if (input.status) updates.status = input.status;
 
     if (Object.keys(updates).length === 0) {
       return { message: "Nothing to update" };
     }
 
-    const { data, error } = await supabase
-      .from("tracking_configs")
-      .update(updates)
-      .eq("id", input.trackingConfigId)
-      .select("*")
-      .single();
+    const [data] = await sdb.raw
+      .update(schema.trackingConfigs)
+      .set(updates)
+      .where(eq(schema.trackingConfigs.id, input.trackingConfigId))
+      .returning();
 
-    if (error) throw new Error(`Failed to update tracking: ${error.message}`);
+    if (!data) throw new Error("Tracking config not found");
 
     return {
       trackingConfig: data,

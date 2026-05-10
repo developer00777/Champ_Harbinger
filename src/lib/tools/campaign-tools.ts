@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { auth } from "@clerk/nextjs/server";
-import { createClient } from "@/lib/supabase/server";
+import { desc, eq, count } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
 
 export const saveCampaign = tool({
   description:
@@ -62,49 +62,47 @@ export const saveCampaign = tool({
       ),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
-    const { userId } = await auth();
+    const sdb = await getScopedDb();
 
     if (input.id) {
-      const updateData: Record<string, unknown> = { name: input.name };
+      const updateData: Partial<typeof schema.campaigns.$inferInsert> = {
+        name: input.name,
+      };
       if (input.status) updateData.status = input.status;
-      if (input.icp) updateData.icp = input.icp;
-      if (input.offering) updateData.offering = input.offering;
-      if (input.positioning) updateData.positioning = input.positioning;
-      if (input.searchCriteria)
-        updateData.search_criteria = input.searchCriteria;
+      if (input.icp) updateData.icp = input.icp as Record<string, unknown>;
+      if (input.offering) updateData.offering = input.offering as Record<string, unknown>;
+      if (input.positioning) updateData.positioning = input.positioning as Record<string, unknown>;
+      if (input.searchCriteria) updateData.searchCriteria = input.searchCriteria as Record<string, unknown>;
       if (input.notes !== undefined) updateData.notes = input.notes;
-      if (input.profileId !== undefined)
-        updateData.profile_id = input.profileId;
+      if (input.profileId !== undefined) updateData.profileId = input.profileId;
 
-      const { data, error } = await supabase
-        .from("campaigns")
-        .update(updateData)
-        .eq("id", input.id)
-        .select()
-        .single();
+      const [data] = await sdb.raw
+        .update(schema.campaigns)
+        .set(updateData)
+        .where(eq(schema.campaigns.id, input.id))
+        .returning();
 
-      if (error) throw new Error(`Failed to update campaign: ${error.message}`);
+      if (!data) throw new Error("Failed to update campaign: not found");
       return { campaign: data, action: "updated" };
     }
 
-    const { data, error } = await supabase
-      .from("campaigns")
-      .insert({
+    const [data] = await sdb.raw
+      .insert(schema.campaigns)
+      .values({
         name: input.name,
         status: input.status || "discovery",
-        icp: input.icp || {},
-        offering: input.offering || {},
-        positioning: input.positioning || {},
-        search_criteria: input.searchCriteria || {},
+        icp: (input.icp || {}) as Record<string, unknown>,
+        offering: (input.offering || {}) as Record<string, unknown>,
+        positioning: (input.positioning || {}) as Record<string, unknown>,
+        searchCriteria: (input.searchCriteria || {}) as Record<string, unknown>,
         notes: input.notes,
-        profile_id: input.profileId || null,
-        user_id: userId,
+        profileId: input.profileId || null,
+        clerkUserId: sdb.userId,
+        clerkOrgId: sdb.orgId,
       })
-      .select()
-      .single();
+      .returning();
 
-    if (error) throw new Error(`Failed to create campaign: ${error.message}`);
+    if (!data) throw new Error("Failed to create campaign");
     return { campaign: data, action: "created" };
   },
 });
@@ -120,27 +118,27 @@ export const getCampaign = tool({
       .describe("Campaign ID. Omit to get the most recent campaign."),
   }),
   execute: async (input) => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
 
     if (input.id) {
-      const { data, error } = await supabase
-        .from("campaigns")
-        .select("*")
-        .eq("id", input.id)
-        .single();
+      const [data] = await sdb.raw
+        .select()
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, input.id))
+        .limit(1);
 
-      if (error) throw new Error(`Failed to get campaign: ${error.message}`);
+      if (!data) throw new Error("Campaign not found");
       return { campaign: data };
     }
 
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .single();
+    const [data] = await sdb.raw
+      .select()
+      .from(schema.campaigns)
+      .where(sdb.scope(schema.campaigns))
+      .orderBy(desc(schema.campaigns.updatedAt))
+      .limit(1);
 
-    if (error) throw new Error(`No campaigns found: ${error.message}`);
+    if (!data) throw new Error("No campaigns found");
     return { campaign: data };
   },
 });
@@ -149,28 +147,46 @@ export const listCampaigns = tool({
   description: "List all campaigns with summary stats.",
   inputSchema: z.object({}),
   execute: async () => {
-    const supabase = await createClient();
+    const sdb = await getScopedDb();
 
-    const { data: campaigns, error } = await supabase
-      .from("campaigns")
-      .select(
-        "id, name, status, profile_id, created_at, updated_at, campaign_organizations(count), campaign_people(count)",
-      )
-      .order("updated_at", { ascending: false });
+    const campaigns = await sdb.raw
+      .select({
+        id: schema.campaigns.id,
+        name: schema.campaigns.name,
+        status: schema.campaigns.status,
+        profileId: schema.campaigns.profileId,
+        createdAt: schema.campaigns.createdAt,
+        updatedAt: schema.campaigns.updatedAt,
+      })
+      .from(schema.campaigns)
+      .where(sdb.scope(schema.campaigns))
+      .orderBy(desc(schema.campaigns.updatedAt));
 
-    if (error) throw new Error(`Failed to list campaigns: ${error.message}`);
+    // Get counts per campaign
+    const orgsCount = await sdb.raw
+      .select({
+        campaignId: schema.campaignOrganizations.campaignId,
+        cnt: count(),
+      })
+      .from(schema.campaignOrganizations)
+      .groupBy(schema.campaignOrganizations.campaignId);
 
-    const campaignsWithStats = (campaigns || []).map((campaign) => {
-      const { campaign_organizations, campaign_people, ...rest } =
-        campaign as Record<string, unknown>;
-      const orgs = campaign_organizations as { count: number }[] | undefined;
-      const ppl = campaign_people as { count: number }[] | undefined;
-      return {
-        ...rest,
-        companyCount: orgs?.[0]?.count ?? 0,
-        contactCount: ppl?.[0]?.count ?? 0,
-      };
-    });
+    const peopleCount = await sdb.raw
+      .select({
+        campaignId: schema.campaignPeople.campaignId,
+        cnt: count(),
+      })
+      .from(schema.campaignPeople)
+      .groupBy(schema.campaignPeople.campaignId);
+
+    const orgsMap = Object.fromEntries(orgsCount.map((r) => [r.campaignId, r.cnt]));
+    const peopleMap = Object.fromEntries(peopleCount.map((r) => [r.campaignId, r.cnt]));
+
+    const campaignsWithStats = campaigns.map((c) => ({
+      ...c,
+      companyCount: orgsMap[c.id] ?? 0,
+      contactCount: peopleMap[c.id] ?? 0,
+    }));
 
     return { campaigns: campaignsWithStats };
   },

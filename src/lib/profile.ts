@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
 import type { UserProfile } from "@/lib/types/profile";
 
 /**
@@ -9,35 +10,35 @@ import type { UserProfile } from "@/lib/types/profile";
 export async function getProfileForPrompt(
   campaignId?: string | null,
 ): Promise<UserProfile | null> {
-  const supabase = await createClient();
+  const sdb = await getScopedDb();
 
   // If campaign has a linked profile, use it
   if (campaignId) {
-    const { data: campaign } = await supabase
-      .from("campaigns")
-      .select("profile_id")
-      .eq("id", campaignId)
-      .single();
+    const [campaign] = await sdb.raw
+      .select({ profileId: schema.campaigns.profileId })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
 
-    if (campaign?.profile_id) {
-      const { data } = await supabase
-        .from("user_profile")
-        .select("*")
-        .eq("id", campaign.profile_id)
-        .single();
+    if (campaign?.profileId) {
+      const [profile] = await sdb.raw
+        .select()
+        .from(schema.userProfile)
+        .where(eq(schema.userProfile.id, campaign.profileId))
+        .limit(1);
 
-      if (data) return data as UserProfile;
+      if (profile) return profile as unknown as UserProfile;
     }
   }
 
-  // Fallback: most recent profile
-  const { data, error } = await supabase
-    .from("user_profile")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // Fallback: most recent profile owned by this user
+  const [data] = await sdb.raw
+    .select()
+    .from(schema.userProfile)
+    .where(sdb.scope(schema.userProfile))
+    .orderBy(schema.userProfile.createdAt)
+    .limit(1);
 
-  if (error || !data) return null;
-  return data as UserProfile;
+  if (!data) return null;
+  return data as unknown as UserProfile;
 }

@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { createClient, getSupabaseAndUser } from "@/lib/supabase/server";
+import { eq, and, inArray } from "drizzle-orm";
+import { getScopedDb, schema } from "@/lib/db/scoped";
+import { db } from "@/db";
 import { composeEmail, mapConcurrent } from "@/lib/email-composition/compose";
 import { loadActiveEmailSkills } from "@/lib/email-composition/load-skills";
 import { saveDraft } from "@/lib/email-composition/save";
@@ -48,83 +50,55 @@ export const createSequence = tool({
       ),
   }),
   execute: async ({ name, campaignId, triggerSignalId, steps, contactIds }) => {
-    const ctx = await getSupabaseAndUser();
-    if (!ctx) {
-      return {
-        error:
-          "No authenticated session available in tool context. Ask the user to sign in.",
-      };
-    }
-    const { supabase, user } = ctx;
-
-    // Resolve user_id. Prefer the campaign row (sequences inherit the
-    // campaign's owner); fall back to the session user and backfill the
-    // campaign so subsequent calls short-circuit.
-    const { data: campaignRow } = await supabase
-      .from("campaigns")
-      .select("user_id")
-      .eq("id", campaignId)
-      .single();
-
-    const userId: string = campaignRow?.user_id ?? user.id;
-    if (!campaignRow?.user_id) {
-      await supabase
-        .from("campaigns")
-        .update({ user_id: userId })
-        .eq("id", campaignId);
-    }
+    const sdb = await getScopedDb();
 
     // Create the sequence
-    const { data: sequence, error: seqErr } = await supabase
-      .from("sequences")
-      .insert({
+    const [sequence] = await sdb.raw
+      .insert(schema.sequences)
+      .values({
         name,
-        campaign_id: campaignId,
-        trigger_signal_id: triggerSignalId ?? null,
+        campaignId,
+        triggerSignalId: triggerSignalId ?? null,
         status: "draft",
-        user_id: userId,
+        clerkUserId: sdb.userId,
+        clerkOrgId: sdb.orgId,
       })
-      .select("id")
-      .single();
+      .returning({ id: schema.sequences.id });
 
-    if (seqErr || !sequence) {
-      return { error: `Failed to create sequence: ${seqErr?.message}` };
+    if (!sequence) {
+      return { error: "Failed to create sequence" };
     }
 
     // Create steps
     const stepRows = steps.map((step, i) => ({
-      sequence_id: sequence.id,
-      step_number: i + 1,
-      step_type: "email" as const,
-      delay_days: i === 0 ? null : (step.delayDays ?? null),
-      delay_hours: i === 0 ? null : (step.delayHours ?? null),
+      sequenceId: sequence.id,
+      stepNumber: i + 1,
+      stepType: "email" as const,
+      delayDays: i === 0 ? null : (step.delayDays ?? null),
+      delayHours: i === 0 ? null : (step.delayHours ?? null),
       condition: i === 0 ? "always" : step.condition,
     }));
 
-    const { error: stepsErr } = await supabase
-      .from("sequence_steps")
-      .insert(stepRows);
-
-    if (stepsErr) {
-      return { error: `Failed to create steps: ${stepsErr.message}` };
-    }
+    await sdb.raw.insert(schema.sequenceSteps).values(stepRows);
 
     // Enroll contacts
     let contacts;
     if (contactIds && contactIds.length > 0) {
-      const { data } = await supabase
-        .from("campaign_people")
-        .select("id, person_id")
-        .eq("campaign_id", campaignId)
-        .in("id", contactIds);
-      contacts = data;
+      contacts = await sdb.raw
+        .select({ id: schema.campaignPeople.id, personId: schema.campaignPeople.personId })
+        .from(schema.campaignPeople)
+        .where(
+          and(
+            eq(schema.campaignPeople.campaignId, campaignId),
+            inArray(schema.campaignPeople.id, contactIds),
+          ),
+        );
     } else {
       // Enroll all contacts -- emails are still reviewed before send
-      const { data } = await supabase
-        .from("campaign_people")
-        .select("id, person_id")
-        .eq("campaign_id", campaignId);
-      contacts = data;
+      contacts = await sdb.raw
+        .select({ id: schema.campaignPeople.id, personId: schema.campaignPeople.personId })
+        .from(schema.campaignPeople)
+        .where(eq(schema.campaignPeople.campaignId, campaignId));
     }
 
     if (!contacts || contacts.length === 0) {
@@ -137,21 +111,15 @@ export const createSequence = tool({
     }
 
     const enrollments = contacts.map((c) => ({
-      sequence_id: sequence.id,
-      campaign_people_id: c.id,
-      person_id: c.person_id,
-      current_step: 1,
+      sequenceId: sequence.id,
+      campaignPeopleId: c.id,
+      personId: c.personId,
+      currentStep: 1,
       status: triggerSignalId ? "waiting" : "queued",
-      waiting_since: new Date().toISOString(),
+      waitingSince: new Date(),
     }));
 
-    const { error: enrollErr } = await supabase
-      .from("sequence_enrollments")
-      .insert(enrollments);
-
-    if (enrollErr) {
-      return { error: `Failed to enroll contacts: ${enrollErr.message}` };
-    }
+    await sdb.raw.insert(schema.sequenceEnrollments).values(enrollments);
 
     return {
       sequenceId: sequence.id,
@@ -170,29 +138,39 @@ export const draftSequenceEmails = tool({
     sequenceId: z.string().uuid().describe("Sequence ID to draft emails for."),
   }),
   execute: async ({ sequenceId }) => {
-    const supabase = await createClient();
-
-    // Load sequence with steps and enrollments
-    const { data: sequence } = await supabase
-      .from("sequences")
-      .select("id, name, campaign_id")
-      .eq("id", sequenceId)
-      .single();
+    const [sequence] = await db
+      .select({
+        id: schema.sequences.id,
+        name: schema.sequences.name,
+        campaignId: schema.sequences.campaignId,
+      })
+      .from(schema.sequences)
+      .where(eq(schema.sequences.id, sequenceId))
+      .limit(1);
 
     if (!sequence) {
       return { error: "Sequence not found." };
     }
 
-    const { data: steps } = await supabase
-      .from("sequence_steps")
-      .select("id, step_number, delay_days, condition")
-      .eq("sequence_id", sequenceId)
-      .order("step_number");
+    const steps = await db
+      .select({
+        id: schema.sequenceSteps.id,
+        stepNumber: schema.sequenceSteps.stepNumber,
+        delayDays: schema.sequenceSteps.delayDays,
+        condition: schema.sequenceSteps.condition,
+      })
+      .from(schema.sequenceSteps)
+      .where(eq(schema.sequenceSteps.sequenceId, sequenceId))
+      .orderBy(schema.sequenceSteps.stepNumber);
 
-    const { data: enrollments } = await supabase
-      .from("sequence_enrollments")
-      .select("id, person_id, campaign_people_id")
-      .eq("sequence_id", sequenceId);
+    const enrollments = await db
+      .select({
+        id: schema.sequenceEnrollments.id,
+        personId: schema.sequenceEnrollments.personId,
+        campaignPeopleId: schema.sequenceEnrollments.campaignPeopleId,
+      })
+      .from(schema.sequenceEnrollments)
+      .where(eq(schema.sequenceEnrollments.sequenceId, sequenceId));
 
     if (!steps || steps.length === 0) {
       return { error: "No steps found for this sequence." };
@@ -202,41 +180,42 @@ export const draftSequenceEmails = tool({
       return { error: "No contacts enrolled in this sequence." };
     }
 
-    // Load thin contact context for drafting (no enrichment_data here —
-    // the agent will fetch it per-contact via getContactDetail when composing).
-    const personIds = enrollments.map((e) => e.person_id);
-    const { data: people } = await supabase
-      .from("people")
-      .select("id, name, title, work_email, personal_email, organization_id")
-      .in("id", personIds);
+    // Load thin contact context for drafting
+    const personIds = enrollments.map((e) => e.personId);
+    const people = await db
+      .select({
+        id: schema.people.id,
+        name: schema.people.name,
+        title: schema.people.title,
+        workEmail: schema.people.workEmail,
+        personalEmail: schema.people.personalEmail,
+        organizationId: schema.people.organizationId,
+      })
+      .from(schema.people)
+      .where(inArray(schema.people.id, personIds));
 
-    const orgIds = [
-      ...new Set((people ?? []).map((p) => p.organization_id).filter(Boolean)),
-    ];
-    const { data: orgs } =
-      orgIds.length > 0
-        ? await supabase
-            .from("organizations")
-            .select("id, name, domain")
-            .in("id", orgIds)
-        : { data: [] };
+    const orgIds = [...new Set(people.map((p) => p.organizationId).filter(Boolean))] as string[];
+    const orgs = orgIds.length > 0
+      ? await db
+          .select({ id: schema.organizations.id, name: schema.organizations.name, domain: schema.organizations.domain })
+          .from(schema.organizations)
+          .where(inArray(schema.organizations.id, orgIds))
+      : [];
 
-    const orgMap = new Map((orgs ?? []).map((o) => [o.id, o]));
-    const personMap = new Map((people ?? []).map((p) => [p.id, p]));
+    const orgMap = new Map(orgs.map((o) => [o.id, o]));
+    const personMap = new Map(people.map((p) => [p.id, p]));
 
     const contactsForDrafting = enrollments.map((enrollment) => {
-      const person = personMap.get(enrollment.person_id);
-      const org = person?.organization_id
-        ? orgMap.get(person.organization_id)
-        : null;
+      const person = personMap.get(enrollment.personId);
+      const org = person?.organizationId ? orgMap.get(person.organizationId) : null;
       return {
         enrollmentId: enrollment.id,
-        personId: enrollment.person_id,
-        campaignPeopleId: enrollment.campaign_people_id,
+        personId: enrollment.personId,
+        campaignPeopleId: enrollment.campaignPeopleId,
         name: person?.name ?? "Unknown",
         title: person?.title ?? null,
-        email: person?.work_email ?? person?.personal_email ?? null,
-        organizationId: person?.organization_id ?? null,
+        email: person?.workEmail ?? person?.personalEmail ?? null,
+        organizationId: person?.organizationId ?? null,
         company: org?.name ?? null,
         domain: org?.domain ?? null,
       };
@@ -245,11 +224,11 @@ export const draftSequenceEmails = tool({
     return {
       sequenceId,
       sequenceName: sequence.name,
-      campaignId: sequence.campaign_id,
+      campaignId: sequence.campaignId,
       steps: steps.map((s) => ({
         stepId: s.id,
-        stepNumber: s.step_number,
-        delayDays: s.delay_days,
+        stepNumber: s.stepNumber,
+        delayDays: s.delayDays,
         condition: s.condition,
       })),
       contacts: contactsForDrafting,
@@ -268,9 +247,7 @@ export const draftSequenceEmails = tool({
 
 // ── draftEmailsForSequence ────────────────────────────────────────────────
 // Server-side fan-out: drafts ALL emails in a sequence via parallel Claude
-// sub-calls, then saves drafts to the DB. The chat agent calls this once and
-// receives a summary; it never loads per-contact enrichment into its own
-// context. Replaces the old "getContactDetail → writeEmail loop" pattern.
+// sub-calls, then saves drafts to the DB.
 export const draftEmailsForSequence = tool({
   description:
     "Draft ALL personalized emails for a sequence in parallel, server-side. " +
@@ -290,84 +267,93 @@ export const draftEmailsForSequence = tool({
       .describe("How many sub-agents to run in parallel. Default 6."),
   }),
   execute: async ({ sequenceId, concurrency }) => {
-    const ctx = await getSupabaseAndUser();
-    if (!ctx) {
-      return {
-        error:
-          "No authenticated session available in tool context. Ask the user to sign in.",
-      };
-    }
-    const { supabase, user } = ctx;
+    const sdb = await getScopedDb();
 
-    const { data: sequence } = await supabase
-      .from("sequences")
-      .select("id, name, campaign_id")
-      .eq("id", sequenceId)
-      .single();
+    const [sequence] = await db
+      .select({ id: schema.sequences.id, name: schema.sequences.name, campaignId: schema.sequences.campaignId })
+      .from(schema.sequences)
+      .where(eq(schema.sequences.id, sequenceId))
+      .limit(1);
     if (!sequence) return { error: "Sequence not found." };
 
-    const { data: campaign } = await supabase
-      .from("campaigns")
-      .select("id, name, icp, offering, positioning, profile_id, user_id")
-      .eq("id", sequence.campaign_id)
-      .single();
+    const [campaign] = await db
+      .select({
+        id: schema.campaigns.id,
+        name: schema.campaigns.name,
+        icp: schema.campaigns.icp,
+        offering: schema.campaigns.offering,
+        positioning: schema.campaigns.positioning,
+        profileId: schema.campaigns.profileId,
+      })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, sequence.campaignId))
+      .limit(1);
     if (!campaign) return { error: "Campaign not found." };
 
-    const userId: string = campaign.user_id ?? user.id;
+    const userId = sdb.userId;
 
-    const { data: profile } = campaign.profile_id
-      ? await supabase
-          .from("user_profile")
-          .select("name, role_title, company_name, notes")
-          .eq("id", campaign.profile_id)
-          .single()
-      : { data: null };
+    let profile: { name: string | null; roleTitle: string | null; companyName: string | null; notes: string | null } | null = null;
+    if (campaign.profileId) {
+      const [p] = await db
+        .select({
+          name: schema.userProfile.name,
+          roleTitle: schema.userProfile.roleTitle,
+          companyName: schema.userProfile.companyName,
+          notes: schema.userProfile.notes,
+        })
+        .from(schema.userProfile)
+        .where(eq(schema.userProfile.id, campaign.profileId))
+        .limit(1);
+      profile = p ?? null;
+    }
 
-    const { data: steps } = await supabase
-      .from("sequence_steps")
-      .select("id, step_number, condition")
-      .eq("sequence_id", sequenceId)
-      .order("step_number");
+    const steps = await db
+      .select({ id: schema.sequenceSteps.id, stepNumber: schema.sequenceSteps.stepNumber, condition: schema.sequenceSteps.condition })
+      .from(schema.sequenceSteps)
+      .where(eq(schema.sequenceSteps.sequenceId, sequenceId))
+      .orderBy(schema.sequenceSteps.stepNumber);
     if (!steps || steps.length === 0) {
       return { error: "No steps found for this sequence." };
     }
 
-    const { data: enrollments } = await supabase
-      .from("sequence_enrollments")
-      .select("id, person_id, campaign_people_id")
-      .eq("sequence_id", sequenceId);
+    const enrollments = await db
+      .select({ id: schema.sequenceEnrollments.id, personId: schema.sequenceEnrollments.personId, campaignPeopleId: schema.sequenceEnrollments.campaignPeopleId })
+      .from(schema.sequenceEnrollments)
+      .where(eq(schema.sequenceEnrollments.sequenceId, sequenceId));
     if (!enrollments || enrollments.length === 0) {
       return { error: "No contacts enrolled in this sequence." };
     }
 
-    const personIds = enrollments.map((e) => e.person_id);
-    const { data: people } = await supabase
-      .from("people")
-      .select(
-        "id, name, title, work_email, personal_email, organization_id, enrichment_data",
-      )
-      .in("id", personIds);
-    const personMap = new Map((people ?? []).map((p) => [p.id, p]));
+    const personIds = enrollments.map((e) => e.personId);
+    const people = await db
+      .select({
+        id: schema.people.id,
+        name: schema.people.name,
+        title: schema.people.title,
+        workEmail: schema.people.workEmail,
+        personalEmail: schema.people.personalEmail,
+        organizationId: schema.people.organizationId,
+        enrichmentData: schema.people.enrichmentData,
+      })
+      .from(schema.people)
+      .where(inArray(schema.people.id, personIds));
+    const personMap = new Map(people.map((p) => [p.id, p]));
 
-    const orgIds = [
-      ...new Set((people ?? []).map((p) => p.organization_id).filter(Boolean)),
-    ];
-    const { data: orgs } =
-      orgIds.length > 0
-        ? await supabase
-            .from("organizations")
-            .select("id, name, domain, industry, enrichment_data")
-            .in("id", orgIds)
-        : { data: [] };
-    const orgMap = new Map((orgs ?? []).map((o) => [o.id, o]));
+    const orgIds = [...new Set(people.map((p) => p.organizationId).filter(Boolean))] as string[];
+    const orgs = orgIds.length > 0
+      ? await db
+          .select({ id: schema.organizations.id, name: schema.organizations.name, domain: schema.organizations.domain, industry: schema.organizations.industry, enrichmentData: schema.organizations.enrichmentData })
+          .from(schema.organizations)
+          .where(inArray(schema.organizations.id, orgIds))
+      : [];
+    const orgMap = new Map(orgs.map((o) => [o.id, o]));
 
-    const activeSkills = await loadActiveEmailSkills(supabase, {
+    const activeSkills = await loadActiveEmailSkills({
       userId,
-      profileId: campaign.profile_id as string | null,
-      campaignId: campaign.id as string,
+      profileId: campaign.profileId ?? null,
+      campaignId: campaign.id,
     });
 
-    // Build the (contact × step) task list. Skip contacts with no email.
     type Task = {
       enrollmentId: string;
       personId: string;
@@ -380,16 +366,16 @@ export const draftEmailsForSequence = tool({
     const totalSteps = steps.length;
     const tasks: Task[] = [];
     for (const enrollment of enrollments) {
-      const person = personMap.get(enrollment.person_id);
-      const hasEmail = person?.work_email || person?.personal_email;
+      const person = personMap.get(enrollment.personId);
+      const hasEmail = person?.workEmail || person?.personalEmail;
       for (const step of steps) {
         tasks.push({
           enrollmentId: enrollment.id,
-          personId: enrollment.person_id,
+          personId: enrollment.personId,
           stepId: step.id,
-          stepNumber: step.step_number,
-          isFinal: step.step_number === totalSteps,
-          condition: step.condition,
+          stepNumber: step.stepNumber,
+          isFinal: step.stepNumber === totalSteps,
+          condition: step.condition ?? "no_reply",
           skipReason: hasEmail ? undefined : "no email on contact",
         });
       }
@@ -407,26 +393,22 @@ export const draftEmailsForSequence = tool({
       }
 
       const person = personMap.get(task.personId)!;
-      const org = person.organization_id
-        ? orgMap.get(person.organization_id)
-        : null;
+      const org = person.organizationId ? orgMap.get(person.organizationId) : null;
 
       const composed = await composeEmail({
         skills: activeSkills,
         contact: {
           name: person.name ?? null,
           title: person.title ?? null,
-          email: person.work_email ?? person.personal_email ?? "",
-          enrichmentData:
-            (person.enrichment_data as Record<string, unknown> | null) ?? null,
+          email: person.workEmail ?? person.personalEmail ?? "",
+          enrichmentData: (person.enrichmentData as Record<string, unknown> | null) ?? null,
         },
         company: org
           ? {
               name: org.name ?? null,
               domain: org.domain ?? null,
               industry: org.industry ?? null,
-              enrichmentData:
-                (org.enrichment_data as Record<string, unknown> | null) ?? null,
+              enrichmentData: (org.enrichmentData as Record<string, unknown> | null) ?? null,
             }
           : null,
         step: {
@@ -438,15 +420,13 @@ export const draftEmailsForSequence = tool({
         campaign: {
           name: campaign.name,
           icp: (campaign.icp as Record<string, unknown> | null) ?? null,
-          offering:
-            (campaign.offering as Record<string, unknown> | null) ?? null,
-          positioning:
-            (campaign.positioning as Record<string, unknown> | null) ?? null,
+          offering: (campaign.offering as Record<string, unknown> | null) ?? null,
+          positioning: (campaign.positioning as Record<string, unknown> | null) ?? null,
         },
         senderProfile: {
           name: profile?.name ?? null,
-          title: profile?.role_title ?? null,
-          company: profile?.company_name ?? null,
+          title: profile?.roleTitle ?? null,
+          company: profile?.companyName ?? null,
           signature: profile?.notes ?? null,
         },
       });
@@ -460,8 +440,9 @@ export const draftEmailsForSequence = tool({
         };
       }
 
-      const saved = await saveDraft(supabase, {
+      const saved = await saveDraft({
         userId,
+        orgId: sdb.orgId,
         campaignId: campaign.id,
         personId: task.personId,
         subject: composed.email.subject,
@@ -515,45 +496,50 @@ export const getSequenceStatus = tool({
     sequenceId: z.string().uuid().describe("Sequence ID."),
   }),
   execute: async ({ sequenceId }) => {
-    const supabase = await createClient();
-
-    const { data: sequence } = await supabase
-      .from("sequences")
-      .select("id, name, status, campaign_id, trigger_signal_id, created_at")
-      .eq("id", sequenceId)
-      .single();
+    const [sequence] = await db
+      .select({
+        id: schema.sequences.id,
+        name: schema.sequences.name,
+        status: schema.sequences.status,
+        campaignId: schema.sequences.campaignId,
+        triggerSignalId: schema.sequences.triggerSignalId,
+        createdAt: schema.sequences.createdAt,
+      })
+      .from(schema.sequences)
+      .where(eq(schema.sequences.id, sequenceId))
+      .limit(1);
 
     if (!sequence) {
       return { error: "Sequence not found." };
     }
 
-    const { data: enrollments } = await supabase
-      .from("sequence_enrollments")
-      .select("status")
-      .eq("sequence_id", sequenceId);
+    const enrollments = await db
+      .select({ status: schema.sequenceEnrollments.status })
+      .from(schema.sequenceEnrollments)
+      .where(eq(schema.sequenceEnrollments.sequenceId, sequenceId));
 
     const counts: Record<string, number> = {};
-    for (const e of enrollments ?? []) {
+    for (const e of enrollments) {
       counts[e.status] = (counts[e.status] ?? 0) + 1;
     }
 
-    const { data: drafts } = await supabase
-      .from("email_drafts")
-      .select("review_status")
-      .eq("sequence_id", sequenceId);
+    const drafts = await db
+      .select({ reviewStatus: schema.emailDrafts.reviewStatus })
+      .from(schema.emailDrafts)
+      .where(eq(schema.emailDrafts.sequenceId, sequenceId));
 
     const draftCounts: Record<string, number> = {};
-    for (const d of drafts ?? []) {
-      const status = d.review_status ?? "pending";
+    for (const d of drafts) {
+      const status = d.reviewStatus ?? "pending";
       draftCounts[status] = (draftCounts[status] ?? 0) + 1;
     }
 
     return {
       sequence,
       enrollments: counts,
-      totalEnrolled: enrollments?.length ?? 0,
+      totalEnrolled: enrollments.length,
       drafts: draftCounts,
-      totalDrafts: drafts?.length ?? 0,
+      totalDrafts: drafts.length,
     };
   },
 });

@@ -1,5 +1,13 @@
 import { resolveMx } from "node:dns/promises";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { eq, and, isNotNull } from "drizzle-orm";
+import type { Db } from "@/db";
+import { schema } from "@/db";
+
+/**
+ * Minimal DB interface accepted by this module.
+ * Compatible with both the real Drizzle `db` and test fakes.
+ */
+export type EmailPatternDb = Pick<Db, "select" | "update">;
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -266,6 +274,163 @@ export async function mxCheck(
   }
 }
 
+// ─── DB-side types ────────────────────────────────────────────────────────────
+
+/**
+ * Minimal person row shape expected by the email-pattern DB functions.
+ */
+export interface PersonRow {
+  id: string;
+  name: string;
+  organization_id: string | null;
+  work_email: string | null;
+  work_email_source: EmailSource | null;
+  work_email_confidence: number | null;
+  work_email_verified_at: string | null;
+}
+
+/**
+ * Minimal org row shape expected by the email-pattern DB functions.
+ */
+export interface OrgRow {
+  id: string;
+  email_pattern: string | null;
+  email_pattern_confidence: number | null;
+  email_pattern_evidence_count: number;
+  email_pattern_bounce_count: number;
+  email_pattern_updated_at: string | null;
+}
+
+/**
+ * Minimal DB adapter interface. Compatible with the real Drizzle db when
+ * wrapped by `makeEmailPatternDb()`, and also with test fakes.
+ */
+export interface EmailPatternDbAdapter {
+  getPeopleForOrg(orgId: string): Promise<PersonRow[]>;
+  getPerson(personId: string): Promise<PersonRow | null>;
+  updatePerson(personId: string, updates: Partial<PersonRow>): Promise<void>;
+  getOrg(orgId: string): Promise<OrgRow | null>;
+  updateOrg(orgId: string, updates: Partial<OrgRow>): Promise<void>;
+}
+
+/**
+ * Wrap the real Drizzle db into the EmailPatternDbAdapter interface.
+ * Import this in production call sites.
+ */
+export function makeEmailPatternDb(db: EmailPatternDb): EmailPatternDbAdapter {
+  return {
+    async getPeopleForOrg(orgId) {
+      const rows = await db
+        .select({
+          id: schema.people.id,
+          name: schema.people.name,
+          organization_id: schema.people.organizationId,
+          work_email: schema.people.workEmail,
+          work_email_source: schema.people.workEmailSource,
+          work_email_confidence: schema.people.workEmailConfidence,
+          work_email_verified_at: schema.people.workEmailVerifiedAt,
+        })
+        .from(schema.people)
+        .where(
+          and(
+            eq(schema.people.organizationId, orgId),
+            isNotNull(schema.people.workEmail),
+            isNotNull(schema.people.workEmailVerifiedAt),
+          ),
+        );
+      return rows.map((r) => ({
+        ...r,
+        work_email_verified_at: r.work_email_verified_at
+          ? r.work_email_verified_at.toISOString()
+          : null,
+        email_pattern_updated_at: null,
+      })) as PersonRow[];
+    },
+
+    async getPerson(personId) {
+      const [row] = await db
+        .select({
+          id: schema.people.id,
+          name: schema.people.name,
+          organization_id: schema.people.organizationId,
+          work_email: schema.people.workEmail,
+          work_email_source: schema.people.workEmailSource,
+          work_email_confidence: schema.people.workEmailConfidence,
+          work_email_verified_at: schema.people.workEmailVerifiedAt,
+        })
+        .from(schema.people)
+        .where(eq(schema.people.id, personId))
+        .limit(1);
+      if (!row) return null;
+      return {
+        ...row,
+        work_email_verified_at: row.work_email_verified_at
+          ? row.work_email_verified_at.toISOString()
+          : null,
+      } as PersonRow;
+    },
+
+    async updatePerson(personId, updates) {
+      const set: Record<string, unknown> = {};
+      if ("work_email" in updates) set.workEmail = updates.work_email;
+      if ("work_email_source" in updates) set.workEmailSource = updates.work_email_source;
+      if ("work_email_confidence" in updates) set.workEmailConfidence = updates.work_email_confidence;
+      if ("work_email_verified_at" in updates) {
+        set.workEmailVerifiedAt = updates.work_email_verified_at
+          ? new Date(updates.work_email_verified_at!)
+          : null;
+      }
+      if (Object.keys(set).length > 0) {
+        await db
+          .update(schema.people)
+          .set(set)
+          .where(eq(schema.people.id, personId));
+      }
+    },
+
+    async getOrg(orgId) {
+      const [row] = await db
+        .select({
+          id: schema.organizations.id,
+          email_pattern: schema.organizations.emailPattern,
+          email_pattern_confidence: schema.organizations.emailPatternConfidence,
+          email_pattern_evidence_count: schema.organizations.emailPatternEvidenceCount,
+          email_pattern_bounce_count: schema.organizations.emailPatternBounceCount,
+          email_pattern_updated_at: schema.organizations.emailPatternUpdatedAt,
+        })
+        .from(schema.organizations)
+        .where(eq(schema.organizations.id, orgId))
+        .limit(1);
+      if (!row) return null;
+      return {
+        ...row,
+        email_pattern_updated_at: row.email_pattern_updated_at
+          ? row.email_pattern_updated_at.toISOString()
+          : null,
+      } as OrgRow;
+    },
+
+    async updateOrg(orgId, updates) {
+      const set: Record<string, unknown> = {};
+      if ("email_pattern" in updates) set.emailPattern = updates.email_pattern;
+      if ("email_pattern_confidence" in updates) set.emailPatternConfidence = updates.email_pattern_confidence;
+      if ("email_pattern_evidence_count" in updates) set.emailPatternEvidenceCount = updates.email_pattern_evidence_count;
+      if ("email_pattern_bounce_count" in updates) set.emailPatternBounceCount = updates.email_pattern_bounce_count;
+      if ("email_pattern_updated_at" in updates) {
+        set.emailPatternUpdatedAt = updates.email_pattern_updated_at
+          ? new Date(updates.email_pattern_updated_at!)
+          : null;
+      }
+      if (Object.keys(set).length > 0) {
+        await db
+          .update(schema.organizations)
+          .set(set)
+          .where(eq(schema.organizations.id, orgId));
+      }
+    },
+  };
+}
+
 // ─── DB-side: pattern recompute + email recording ─────────────────────────
 
 /**
@@ -274,22 +439,17 @@ export async function mxCheck(
  * recorded.
  */
 export async function recomputeOrgPattern(
-  supabase: SupabaseClient,
+  db: EmailPatternDbAdapter,
   orgId: string,
 ): Promise<void> {
-  const { data: people } = await supabase
-    .from("people")
-    .select("name, work_email, work_email_source, work_email_verified_at")
-    .eq("organization_id", orgId)
-    .not("work_email", "is", null)
-    .not("work_email_verified_at", "is", null);
+  const people = await db.getPeopleForOrg(orgId);
 
   const candidates: VerifiedEmail[] = [];
-  for (const p of people ?? []) {
+  for (const p of people) {
     if (!p.work_email || !p.work_email_source) continue;
-    if (p.work_email_source === "pattern_derived") continue; // don't feed guesses back in
+    if (p.work_email_source === "pattern_derived") continue;
     const { first, last } = splitName(p.name);
-    if (!first || !last) continue; // need both for pattern matching
+    if (!first || !last) continue;
     candidates.push({
       email: p.work_email,
       firstName: first,
@@ -300,15 +460,12 @@ export async function recomputeOrgPattern(
 
   const { pattern, confidence, evidenceCount } = inferPattern(candidates);
 
-  await supabase
-    .from("organizations")
-    .update({
-      email_pattern: pattern,
-      email_pattern_confidence: confidence,
-      email_pattern_evidence_count: evidenceCount,
-      email_pattern_updated_at: new Date().toISOString(),
-    })
-    .eq("id", orgId);
+  await db.updateOrg(orgId, {
+    email_pattern: pattern,
+    email_pattern_confidence: confidence,
+    email_pattern_evidence_count: evidenceCount,
+    email_pattern_updated_at: new Date().toISOString(),
+  });
 }
 
 /**
@@ -323,7 +480,7 @@ export async function recomputeOrgPattern(
  * shouldn't replace it.
  */
 export async function recordVerifiedEmail(
-  supabase: SupabaseClient,
+  db: EmailPatternDbAdapter,
   args: {
     personId: string;
     email: string;
@@ -339,14 +496,7 @@ export async function recordVerifiedEmail(
     return;
   }
 
-  const { data: person } = await supabase
-    .from("people")
-    .select(
-      "organization_id, work_email, work_email_source, work_email_confidence",
-    )
-    .eq("id", personId)
-    .maybeSingle();
-
+  const person = await db.getPerson(personId);
   if (!person) return;
 
   const newEmail = email.toLowerCase();
@@ -368,18 +518,15 @@ export async function recordVerifiedEmail(
     return;
   }
 
-  await supabase
-    .from("people")
-    .update({
-      work_email: newEmail,
-      work_email_source: finalSource,
-      work_email_confidence: SOURCE_WEIGHT[finalSource],
-      work_email_verified_at: new Date().toISOString(),
-    })
-    .eq("id", personId);
+  await db.updatePerson(personId, {
+    work_email: newEmail,
+    work_email_source: finalSource,
+    work_email_confidence: SOURCE_WEIGHT[finalSource],
+    work_email_verified_at: new Date().toISOString(),
+  });
 
   if (person.organization_id) {
-    await recomputeOrgPattern(supabase, person.organization_id);
+    await recomputeOrgPattern(db, person.organization_id);
   }
 }
 
@@ -389,17 +536,12 @@ export async function recordVerifiedEmail(
  * it entirely if bounces dominate).
  */
 export async function recordBounce(
-  supabase: SupabaseClient,
+  db: EmailPatternDbAdapter,
   args: { personId: string; email: string },
 ): Promise<void> {
   const { personId, email } = args;
 
-  const { data: person } = await supabase
-    .from("people")
-    .select("id, work_email, work_email_source, organization_id")
-    .eq("id", personId)
-    .maybeSingle();
-
+  const person = await db.getPerson(personId);
   if (!person) return;
 
   // Only act if the bounced email is the one we have on file.
@@ -411,13 +553,10 @@ export async function recordBounce(
   }
 
   // Clear verification + lower confidence on the person.
-  await supabase
-    .from("people")
-    .update({
-      work_email_verified_at: null,
-      work_email_confidence: 0,
-    })
-    .eq("id", personId);
+  await db.updatePerson(personId, {
+    work_email_verified_at: null,
+    work_email_confidence: 0,
+  });
 
   // If the email was derived from the org's pattern, that's evidence the
   // pattern is wrong. Bump bounce count and reduce / clear confidence.
@@ -432,26 +571,12 @@ export async function recordBounce(
   // recompute hasn't run yet), refresh it first so the bounce ratio is fair.
   // Without this, the very first bounce would compute 1/1 > 0.5 and clear a
   // perfectly-good pattern.
-  let { data: org } = await supabase
-    .from("organizations")
-    .select(
-      "email_pattern, email_pattern_confidence, email_pattern_evidence_count, email_pattern_bounce_count",
-    )
-    .eq("id", person.organization_id)
-    .maybeSingle();
-
+  let org = await db.getOrg(person.organization_id);
   if (!org) return;
 
   if (org.email_pattern && (org.email_pattern_evidence_count ?? 0) === 0) {
-    await recomputeOrgPattern(supabase, person.organization_id);
-    const refreshed = await supabase
-      .from("organizations")
-      .select(
-        "email_pattern, email_pattern_confidence, email_pattern_evidence_count, email_pattern_bounce_count",
-      )
-      .eq("id", person.organization_id)
-      .maybeSingle();
-    if (refreshed.data) org = refreshed.data;
+    await recomputeOrgPattern(db, person.organization_id);
+    org = (await db.getOrg(person.organization_id)) ?? org;
   }
 
   const newBounces = (org.email_pattern_bounce_count ?? 0) + 1;
@@ -462,8 +587,7 @@ export async function recordBounce(
 
   if (evidence === 0) {
     // No supporting evidence even after recompute. Just bump the bounce count;
-    // don't touch the pattern (recompute already wrote NULL if there's no
-    // evidence, or kept the original if recompute hasn't been re-triggered).
+    // don't touch the pattern.
   } else {
     const ratio = newBounces / evidence;
     if (ratio > 0.5) {
@@ -474,15 +598,12 @@ export async function recordBounce(
     }
   }
 
-  await supabase
-    .from("organizations")
-    .update({
-      email_pattern: pattern,
-      email_pattern_confidence: confidence,
-      email_pattern_bounce_count: newBounces,
-      email_pattern_updated_at: new Date().toISOString(),
-    })
-    .eq("id", person.organization_id);
+  await db.updateOrg(person.organization_id, {
+    email_pattern: pattern,
+    email_pattern_confidence: confidence,
+    email_pattern_bounce_count: newBounces,
+    email_pattern_updated_at: new Date().toISOString(),
+  });
 }
 
 /**
@@ -491,20 +612,14 @@ export async function recordBounce(
  * Exa search.
  */
 export async function getOrgPattern(
-  supabase: SupabaseClient,
+  db: EmailPatternDbAdapter,
   orgId: string,
 ): Promise<{
   pattern: string | null;
   confidence: number;
   evidenceCount: number;
 } | null> {
-  const { data } = await supabase
-    .from("organizations")
-    .select(
-      "email_pattern, email_pattern_confidence, email_pattern_evidence_count",
-    )
-    .eq("id", orgId)
-    .maybeSingle();
+  const data = await db.getOrg(orgId);
   if (!data) return null;
   return {
     pattern: data.email_pattern ?? null,

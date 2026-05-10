@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { getAdminClient } from "@/lib/supabase/admin";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
 
 // ── Pricing constants (USD) ──────────────────────────────────────────────
 // Last verified 2026-03-29. Sources:
@@ -169,21 +170,19 @@ export function trackUsage(entry: UsageEntry): void {
 
   void (async () => {
     try {
-      const { error } = await getAdminClient()
-        .from("api_usage")
-        .insert({
-          service: entry.service,
-          operation: entry.operation,
-          tokens_input: entry.tokens_input ?? null,
-          tokens_output: entry.tokens_output ?? null,
-          estimated_cost_usd: entry.estimated_cost_usd,
-          metadata: entry.metadata ?? {},
-          campaign_id: entry.campaign_id ?? null,
-          user_id: entry.user_id ?? null,
-          action_id: ctx?.action_id ?? null,
-          action_label: ctx?.action_label ?? null,
-        });
-      if (error) console.error("[cost-tracker] insert failed:", error.message);
+      await adminDb.insert(schema.apiUsage).values({
+        service: entry.service,
+        operation: entry.operation,
+        tokensInput: entry.tokens_input ?? null,
+        tokensOutput: entry.tokens_output ?? null,
+        estimatedCostUsd: String(entry.estimated_cost_usd),
+        metadata: entry.metadata ?? {},
+        campaignId: entry.campaign_id ?? null,
+        clerkUserId: entry.user_id ?? "system",
+        clerkOrgId: null,
+        actionId: ctx?.action_id ? ctx.action_id as unknown as undefined : undefined,
+        actionLabel: ctx?.action_label ?? null,
+      });
     } catch (err) {
       console.error("[cost-tracker] unexpected error:", err);
     }

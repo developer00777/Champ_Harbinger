@@ -1,4 +1,6 @@
-import { getAdminClient } from "@/lib/supabase/admin";
+import { eq, and } from "drizzle-orm";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
 import { sendMessage } from "@/lib/services/agentmail-service";
 import { trackUsage } from "@/lib/services/cost-tracker";
 
@@ -26,119 +28,134 @@ export type SendResult =
  * that need to respect delays must check before calling.
  */
 export async function sendApprovedDraft(
-  supabase: ReturnType<typeof getAdminClient>,
   enrollment: EnrollmentForSend,
 ): Promise<SendResult> {
-  const now = new Date().toISOString();
+  const now = new Date();
 
-  const { data: step } = await supabase
-    .from("sequence_steps")
-    .select("id")
-    .eq("sequence_id", enrollment.sequence_id)
-    .eq("step_number", enrollment.current_step)
-    .single();
+  const [step] = await adminDb
+    .select({ id: schema.sequenceSteps.id })
+    .from(schema.sequenceSteps)
+    .where(
+      and(
+        eq(schema.sequenceSteps.sequenceId, enrollment.sequence_id),
+        eq(schema.sequenceSteps.stepNumber, enrollment.current_step),
+      ),
+    )
+    .limit(1);
 
   if (!step) return { ok: false, reason: "Step not found" };
 
-  const { data: draft } = await supabase
-    .from("email_drafts")
-    .select("*")
-    .eq("enrollment_id", enrollment.id)
-    .eq("sequence_step_id", step.id)
-    .eq("review_status", "approved")
-    .eq("status", "draft")
-    .single();
+  const [draft] = await adminDb
+    .select()
+    .from(schema.emailDrafts)
+    .where(
+      and(
+        eq(schema.emailDrafts.enrollmentId, enrollment.id),
+        eq(schema.emailDrafts.sequenceStepId, step.id),
+        eq(schema.emailDrafts.reviewStatus, "approved"),
+        eq(schema.emailDrafts.status, "draft"),
+      ),
+    )
+    .limit(1);
 
   if (!draft) {
     return { ok: false, reason: "No approved draft ready for this step" };
   }
 
-  const { data: settings } = await supabase
-    .from("user_settings")
-    .select("agentmail_inbox_id")
-    .eq("user_id", draft.user_id)
-    .single();
+  const [settings] = await adminDb
+    .select({ agentmailInboxId: schema.userSettings.agentmailInboxId })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.clerkUserId, draft.clerkUserId))
+    .limit(1);
 
-  if (!settings?.agentmail_inbox_id) {
+  if (!settings?.agentmailInboxId) {
     return { ok: false, reason: "No AgentMail inbox configured" };
   }
 
   try {
-    const result = await sendMessage(settings.agentmail_inbox_id, {
-      to: draft.to_email,
+    const result = await sendMessage(settings.agentmailInboxId, {
+      to: draft.toEmail,
       subject: draft.subject,
-      html: draft.body_html,
-      text: draft.body_text ?? undefined,
+      html: draft.bodyHtml,
+      text: draft.bodyText ?? undefined,
     });
 
     const messageId = result.messageId ?? crypto.randomUUID();
     const threadId = result.threadId ?? null;
 
-    await supabase.from("sent_emails").insert({
-      agentmail_message_id: messageId,
-      agentmail_thread_id: threadId,
-      draft_id: draft.id,
-      campaign_people_id: enrollment.campaign_people_id,
-      campaign_id: draft.campaign_id,
-      person_id: enrollment.person_id,
-      user_id: draft.user_id,
-      to_email: draft.to_email,
-      from_email: settings.agentmail_inbox_id,
+    await adminDb.insert(schema.sentEmails).values({
+      agentmailMessageId: messageId,
+      agentmailThreadId: threadId,
+      draftId: draft.id,
+      campaignPeopleId: enrollment.campaign_people_id,
+      campaignId: draft.campaignId,
+      personId: enrollment.person_id,
+      clerkUserId: draft.clerkUserId,
+      clerkOrgId: draft.clerkOrgId,
+      toEmail: draft.toEmail,
+      fromEmail: settings.agentmailInboxId,
       subject: draft.subject,
       status: "sent",
-      sent_at: now,
+      sentAt: now,
     });
 
-    await supabase
-      .from("email_drafts")
-      .update({ status: "sent", sent_at: now, updated_at: now })
-      .eq("id", draft.id);
+    await adminDb
+      .update(schema.emailDrafts)
+      .set({ status: "sent", sentAt: now, updatedAt: now })
+      .where(eq(schema.emailDrafts.id, draft.id));
 
-    await supabase
-      .from("campaign_people")
-      .update({ outreach_status: "sent" })
-      .eq("id", enrollment.campaign_people_id);
+    await adminDb
+      .update(schema.campaignPeople)
+      .set({ outreachStatus: "sent" })
+      .where(eq(schema.campaignPeople.id, enrollment.campaign_people_id));
 
     const nextStep = enrollment.current_step + 1;
-    const { data: nextStepRow } = await supabase
-      .from("sequence_steps")
-      .select("delay_days, delay_hours")
-      .eq("sequence_id", enrollment.sequence_id)
-      .eq("step_number", nextStep)
-      .single();
+    const [nextStepRow] = await adminDb
+      .select({
+        delayDays: schema.sequenceSteps.delayDays,
+        delayHours: schema.sequenceSteps.delayHours,
+      })
+      .from(schema.sequenceSteps)
+      .where(
+        and(
+          eq(schema.sequenceSteps.sequenceId, enrollment.sequence_id),
+          eq(schema.sequenceSteps.stepNumber, nextStep),
+        ),
+      )
+      .limit(1);
 
     if (nextStepRow) {
       const delayMs =
-        ((nextStepRow.delay_days ?? 0) * 86400 +
-          (nextStepRow.delay_hours ?? 0) * 3600) *
+        ((nextStepRow.delayDays ?? 0) * 86400 +
+          (nextStepRow.delayHours ?? 0) * 3600) *
         1000;
-      const nextSendAt = new Date(Date.now() + delayMs).toISOString();
+      const nextSendAt = new Date(Date.now() + delayMs);
 
-      await supabase
-        .from("sequence_enrollments")
-        .update({
-          current_step: nextStep,
+      await adminDb
+        .update(schema.sequenceEnrollments)
+        .set({
+          currentStep: nextStep,
           status: "active",
-          next_send_at: nextSendAt,
-          updated_at: now,
+          nextSendAt,
+          updatedAt: now,
         })
-        .eq("id", enrollment.id);
+        .where(eq(schema.sequenceEnrollments.id, enrollment.id));
     } else {
-      await supabase
-        .from("sequence_enrollments")
-        .update({ status: "completed", updated_at: now })
-        .eq("id", enrollment.id);
+      await adminDb
+        .update(schema.sequenceEnrollments)
+        .set({ status: "completed", updatedAt: now })
+        .where(eq(schema.sequenceEnrollments.id, enrollment.id));
     }
 
     trackUsage({
       service: "agentmail",
       operation: "send-email",
       estimated_cost_usd: 0.0004,
-      campaign_id: draft.campaign_id,
-      user_id: draft.user_id,
+      campaign_id: draft.campaignId,
+      user_id: draft.clerkUserId,
       metadata: {
         draftId: draft.id,
-        to: draft.to_email,
+        to: draft.toEmail,
         sequenceId: enrollment.sequence_id,
       },
     });

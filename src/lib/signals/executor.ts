@@ -1,5 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
-import { getAdminClient } from "@/lib/supabase/admin";
+import { eq, desc } from "drizzle-orm";
+import { adminDb } from "@/lib/db/admin";
+import { getScopedDb, schema } from "@/lib/db/scoped";
 import { ExaService } from "@/lib/services/exa-service";
 import { structuralDiff } from "./diff";
 import { runRecipe } from "./runner";
@@ -369,16 +370,16 @@ async function diffAgainstPrevious(
 ): Promise<SignalOutput["diff"] | null> {
   if (!organizationId) return null;
 
-  const supabase = useAdmin ? getAdminClient() : await createClient();
+  const db = useAdmin ? adminDb : (await getScopedDb()).raw;
 
-  const { data: prev } = await supabase
-    .from("signal_results")
-    .select("output")
-    .eq("signal_id", signalId)
-    .eq("organization_id", organizationId)
-    .order("ran_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const [prev] = await db
+    .select({ output: schema.signalResults.output })
+    .from(schema.signalResults)
+    .where(
+      eq(schema.signalResults.signalId, signalId),
+    )
+    .orderBy(desc(schema.signalResults.ranAt))
+    .limit(1);
 
   if (!prev) return null;
 
