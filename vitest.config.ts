@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
+      "@/db": resolve(__dirname, "db/index.ts"),
       "@": resolve(__dirname, "src"),
     },
   },

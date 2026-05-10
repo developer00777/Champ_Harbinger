@@ -5,11 +5,14 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
  * Everything else is protected by default.
  */
 const isPublicRoute = createRouteMatcher([
-  "/",            // marketing landing page
-  "/login(.*)",   // Clerk sign-in
-  "/signup(.*)",  // Clerk sign-up
-  "/ingest(.*)",  // PostHog proxy rewrites
+  "/", // marketing landing page
+  "/login(.*)", // Clerk sign-in
+  "/signup(.*)", // Clerk sign-up
+  "/ingest(.*)", // PostHog proxy rewrites
   "/api/email/track(.*)", // email open/click tracking (public webhook)
+  "/api/email/cleanup(.*)", // email cleanup webhooks
+  "/api/tracking/(.*)", // tracking pixel/webhooks
+  "/api/outreach/process(.*)", // outreach sequence processing (called by job scheduler)
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
