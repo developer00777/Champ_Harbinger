@@ -1,4 +1,4 @@
-import { getModel } from "@/lib/ai/provider";
+import { getModelSync as getModel } from "@/lib/ai/provider";
 import { generateObject } from "ai";
 import { z } from "zod";
 

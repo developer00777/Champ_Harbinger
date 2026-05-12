@@ -1,9 +1,9 @@
-import { getModel } from "@/lib/ai/provider";
+import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { generateObject, tool } from "ai";
 import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
-import { adminDb as db, } from "@/lib/db/admin";
+import { adminDb as db } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { ExaService, type SearchCategory } from "@/lib/services/exa-service";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
@@ -189,7 +189,10 @@ export const searchCompanies = tool({
         .from(schema.campaignOrganizations)
         .innerJoin(
           schema.organizations,
-          eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+          eq(
+            schema.campaignOrganizations.organizationId,
+            schema.organizations.id,
+          ),
         )
         .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
       for (const l of existingLinks) {
@@ -292,7 +295,10 @@ export const getCompanies = tool({
       .from(schema.campaignOrganizations)
       .innerJoin(
         schema.organizations,
-        eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+        eq(
+          schema.campaignOrganizations.organizationId,
+          schema.organizations.id,
+        ),
       )
       .where(
         input.status
@@ -377,13 +383,22 @@ export const getCampaignSummary = tool({
 
     const [companies, contacts] = await Promise.all([
       db
-        .select({ id: schema.campaignOrganizations.id, status: schema.campaignOrganizations.status })
+        .select({
+          id: schema.campaignOrganizations.id,
+          status: schema.campaignOrganizations.status,
+        })
         .from(schema.campaignOrganizations)
         .where(eq(schema.campaignOrganizations.campaignId, input.campaignId)),
       db
-        .select({ id: schema.campaignPeople.id, enrichmentStatus: schema.people.enrichmentStatus })
+        .select({
+          id: schema.campaignPeople.id,
+          enrichmentStatus: schema.people.enrichmentStatus,
+        })
         .from(schema.campaignPeople)
-        .innerJoin(schema.people, eq(schema.campaignPeople.personId, schema.people.id))
+        .innerJoin(
+          schema.people,
+          eq(schema.campaignPeople.personId, schema.people.id),
+        )
         .where(eq(schema.campaignPeople.campaignId, input.campaignId)),
     ]);
 
@@ -559,7 +574,10 @@ export const discoverCompanies = tool({
         .from(schema.campaignOrganizations)
         .innerJoin(
           schema.organizations,
-          eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+          eq(
+            schema.campaignOrganizations.organizationId,
+            schema.organizations.id,
+          ),
         )
         .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
       for (const l of existingLinks) {
@@ -825,7 +843,10 @@ export const searchYCCompanies = tool({
     if (input.batch) {
       const batchUpper = input.batch.toUpperCase();
       cachedOrgs = cachedOrgs.filter((o) => {
-        const yc = (o.enrichmentData as Record<string, unknown>)?.yc as Record<string, unknown> | null;
+        const yc = (o.enrichmentData as Record<string, unknown>)?.yc as Record<
+          string,
+          unknown
+        > | null;
         return yc?.batch === batchUpper;
       });
     }
@@ -840,11 +861,15 @@ export const searchYCCompanies = tool({
       let newlyLinked = 0;
       if (input.campaignId) {
         const existingLinks = await db
-          .select({ organizationId: schema.campaignOrganizations.organizationId })
+          .select({
+            organizationId: schema.campaignOrganizations.organizationId,
+          })
           .from(schema.campaignOrganizations)
           .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
 
-        const alreadyLinked = new Set(existingLinks.map((l) => l.organizationId));
+        const alreadyLinked = new Set(
+          existingLinks.map((l) => l.organizationId),
+        );
 
         for (const org of cachedOrgs) {
           if (!alreadyLinked.has(org.id)) {
@@ -893,7 +918,10 @@ export const searchYCCompanies = tool({
         .from(schema.campaignOrganizations)
         .innerJoin(
           schema.organizations,
-          eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+          eq(
+            schema.campaignOrganizations.organizationId,
+            schema.organizations.id,
+          ),
         )
         .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
       for (const l of existingLinks) {

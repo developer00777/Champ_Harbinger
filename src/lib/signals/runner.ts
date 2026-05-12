@@ -1,4 +1,4 @@
-import { getModel } from "@/lib/ai/provider";
+import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { generateObject, jsonSchema } from "ai";
 import { eq, desc, gte, and } from "drizzle-orm";
@@ -153,7 +153,10 @@ async function executeStep(
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - (step.maxAgeDays ?? 90));
       const [data] = await env.db
-        .select({ output: schema.signalResults.output, ranAt: schema.signalResults.ranAt })
+        .select({
+          output: schema.signalResults.output,
+          ranAt: schema.signalResults.ranAt,
+        })
         .from(schema.signalResults)
         .where(
           and(

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { generateObject } from "ai";
-import { getModel } from "@/lib/ai/provider";
+import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { z } from "zod";
 import {

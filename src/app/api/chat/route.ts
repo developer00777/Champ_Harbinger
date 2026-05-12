@@ -18,7 +18,7 @@ import {
 import { getPostHogClient } from "@/lib/posthog-server";
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { allTools } from "@/lib/tools";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 
 export const maxDuration = 120;
 
@@ -60,11 +60,13 @@ function trimMessages(messages: ModelMessage[]): ModelMessage[] {
 }
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { user } = ctx;
+  const user = { id: userId };
 
   let body: Record<string, unknown>;
   try {
@@ -115,10 +117,12 @@ export async function POST(request: Request) {
     pageContext,
   });
 
+  const model = await getModel(undefined, userId);
+
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       const result = streamText({
-        model: getModel(),
+        model,
         system: systemPrompt,
         messages: modelMessages,
         tools: allTools,
