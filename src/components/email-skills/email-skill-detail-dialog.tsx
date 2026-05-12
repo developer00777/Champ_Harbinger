@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { createClient } from "@/lib/supabase/client";
 import type { EmailSkill } from "@/lib/types/email-skill";
 
 interface EmailSkillDetailDialogProps {
@@ -57,43 +56,51 @@ export function EmailSkillDetailDialog({
   const handleSave = async () => {
     if (!canEdit) return;
     setSaving(true);
-    const supabase = createClient();
-    const { data, error } = await supabase
-      .from("email_skills")
-      .update({
-        name,
-        description: description || null,
-        instructions,
-      })
-      .eq("id", skill.id)
-      .select("*")
-      .single();
-    setSaving(false);
-    if (error || !data) {
-      toast.error(error?.message ?? "Failed to save");
-      return;
+    try {
+      const res = await fetch(`/api/email-skills/${skill.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: description || null,
+          instructions,
+        }),
+      });
+      const data = (await res.json()) as EmailSkill | { error?: string };
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error ?? "Failed to save");
+        return;
+      }
+      toast.success("Saved");
+      setEditing(false);
+      onSaved?.(data as EmailSkill);
+    } catch {
+      toast.error("Failed to save");
+    } finally {
+      setSaving(false);
     }
-    toast.success("Saved");
-    setEditing(false);
-    onSaved?.(data as EmailSkill);
   };
 
   const handleDelete = async () => {
     if (!canEdit) return;
     setDeleting(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("email_skills")
-      .delete()
-      .eq("id", skill.id);
-    setDeleting(false);
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      const res = await fetch(`/api/email-skills/${skill.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(data.error ?? "Failed to delete");
+        return;
+      }
+      toast.success("Skill deleted");
+      onDeleted?.(skill.id);
+      onOpenChange(false);
+    } catch {
+      toast.error("Failed to delete");
+    } finally {
+      setDeleting(false);
     }
-    toast.success("Skill deleted");
-    onDeleted?.(skill.id);
-    onOpenChange(false);
   };
 
   return (

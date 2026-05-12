@@ -1,5 +1,8 @@
 import { withAction } from "@/lib/services/cost-tracker";
-import { createClient, getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq, and } from "drizzle-orm";
 import {
   summarizeSearchResults,
   summarizeWebsite,
@@ -19,7 +22,10 @@ import {
   type CompanyContext,
   type CandidateContact,
 } from "@/lib/services/contact-filter";
-import { recordVerifiedEmail } from "@/lib/services/email-pattern";
+import {
+  recordVerifiedEmail,
+  makeEmailPatternDb,
+} from "@/lib/services/email-pattern";
 import { parseLinkedInTitle } from "@/lib/utils";
 
 export const maxDuration = 120;
@@ -34,41 +40,40 @@ const SIGNAL_SLUG_GOOGLE_REVIEWS = "google-reviews";
 async function getActiveSignalSlugs(
   campaignId: string,
 ): Promise<Set<string> | null> {
-  const supabase = await createClient();
-
   // Check if any campaign_signals records exist at all
-  const { data: allSignals } = await supabase
-    .from("campaign_signals")
-    .select("id")
-    .eq("campaign_id", campaignId)
+  const anySignal = await adminDb
+    .select({ id: schema.campaignSignals.id })
+    .from(schema.campaignSignals)
+    .where(eq(schema.campaignSignals.campaignId, campaignId))
     .limit(1);
 
   // No signal config at all -- run everything (not configured yet)
-  if (!allSignals || allSignals.length === 0) return null;
+  if (anySignal.length === 0) return null;
 
-  const { data } = await supabase
-    .from("campaign_signals")
-    .select("signal_id, signals(slug)")
-    .eq("campaign_id", campaignId)
-    .eq("enabled", true);
+  const rows = await adminDb
+    .select({ slug: schema.signals.slug })
+    .from(schema.campaignSignals)
+    .innerJoin(
+      schema.signals,
+      eq(schema.campaignSignals.signalId, schema.signals.id),
+    )
+    .where(
+      and(
+        eq(schema.campaignSignals.campaignId, campaignId),
+        eq(schema.campaignSignals.enabled, true),
+      ),
+    );
 
-  if (!data) return new Set();
-  return new Set(
-    (data as Array<Record<string, unknown>>)
-      .map((row) => {
-        const signal = row.signals as { slug: string } | null;
-        return signal?.slug;
-      })
-      .filter((s: string | undefined): s is string => !!s),
-  );
+  return new Set(rows.map((r) => r.slug));
 }
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase, user } = ctx;
 
   let body: Record<string, unknown>;
   try {
@@ -86,18 +91,18 @@ export async function POST(request: Request) {
   }
 
   // Defense-in-depth ownership check. If campaignId is supplied, verify
-  // it belongs to the signed-in user directly. Otherwise we'll derive it
-  // from the campaign_organizations row below.
+  // it belongs to the signed-in user directly.
   if (campaignId) {
-    const { data: campaignRow, error: campaignError } = await supabase
-      .from("campaigns")
-      .select("user_id")
-      .eq("id", campaignId)
-      .single();
-    if (campaignError || !campaignRow) {
+    const [campaignRow] = await adminDb
+      .select({ clerkUserId: schema.campaigns.clerkUserId })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
+
+    if (!campaignRow) {
       return Response.json({ error: "Campaign not found" }, { status: 404 });
     }
-    if (campaignRow.user_id !== user.id) {
+    if (campaignRow.clerkUserId !== userId) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
   }
@@ -108,33 +113,36 @@ export async function POST(request: Request) {
     : null; // null = run all (no campaign context)
 
   // companyId is a campaign_organizations link ID -- resolve the organization.
-  // Join through campaigns.user_id so we can also verify ownership when
+  // Join through campaigns.clerk_user_id so we can also verify ownership when
   // campaignId wasn't explicitly supplied.
-  const { data: link, error: linkError } = await supabase
-    .from("campaign_organizations")
-    .select(
-      "organization_id, campaign_id, organization:organizations(*), campaign:campaigns(user_id)",
+  const [link] = await adminDb
+    .select({
+      organizationId: schema.campaignOrganizations.organizationId,
+      campaignId: schema.campaignOrganizations.campaignId,
+      campaignClerkUserId: schema.campaigns.clerkUserId,
+    })
+    .from(schema.campaignOrganizations)
+    .innerJoin(
+      schema.campaigns,
+      eq(schema.campaignOrganizations.campaignId, schema.campaigns.id),
     )
-    .eq("id", companyId)
-    .single();
+    .where(eq(schema.campaignOrganizations.id, companyId))
+    .limit(1);
 
-  if (linkError || !link) {
-    // Try as a direct organization ID. Organizations are not user-scoped,
-    // so the only ownership signal here is the campaignId check above (if
-    // supplied). Without a campaign context, fall back to RLS + the
-    // authenticated session.
-    const { data: org, error: orgError } = await supabase
-      .from("organizations")
-      .select("*")
-      .eq("id", companyId)
-      .single();
+  if (!link) {
+    // Try as a direct organization ID.
+    const [org] = await adminDb
+      .select()
+      .from(schema.organizations)
+      .where(eq(schema.organizations.id, companyId))
+      .limit(1);
 
-    if (orgError || !org) {
+    if (!org) {
       return Response.json({ error: "Company not found" }, { status: 404 });
     }
 
     return enrichOrganization(
-      org as Record<string, unknown>,
+      org as unknown as Record<string, unknown>,
       companyId,
       activeSlugs,
       campaignId,
@@ -142,25 +150,33 @@ export async function POST(request: Request) {
   }
 
   // Ownership check via the link's parent campaign.
-  const linkCampaign = link.campaign as unknown as { user_id: string } | null;
-  if (!linkCampaign) {
-    return Response.json({ error: "Company not found" }, { status: 404 });
-  }
-  if (linkCampaign.user_id !== user.id) {
+  if (link.campaignClerkUserId !== userId) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (!link.organization) {
+  const orgId = link.organizationId;
+
+  // Fetch the full organization row
+  const [org] = await adminDb
+    .select()
+    .from(schema.organizations)
+    .where(eq(schema.organizations.id, orgId))
+    .limit(1);
+
+  if (!org) {
     return Response.json(
       { error: "Organization data missing" },
       { status: 404 },
     );
   }
 
-  const org = link.organization as unknown as Record<string, unknown>;
-  const orgId = link.organization_id;
-
-  return enrichOrganization(org, orgId, activeSlugs, campaignId, companyId);
+  return enrichOrganization(
+    org as unknown as Record<string, unknown>,
+    orgId,
+    activeSlugs,
+    campaignId,
+    companyId,
+  );
 }
 
 async function findContactsForCompany(
@@ -169,34 +185,33 @@ async function findContactsForCompany(
   campaignId: string,
   linkId?: string,
 ): Promise<{ totalFound: number }> {
-  const supabase = await createClient();
   let totalFound = 0;
 
-  const { data: campaign } = await supabase
-    .from("campaigns")
-    .select("icp")
-    .eq("id", campaignId)
-    .single();
+  const [campaign] = await adminDb
+    .select({ icp: schema.campaigns.icp })
+    .from(schema.campaigns)
+    .where(eq(schema.campaigns.id, campaignId))
+    .limit(1);
 
   const icp = campaign?.icp as Record<string, unknown> | null;
   const targetTitles = (icp?.targetTitles as string[] | undefined) || [];
   // Bound to avoid per-user Exa spend blowouts.
   const boundedTitles = targetTitles.slice(0, 5);
 
-  // Dedup against existing campaign contacts (by LinkedIn URL only -- name
-  // matching is too fragile with first-name-only entries from team pages)
-  const { data: existingLinks } = await supabase
-    .from("campaign_people")
-    .select("person:people(linkedin_url)")
-    .eq("campaign_id", campaignId);
+  // Dedup against existing campaign contacts (by LinkedIn URL only)
+  const existingLinks = await adminDb
+    .select({ linkedinUrl: schema.people.linkedinUrl })
+    .from(schema.campaignPeople)
+    .innerJoin(
+      schema.people,
+      eq(schema.campaignPeople.personId, schema.people.id),
+    )
+    .where(eq(schema.campaignPeople.campaignId, campaignId));
 
   const existingUrls = new Set(
-    (existingLinks || [])
-      .map(
-        (l: { person: unknown }) =>
-          (l.person as { linkedin_url: string | null } | null)?.linkedin_url,
-      )
-      .filter(Boolean) as string[],
+    existingLinks
+      .map((l) => l.linkedinUrl)
+      .filter((u): u is string => u !== null),
   );
 
   // ── Phase 1: Search the company's own website for team/staff ───────
@@ -219,7 +234,7 @@ async function findContactsForCompany(
         });
 
         if (dp.email) {
-          await recordVerifiedEmail(supabase, {
+          await recordVerifiedEmail(makeEmailPatternDb(adminDb), {
             personId: person.id,
             email: dp.email,
             source: "team_page",
@@ -339,7 +354,7 @@ async function enrichOrganization(
       }
       return Response.json({
         companyId: orgId,
-        enrichmentData: org.enrichment_data,
+        enrichmentData: org.enrichment_data ?? org.enrichmentData,
         skipped: true,
         contactsFound,
       });

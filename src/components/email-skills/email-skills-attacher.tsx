@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { EmailSkillDetailDialog } from "@/components/email-skills/email-skill-detail-dialog";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { createClient } from "@/lib/supabase/client";
 import type { EmailSkill, EmailSkillScopeType } from "@/lib/types/email-skill";
 
 interface EmailSkillsAttacherProps {
@@ -41,29 +40,22 @@ export function EmailSkillsAttacher({
   const mountedRef = useRef(true);
 
   const fetchData = useCallback(async () => {
-    const supabase = createClient();
-    const [skillsRes, attachmentsRes] = await Promise.all([
-      supabase
-        .from("email_skills")
-        .select("*")
-        .order("is_builtin", { ascending: false })
-        .order("name"),
+    const [skillsData, attachmentsData] = await Promise.all([
+      fetch("/api/email-skills").then((r) => r.json()),
       scopeId
-        ? supabase
-            .from("email_skill_attachments")
-            .select("skill_id, enabled")
-            .eq("scope_type", scopeType)
-            .eq("scope_id", scopeId)
-            .eq("enabled", true)
-        : Promise.resolve({ data: [] as Array<{ skill_id: string }> }),
+        ? fetch(
+            `/api/email-skills/attachments?scopeType=${scopeType}&scopeId=${scopeId}`,
+          ).then((r) => r.json())
+        : Promise.resolve([] as Array<{ skill_id: string }>),
     ]);
     if (!mountedRef.current) return;
-    setSkills((skillsRes.data as EmailSkill[]) ?? []);
+    setSkills(Array.isArray(skillsData) ? (skillsData as EmailSkill[]) : []);
     setAttachedIds(
       new Set(
-        ((attachmentsRes.data ?? []) as Array<{ skill_id: string }>).map(
-          (r) => r.skill_id,
-        ),
+        (Array.isArray(attachmentsData)
+          ? (attachmentsData as Array<{ skill_id: string }>)
+          : []
+        ).map((r) => r.skill_id),
       ),
     );
     setLoading(false);
@@ -89,19 +81,21 @@ export function EmailSkillsAttacher({
       else next.delete(skillId);
       return next;
     });
-    const supabase = createClient();
     if (attached) {
-      const { error } = await supabase.from("email_skill_attachments").upsert(
-        {
-          skill_id: skillId,
-          scope_type: scopeType,
-          scope_id: scopeId,
-          enabled: true,
-        },
-        { onConflict: "skill_id,scope_type,scope_id" },
-      );
-      if (error) {
-        toast.error(`Failed: ${error.message}`);
+      const res = await fetch("/api/email-skills/attachments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          skillId,
+          scopeType,
+          scopeId,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        toast.error(`Failed: ${data.error ?? "Unknown error"}`);
         setAttachedIds((prev) => {
           const next = new Set(prev);
           next.delete(skillId);
@@ -109,14 +103,15 @@ export function EmailSkillsAttacher({
         });
       }
     } else {
-      const { error } = await supabase
-        .from("email_skill_attachments")
-        .delete()
-        .eq("skill_id", skillId)
-        .eq("scope_type", scopeType)
-        .eq("scope_id", scopeId);
-      if (error) {
-        toast.error(`Failed: ${error.message}`);
+      const res = await fetch(
+        `/api/email-skills/attachments?skillId=${skillId}&scopeType=${scopeType}&scopeId=${scopeId}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        toast.error(`Failed: ${data.error ?? "Unknown error"}`);
         setAttachedIds((prev) => new Set(prev).add(skillId));
       }
     }

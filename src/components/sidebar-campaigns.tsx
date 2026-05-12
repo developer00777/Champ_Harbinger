@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SafeLink } from "@/components/safe-link";
 import { Loader2, Target } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -43,17 +42,31 @@ export function SidebarCampaigns({
     mountedRef.current = true;
 
     const fetchCampaigns = async () => {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from("campaigns")
-        .select("id, name, status, created_at")
-        .order("updated_at", { ascending: false });
-
-      if (mountedRef.current) {
-        if (!error && data) {
-          setCampaigns(data);
+      try {
+        const res = await fetch("/api/campaigns");
+        const data = await res.json();
+        if (mountedRef.current) {
+          if (Array.isArray(data)) {
+            setCampaigns(
+              data.map(
+                (c: {
+                  id: string;
+                  name: string;
+                  status: string;
+                  createdAt: string;
+                }) => ({
+                  id: c.id,
+                  name: c.name,
+                  status: c.status,
+                  created_at: c.createdAt,
+                }),
+              ),
+            );
+          }
+          setLoading(false);
         }
-        setLoading(false);
+      } catch {
+        if (mountedRef.current) setLoading(false);
       }
     };
 

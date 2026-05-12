@@ -11,7 +11,6 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { ReviewButton } from "@/components/outreach/review-button";
 import { OUTREACH_STATUS, type OutreachStatus } from "@/lib/outreach/status";
-import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 export interface DraftRow {
@@ -114,12 +113,17 @@ export function OutreachDraftsPanel({
   if (visibleGroups.length === 0) return null;
 
   const handleEmailEdit = async (draftIds: string[], next: string) => {
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("email_drafts")
-      .update({ to_email: next, updated_at: new Date().toISOString() })
-      .in("id", draftIds);
-    if (error) throw new Error(error.message);
+    const res = await fetch("/api/outreach/drafts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        updates: draftIds.map((id) => ({ id, toEmail: next })),
+      }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(data.error ?? "Failed to update email");
+    }
     onRefresh();
   };
 

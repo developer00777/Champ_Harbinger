@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { User } from "lucide-react";
 import { toast } from "sonner";
 
-import { createClient } from "@/lib/supabase/client";
 import { profileDisplayName } from "@/lib/types/profile";
 import type { UserProfile } from "@/lib/types/profile";
 
@@ -24,12 +23,13 @@ export function ProfileSelector({
 
   useEffect(() => {
     const load = async () => {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("user_profile")
-        .select("*")
-        .order("created_at", { ascending: false });
-      setProfiles((data as UserProfile[]) ?? []);
+      try {
+        const res = await fetch("/api/profile");
+        const data = await res.json();
+        setProfiles(Array.isArray(data) ? (data as UserProfile[]) : []);
+      } catch {
+        // silently ignore load errors
+      }
     };
     load();
   }, []);
@@ -37,16 +37,19 @@ export function ProfileSelector({
   const handleChange = async (profileId: string) => {
     const value = profileId || null;
     setSaving(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("campaigns")
-      .update({ profile_id: value })
-      .eq("id", campaignId);
-
-    if (error) {
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile_id: value }),
+      });
+      if (!res.ok) {
+        toast.error("Failed to update profile");
+      } else {
+        onProfileChanged(value);
+      }
+    } catch {
       toast.error("Failed to update profile");
-    } else {
-      onProfileChanged(value);
     }
     setSaving(false);
   };

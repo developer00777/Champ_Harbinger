@@ -152,6 +152,39 @@ export async function GET(
   return NextResponse.json({ campaign: campaignOut, companies, contacts });
 }
 
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+
+  let sdb: Awaited<ReturnType<typeof getScopedDb>>;
+  try {
+    sdb = await getScopedDb();
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = (await request.json()) as Record<string, unknown>;
+
+  const patch: Partial<typeof schema.campaigns.$inferInsert> = {};
+  if ("profile_id" in body) {
+    patch.profileId = (body.profile_id as string | null) ?? null;
+  }
+
+  const updated = await sdb.raw
+    .update(schema.campaigns)
+    .set(patch)
+    .where(and(eq(schema.campaigns.id, id), sdb.scope(schema.campaigns)))
+    .returning();
+
+  if (!updated[0]) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },

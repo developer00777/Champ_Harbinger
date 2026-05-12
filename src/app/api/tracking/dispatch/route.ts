@@ -1,4 +1,6 @@
-import { getAdminClient } from "@/lib/supabase/admin";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq, lte, and } from "drizzle-orm";
 import {
   verifyQStashSignature,
   getQStashClient,
@@ -19,20 +21,20 @@ export async function POST(request: Request) {
   }
 
   // Find all active tracking configs that are due
-  const { data: configs, error } = await getAdminClient()
-    .from("tracking_configs")
-    .select("id, schedule")
-    .eq("status", "active")
-    .lte("next_run_at", new Date().toISOString());
-
-  if (error) {
-    return Response.json(
-      { error: `Failed to query tracking configs: ${error.message}` },
-      { status: 500 },
+  const configs = await adminDb
+    .select({
+      id: schema.trackingConfigs.id,
+      schedule: schema.trackingConfigs.schedule,
+    })
+    .from(schema.trackingConfigs)
+    .where(
+      and(
+        eq(schema.trackingConfigs.status, "active"),
+        lte(schema.trackingConfigs.nextRunAt, new Date()),
+      ),
     );
-  }
 
-  if (!configs || configs.length === 0) {
+  if (configs.length === 0) {
     return Response.json({ dispatched: 0 });
   }
 
@@ -45,7 +47,7 @@ export async function POST(request: Request) {
   for (let i = 0; i < configs.length; i += BATCH_SIZE) {
     const batch = configs.slice(i, i + BATCH_SIZE);
     const results = await Promise.allSettled(
-      batch.map(async (config: { id: string; schedule: string }) => {
+      batch.map(async (config) => {
         await qstash.publishJSON({
           url: `${baseUrl}/api/tracking/run`,
           body: { trackingConfigId: config.id },
@@ -56,12 +58,12 @@ export async function POST(request: Request) {
         const interval =
           SCHEDULE_INTERVALS[config.schedule as Schedule] ??
           SCHEDULE_INTERVALS.weekly;
-        const nextRun = new Date(Date.now() + interval).toISOString();
+        const nextRun = new Date(Date.now() + interval);
 
-        await getAdminClient()
-          .from("tracking_configs")
-          .update({ next_run_at: nextRun })
-          .eq("id", config.id);
+        await adminDb
+          .update(schema.trackingConfigs)
+          .set({ nextRunAt: nextRun })
+          .where(eq(schema.trackingConfigs.id, config.id));
       }),
     );
 

@@ -1,5 +1,8 @@
 import { withAction } from "@/lib/services/cost-tracker";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq } from "drizzle-orm";
 import { ExaService } from "@/lib/services/exa-service";
 import { LinkedinService } from "@/lib/services/linkedin-service";
 import { XService } from "@/lib/services/x-service";
@@ -11,11 +14,12 @@ import {
 export const maxDuration = 120;
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase, user } = ctx;
 
   let body: Record<string, unknown>;
   try {
@@ -30,92 +34,94 @@ export async function POST(request: Request) {
   }
 
   // contactId may be a campaign_people link ID -- resolve to person.
-  // The link is our ownership hook: campaign_people -> campaigns.user_id
-  // (defense in depth on top of RLS, which already scopes campaign_people
-  // through its parent campaign).
+  // Ownership check: verify the parent campaign belongs to the signed-in user.
   let personId: string;
 
-  const { data: link } = await supabase
-    .from("campaign_people")
-    .select("person_id, campaign:campaigns(user_id)")
-    .eq("id", contactId)
-    .maybeSingle();
+  const [link] = await adminDb
+    .select({
+      personId: schema.campaignPeople.personId,
+      campaignClerkUserId: schema.campaigns.clerkUserId,
+    })
+    .from(schema.campaignPeople)
+    .innerJoin(
+      schema.campaigns,
+      eq(schema.campaignPeople.campaignId, schema.campaigns.id),
+    )
+    .where(eq(schema.campaignPeople.id, contactId))
+    .limit(1);
 
   if (link) {
-    const campaign = link.campaign as unknown as { user_id: string } | null;
-    if (!campaign) {
-      return Response.json({ error: "Contact not found" }, { status: 404 });
-    }
-    if (campaign.user_id !== user.id) {
+    if (link.campaignClerkUserId !== userId) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
-    personId = link.person_id;
+    personId = link.personId;
   } else {
-    // Bare person ID path -- people rows aren't user-scoped; RLS on the
-    // subsequent select is the only layer we have here.
+    // Bare person ID path -- no user-scoping available without a campaign
+    // context; the subsequent select is the only gate we have here.
     personId = contactId;
   }
 
-  const { data: personData, error: fetchError } = await supabase
-    .from("people")
-    .select(
-      "name, title, linkedin_url, twitter_url, organization:organizations(name)",
+  const [personRow] = await adminDb
+    .select({
+      name: schema.people.name,
+      title: schema.people.title,
+      linkedinUrl: schema.people.linkedinUrl,
+      twitterUrl: schema.people.twitterUrl,
+      enrichmentData: schema.people.enrichmentData,
+      orgName: schema.organizations.name,
+    })
+    .from(schema.people)
+    .leftJoin(
+      schema.organizations,
+      eq(schema.people.organizationId, schema.organizations.id),
     )
-    .eq("id", personId)
-    .single();
+    .where(eq(schema.people.id, personId))
+    .limit(1);
 
-  if (fetchError || !personData) {
+  if (!personRow) {
     return Response.json({ error: "Contact not found" }, { status: 404 });
   }
-
-  const person = personData as {
-    name: string;
-    title: string | null;
-    linkedin_url: string | null;
-    twitter_url: string | null;
-    organization: { name?: string } | null;
-  };
 
   // Check recency
   const recent = await isRecentlyEnriched("people", personId);
   if (recent) {
-    const { data: p } = await supabase
-      .from("people")
-      .select("enrichment_data")
-      .eq("id", personId)
-      .single();
+    const [p] = await adminDb
+      .select({ enrichmentData: schema.people.enrichmentData })
+      .from(schema.people)
+      .where(eq(schema.people.id, personId))
+      .limit(1);
     return Response.json({
       contactId: personId,
       status: "enriched",
-      enrichmentData: p?.enrichment_data || {},
+      enrichmentData: p?.enrichmentData || {},
       skipped: true,
     });
   }
 
-  const contactName = person.name || "Unknown";
-  const companyName = person.organization?.name || null;
+  const contactName = personRow.name || "Unknown";
+  const companyName = personRow.orgName || null;
   const actionLabel = companyName
     ? `Enrich person: ${contactName} (${companyName})`
     : `Enrich person: ${contactName}`;
 
   return withAction(actionLabel, async () => {
     // Mark as in_progress
-    await supabase
-      .from("people")
-      .update({ enrichment_status: "in_progress" })
-      .eq("id", personId);
+    await adminDb
+      .update(schema.people)
+      .set({ enrichmentStatus: "in_progress" })
+      .where(eq(schema.people.id, personId));
 
     const enrichmentData: Record<string, unknown> = {};
     const errors: string[] = [];
     const promises: Promise<void>[] = [];
 
-    if (person.linkedin_url) {
+    if (personRow.linkedinUrl) {
       promises.push(
         (async () => {
           try {
             const linkedin = new LinkedinService();
             const scrapeResult = await linkedin.scrapeProfile(
-              person.linkedin_url!,
+              personRow.linkedinUrl!,
             );
             enrichmentData.linkedin = {
               profileInfo: scrapeResult.profile || null,
@@ -130,12 +136,12 @@ export async function POST(request: Request) {
       );
     }
 
-    if (person.twitter_url) {
+    if (personRow.twitterUrl) {
       promises.push(
         (async () => {
           try {
             const x = new XService();
-            const result = await x.enrichTwitterProfile(person.twitter_url!);
+            const result = await x.enrichTwitterProfile(personRow.twitterUrl!);
             enrichmentData.twitter = {
               user: result.user,
               tweets: result.tweets.slice(0, 10),
@@ -153,7 +159,7 @@ export async function POST(request: Request) {
     if (contactName !== "Unknown") {
       const exa = new ExaService();
 
-      const contactTitle = person.title || null;
+      const contactTitle = personRow.title || null;
       const queryParts = [`"${contactName}"`];
       if (companyName) queryParts.push(`"${companyName}"`);
       if (contactTitle) queryParts.push(contactTitle);
@@ -162,14 +168,14 @@ export async function POST(request: Request) {
       // Collect URLs already in the company's enrichment data so we don't
       // show the same links on both the company and contact cards.
       const companyUrls = new Set<string>();
-      if (person.organization) {
-        const { data: orgRow } = await supabase
-          .from("organizations")
-          .select("enrichment_data")
-          .eq("name", (person.organization as { name?: string }).name ?? "")
-          .maybeSingle();
+      if (companyName) {
+        const [orgRow] = await adminDb
+          .select({ enrichmentData: schema.organizations.enrichmentData })
+          .from(schema.organizations)
+          .where(eq(schema.organizations.name, companyName))
+          .limit(1);
 
-        const orgEnrichment = orgRow?.enrichment_data as Record<
+        const orgEnrichment = orgRow?.enrichmentData as Record<
           string,
           unknown
         > | null;
@@ -264,10 +270,10 @@ export async function POST(request: Request) {
     }
 
     if (promises.length === 0) {
-      await supabase
-        .from("people")
-        .update({ enrichment_status: "failed" })
-        .eq("id", personId);
+      await adminDb
+        .update(schema.people)
+        .set({ enrichmentStatus: "failed" })
+        .where(eq(schema.people.id, personId));
 
       return Response.json({
         contactId: personId,

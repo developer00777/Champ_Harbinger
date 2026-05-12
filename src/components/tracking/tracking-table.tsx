@@ -5,7 +5,6 @@ import { ChevronDown, ChevronRight, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { ReadinessBadge } from "./readiness-badge";
 import { TrackingTimeline } from "./tracking-timeline";
-import { createClient } from "@/lib/supabase/client";
 import type { TrackingChange, ReadinessTag } from "@/lib/types/tracking";
 
 export type ViewMode = "by-signal" | "by-company";
@@ -52,14 +51,15 @@ function ExpandableSignalRow({ row }: { row: TrackingRow }) {
   const toggleExpand = async () => {
     if (!expanded && changes.length === 0) {
       setLoadingChanges(true);
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("tracking_changes")
-        .select("*")
-        .eq("tracking_config_id", row.id)
-        .order("detected_at", { ascending: false })
-        .limit(20);
-      setChanges((data as TrackingChange[]) ?? []);
+      try {
+        const res = await fetch(
+          `/api/tracking/changes?configId=${row.id}&limit=20`,
+        );
+        const data = await res.json();
+        setChanges(Array.isArray(data) ? (data as TrackingChange[]) : []);
+      } catch {
+        // ignore errors — show empty timeline
+      }
       setLoadingChanges(false);
     }
     setExpanded(!expanded);
@@ -69,18 +69,19 @@ function ExpandableSignalRow({ row }: { row: TrackingRow }) {
     e.stopPropagation();
     const newStatus = localStatus === "active" ? "paused" : "active";
     setLocalStatus(newStatus);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("tracking_configs")
-      .update({ status: newStatus })
-      .eq("id", row.id);
-    if (error) {
-      toast.error("Failed to update tracking status");
-      setLocalStatus(localStatus); // revert on failure
-    } else {
+    try {
+      const res = await fetch(`/api/tracking/configs/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error("Failed");
       toast.success(
         newStatus === "paused" ? "Tracking paused" : "Tracking resumed",
       );
+    } catch {
+      toast.error("Failed to update tracking status");
+      setLocalStatus(localStatus); // revert on failure
     }
   };
 
@@ -158,22 +159,24 @@ function ExpandableCompanyRow({ group }: { group: CompanyGroup }) {
   const toggleExpand = async () => {
     if (!expanded && Object.keys(changesByConfig).length === 0) {
       setLoadingChanges(true);
-      const supabase = createClient();
-      const configIds = group.rows.map((r) => r.id);
-      const { data } = await supabase
-        .from("tracking_changes")
-        .select("*")
-        .in("tracking_config_id", configIds)
-        .order("detected_at", { ascending: false })
-        .limit(50);
+      try {
+        const configIds = group.rows.map((r) => r.id);
+        const qs = configIds.map((id) => `configId=${id}`).join("&");
+        const res = await fetch(`/api/tracking/changes?${qs}&limit=50`);
+        const data = await res.json();
 
-      const grouped: Record<string, TrackingChange[]> = {};
-      for (const change of (data as TrackingChange[]) ?? []) {
-        const cid = change.tracking_config_id;
-        if (!grouped[cid]) grouped[cid] = [];
-        grouped[cid].push(change);
+        const grouped: Record<string, TrackingChange[]> = {};
+        for (const change of Array.isArray(data)
+          ? (data as TrackingChange[])
+          : []) {
+          const cid = change.tracking_config_id;
+          if (!grouped[cid]) grouped[cid] = [];
+          grouped[cid].push(change);
+        }
+        setChangesByConfig(grouped);
+      } catch {
+        // ignore errors — show empty timelines
       }
-      setChangesByConfig(grouped);
       setLoadingChanges(false);
     }
     setExpanded(!expanded);

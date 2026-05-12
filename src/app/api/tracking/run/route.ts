@@ -1,4 +1,6 @@
-import { getAdminClient } from "@/lib/supabase/admin";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq, desc } from "drizzle-orm";
 import { verifyQStashSignature, getBaseUrl } from "@/lib/services/qstash";
 import { withAction } from "@/lib/services/cost-tracker";
 import { executeSignal } from "@/lib/signals/executor";
@@ -11,7 +13,12 @@ import {
   describeHiringChanges,
 } from "@/lib/services/tracking-differ";
 import { evaluateIntent } from "@/lib/services/intent-evaluator";
-import type { HiringSnapshot, TrackingConfig } from "@/lib/types/tracking";
+import type {
+  HiringSnapshot,
+  TrackingConfig,
+  Schedule,
+  TrackingStatus,
+} from "@/lib/types/tracking";
 
 export const maxDuration = 120;
 
@@ -32,33 +39,113 @@ export async function POST(request: Request) {
   const { trackingConfigId } = payload;
 
   // Load tracking config with joins
-  const { data: config, error: configErr } = await getAdminClient()
-    .from("tracking_configs")
-    .select(
-      "*, organization:organizations(*), signal:signals(*), campaign:campaigns(icp, offering)",
+  const [configRow] = await adminDb
+    .select({
+      id: schema.trackingConfigs.id,
+      campaignId: schema.trackingConfigs.campaignId,
+      organizationId: schema.trackingConfigs.organizationId,
+      personId: schema.trackingConfigs.personId,
+      signalId: schema.trackingConfigs.signalId,
+      schedule: schema.trackingConfigs.schedule,
+      intent: schema.trackingConfigs.intent,
+      status: schema.trackingConfigs.status,
+      lastRunAt: schema.trackingConfigs.lastRunAt,
+      nextRunAt: schema.trackingConfigs.nextRunAt,
+      // Campaign fields
+      campaignIcp: schema.campaigns.icp,
+      campaignOffering: schema.campaigns.offering,
+      // Organization fields
+      orgName: schema.organizations.name,
+      orgDomain: schema.organizations.domain,
+      orgIndustry: schema.organizations.industry,
+      orgLocation: schema.organizations.location,
+      orgDescription: schema.organizations.description,
+      orgUrl: schema.organizations.url,
+      // Signal fields
+      signalSlug: schema.signals.slug,
+      signalName: schema.signals.name,
+      signalCategory: schema.signals.category,
+      signalExecutionType: schema.signals.executionType,
+      signalToolKey: schema.signals.toolKey,
+      signalConfig: schema.signals.config,
+      signalIsBuiltin: schema.signals.isBuiltin,
+      signalIsPublic: schema.signals.isPublic,
+      signalDescription: schema.signals.description,
+    })
+    .from(schema.trackingConfigs)
+    .innerJoin(
+      schema.campaigns,
+      eq(schema.trackingConfigs.campaignId, schema.campaigns.id),
     )
-    .eq("id", trackingConfigId)
-    .single();
+    .leftJoin(
+      schema.organizations,
+      eq(schema.trackingConfigs.organizationId, schema.organizations.id),
+    )
+    .innerJoin(
+      schema.signals,
+      eq(schema.trackingConfigs.signalId, schema.signals.id),
+    )
+    .where(eq(schema.trackingConfigs.id, trackingConfigId))
+    .limit(1);
 
-  if (configErr || !config) {
+  if (!configRow) {
     return Response.json(
-      { error: `Tracking config not found: ${configErr?.message}` },
+      { error: `Tracking config not found: ${trackingConfigId}` },
       { status: 404 },
     );
   }
 
-  const typedConfig = config as TrackingConfig & {
+  const orgName = configRow.orgName ?? "Unknown Company";
+  const orgDomain = configRow.orgDomain ?? undefined;
+
+  // Reconstruct the nested objects that the downstream code expects
+  const typedConfig: TrackingConfig & {
     organization: Record<string, unknown> | null;
     signal: Record<string, unknown>;
     campaign: {
       icp: Record<string, unknown>;
       offering: Record<string, unknown>;
     };
+  } = {
+    id: configRow.id,
+    campaign_id: configRow.campaignId,
+    organization_id: configRow.organizationId ?? null,
+    person_id: configRow.personId ?? null,
+    signal_id: configRow.signalId,
+    schedule: configRow.schedule as Schedule,
+    intent: configRow.intent,
+    status: configRow.status as TrackingStatus,
+    last_run_at: configRow.lastRunAt?.toISOString() ?? null,
+    next_run_at: configRow.nextRunAt?.toISOString() ?? null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    organization: configRow.orgName
+      ? {
+          name: configRow.orgName,
+          domain: configRow.orgDomain,
+          industry: configRow.orgIndustry,
+          location: configRow.orgLocation,
+          description: configRow.orgDescription,
+          url: configRow.orgUrl,
+        }
+      : null,
+    signal: {
+      id: configRow.signalId,
+      slug: configRow.signalSlug,
+      name: configRow.signalName,
+      category: configRow.signalCategory,
+      executionType: configRow.signalExecutionType,
+      toolKey: configRow.signalToolKey,
+      config: configRow.signalConfig,
+      isBuiltin: configRow.signalIsBuiltin,
+      isPublic: configRow.signalIsPublic,
+      description: configRow.signalDescription,
+    },
+    campaign: {
+      icp: (configRow.campaignIcp as Record<string, unknown>) ?? {},
+      offering: (configRow.campaignOffering as Record<string, unknown>) ?? {},
+    },
   };
-
-  const orgName =
-    (typedConfig.organization?.name as string) || "Unknown Company";
-  const orgDomain = typedConfig.organization?.domain as string | undefined;
 
   // Wrap in withAction for cost tracking
   return withAction(`Tracking run: ${orgName}`, async () => {
@@ -68,10 +155,10 @@ export async function POST(request: Request) {
 
     try {
       const signalOutput = await executeSignal(signalRecord, {
-        organizationId: config.organization_id,
+        organizationId: configRow.organizationId ?? undefined,
         domain: orgDomain,
         name: orgName,
-        campaignId: config.campaign_id,
+        campaignId: configRow.campaignId,
         useAdmin: true,
       });
 
@@ -102,39 +189,42 @@ export async function POST(request: Request) {
     const hash = hashSnapshot(snapshot);
 
     // ── Compare to previous snapshot ───────────────────────────────────
-    const { data: prevSnapshots } = await getAdminClient()
-      .from("tracking_snapshots")
-      .select("snapshot_data, snapshot_hash")
-      .eq("tracking_config_id", trackingConfigId)
-      .order("captured_at", { ascending: false })
+    const prevSnapshots = await adminDb
+      .select({
+        snapshotData: schema.trackingSnapshots.snapshotData,
+        snapshotHash: schema.trackingSnapshots.snapshotHash,
+      })
+      .from(schema.trackingSnapshots)
+      .where(eq(schema.trackingSnapshots.trackingConfigId, trackingConfigId))
+      .orderBy(desc(schema.trackingSnapshots.capturedAt))
       .limit(1);
 
-    const prevSnapshot = prevSnapshots?.[0] ?? null;
-    const hasChanged = !prevSnapshot || prevSnapshot.snapshot_hash !== hash;
+    const prevSnapshot = prevSnapshots[0] ?? null;
+    const hasChanged = !prevSnapshot || prevSnapshot.snapshotHash !== hash;
 
     // ── Store new snapshot (always, for the timeline) ──────────────────
-    await getAdminClient().from("tracking_snapshots").insert({
-      tracking_config_id: trackingConfigId,
-      snapshot_data: snapshot,
-      snapshot_hash: hash,
+    await adminDb.insert(schema.trackingSnapshots).values({
+      trackingConfigId,
+      snapshotData: snapshot as unknown as Record<string, unknown>,
+      snapshotHash: hash,
     });
 
     // ── Store signal_result with tracking_config_id ────────────────────
-    await getAdminClient().from("signal_results").insert({
-      signal_id: config.signal_id,
-      campaign_id: config.campaign_id,
-      organization_id: config.organization_id,
-      person_id: config.person_id,
-      tracking_config_id: trackingConfigId,
+    await adminDb.insert(schema.signalResults).values({
+      signalId: configRow.signalId,
+      campaignId: configRow.campaignId,
+      organizationId: configRow.organizationId ?? undefined,
+      personId: configRow.personId ?? undefined,
+      trackingConfigId,
       output: rawOutput,
       status: "success",
     });
 
     // ── Update last_run_at ─────────────────────────────────────────────
-    await getAdminClient()
-      .from("tracking_configs")
-      .update({ last_run_at: new Date().toISOString() })
-      .eq("id", trackingConfigId);
+    await adminDb
+      .update(schema.trackingConfigs)
+      .set({ lastRunAt: new Date() })
+      .where(eq(schema.trackingConfigs.id, trackingConfigId));
 
     if (!hasChanged) {
       return Response.json({
@@ -146,7 +236,7 @@ export async function POST(request: Request) {
 
     // ── Compute diff ───────────────────────────────────────────────────
     const prevData = prevSnapshot
-      ? (prevSnapshot.snapshot_data as HiringSnapshot)
+      ? (prevSnapshot.snapshotData as unknown as HiringSnapshot)
       : null;
 
     // If no previous data (first run after baseline), store as baseline
@@ -180,46 +270,53 @@ export async function POST(request: Request) {
       diff.classified_added = classified;
     }
 
-    // ── Store tracking changes ───────────────────────────────────��─────
+    // ── Store tracking changes ─────────────────────────────────────────
     const changeDescription = describeHiringChanges(diff);
 
-    const changesToInsert: Array<Record<string, unknown>> = [];
+    const changesToInsert: Array<{
+      trackingConfigId: string;
+      changeType: string;
+      fieldPath: string | null;
+      previousValue: unknown;
+      currentValue: unknown;
+      description: string;
+    }> = [];
 
     if (diff.added_jobs.length > 0) {
       changesToInsert.push({
-        tracking_config_id: trackingConfigId,
-        change_type: "added",
-        field_path: "jobs",
-        previous_value: null,
-        current_value: diff.added_jobs,
+        trackingConfigId,
+        changeType: "added",
+        fieldPath: "jobs",
+        previousValue: null,
+        currentValue: diff.added_jobs,
         description: `+${diff.added_jobs.length} role${diff.added_jobs.length > 1 ? "s" : ""}: ${diff.added_jobs.map((j) => j.title).join(", ")}`,
       });
     }
 
     if (diff.removed_jobs.length > 0) {
       changesToInsert.push({
-        tracking_config_id: trackingConfigId,
-        change_type: "removed",
-        field_path: "jobs",
-        previous_value: diff.removed_jobs,
-        current_value: null,
+        trackingConfigId,
+        changeType: "removed",
+        fieldPath: "jobs",
+        previousValue: diff.removed_jobs,
+        currentValue: null,
         description: `-${diff.removed_jobs.length} role${diff.removed_jobs.length > 1 ? "s" : ""}: ${diff.removed_jobs.map((j) => j.title).join(", ")}`,
       });
     }
 
     if (diff.job_count_delta !== 0 && changesToInsert.length === 0) {
       changesToInsert.push({
-        tracking_config_id: trackingConfigId,
-        change_type: "count_change",
-        field_path: "job_count",
-        previous_value: prevData.job_count,
-        current_value: snapshot.job_count,
+        trackingConfigId,
+        changeType: "count_change",
+        fieldPath: "job_count",
+        previousValue: prevData.job_count,
+        currentValue: snapshot.job_count,
         description: changeDescription,
       });
     }
 
     if (changesToInsert.length > 0) {
-      await getAdminClient().from("tracking_changes").insert(changesToInsert);
+      await adminDb.insert(schema.trackingChanges).values(changesToInsert);
     }
 
     // ── Evaluate intent via LLM ────────────────────────────────────────
@@ -237,30 +334,38 @@ export async function POST(request: Request) {
     });
 
     if (verdict.fire) {
-      await getAdminClient()
-        .from("tracking_changes")
-        .insert({
-          tracking_config_id: trackingConfigId,
-          change_type: "threshold_crossed",
-          field_path: null,
-          previous_value: null,
-          current_value: { confidence: verdict.confidence },
-          description: verdict.reason,
-        });
+      await adminDb.insert(schema.trackingChanges).values({
+        trackingConfigId,
+        changeType: "threshold_crossed",
+        fieldPath: null,
+        previousValue: null,
+        currentValue: { confidence: verdict.confidence },
+        description: verdict.reason,
+      });
 
-      const junctionTable = config.organization_id
-        ? "campaign_organizations"
-        : "campaign_people";
-      const entityField = config.organization_id
-        ? "organization_id"
-        : "person_id";
-      const entityId = config.organization_id || config.person_id;
-
-      await getAdminClient()
-        .from(junctionTable)
-        .update({ readiness_tag: "ready_to_contact" })
-        .eq("campaign_id", config.campaign_id)
-        .eq(entityField, entityId);
+      if (configRow.organizationId) {
+        await adminDb
+          .update(schema.campaignOrganizations)
+          .set({ readinessTag: "ready_to_contact" })
+          .where(
+            eq(schema.campaignOrganizations.campaignId, configRow.campaignId),
+          );
+        // Further filter by organizationId
+        await adminDb
+          .update(schema.campaignOrganizations)
+          .set({ readinessTag: "ready_to_contact" })
+          .where(
+            eq(
+              schema.campaignOrganizations.organizationId,
+              configRow.organizationId,
+            ),
+          );
+      } else if (configRow.personId) {
+        await adminDb
+          .update(schema.campaignPeople)
+          .set({ readinessTag: "ready_to_contact" })
+          .where(eq(schema.campaignPeople.campaignId, configRow.campaignId));
+      }
 
       const outreachBaseUrl = getBaseUrl();
       void fetch(`${outreachBaseUrl}/api/outreach/process`, {
@@ -268,9 +373,9 @@ export async function POST(request: Request) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "signal",
-          signalId: config.signal_id,
-          campaignId: config.campaign_id,
-          organizationId: config.organization_id ?? undefined,
+          signalId: configRow.signalId,
+          campaignId: configRow.campaignId,
+          organizationId: configRow.organizationId ?? undefined,
           reason: verdict.reason,
           confidence: verdict.confidence,
         }),

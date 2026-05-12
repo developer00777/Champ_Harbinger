@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 
 import { StatCards } from "@/components/dashboard/stat-cards";
 import { CampaignTable } from "@/components/dashboard/campaign-table";
+import { ChampIQQueueWidget } from "@/components/dashboard/champiq-queue-widget";
 import {
   ListRowsSkeleton,
   PageHeaderSkeleton,
@@ -127,6 +128,8 @@ export default function DashboardPage() {
             Cross-campaign performance at a glance.
           </p>
         </div>
+
+        <ChampIQQueueWidget />
 
         <StatCards totals={data.totals} />
 

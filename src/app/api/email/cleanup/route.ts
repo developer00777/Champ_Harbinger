@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { getAdminClient } from "@/lib/supabase/admin";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq, lt, and } from "drizzle-orm";
 
 /**
  * Draft cleanup endpoint. Call via cron or QStash schedule.
@@ -7,33 +9,35 @@ import { getAdminClient } from "@/lib/supabase/admin";
  * - Deletes stale drafts (never sent) older than 30 days
  */
 export async function POST() {
-  const supabase = getAdminClient();
-
-  const sevenDaysAgo = new Date(
-    Date.now() - 7 * 24 * 60 * 60 * 1000,
-  ).toISOString();
-  const thirtyDaysAgo = new Date(
-    Date.now() - 30 * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
   // Delete old discarded drafts
-  const { count: discardedCount } = await supabase
-    .from("email_drafts")
-    .delete({ count: "exact" })
-    .eq("status", "discarded")
-    .lt("created_at", sevenDaysAgo);
+  const discardedRows = await adminDb
+    .delete(schema.emailDrafts)
+    .where(
+      and(
+        eq(schema.emailDrafts.status, "discarded"),
+        lt(schema.emailDrafts.createdAt, sevenDaysAgo),
+      ),
+    )
+    .returning({ id: schema.emailDrafts.id });
 
   // Delete stale unsent drafts
-  const { count: staleCount } = await supabase
-    .from("email_drafts")
-    .delete({ count: "exact" })
-    .eq("status", "draft")
-    .lt("created_at", thirtyDaysAgo);
+  const staleRows = await adminDb
+    .delete(schema.emailDrafts)
+    .where(
+      and(
+        eq(schema.emailDrafts.status, "draft"),
+        lt(schema.emailDrafts.createdAt, thirtyDaysAgo),
+      ),
+    )
+    .returning({ id: schema.emailDrafts.id });
 
   return NextResponse.json({
     cleaned: {
-      discarded: discardedCount ?? 0,
-      stale: staleCount ?? 0,
+      discarded: discardedRows.length,
+      stale: staleRows.length,
     },
   });
 }

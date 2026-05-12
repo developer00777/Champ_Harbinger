@@ -6,33 +6,35 @@ import {
   estimateClaudeCostFromUsage,
   trackUsage,
 } from "@/lib/services/cost-tracker";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq, and } from "drizzle-orm";
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase, user } = ctx;
 
   const { chatId } = (await request.json()) as { chatId: string };
   if (!chatId) {
     return Response.json({ error: "chatId required" }, { status: 400 });
   }
 
-  // Fetch the chat. Scope to the signed-in user (defense in depth on top
-  // of RLS) -- a mismatch yields the same 404 as a missing row.
-  const { data: chat, error } = await supabase
-    .from("chats")
-    .select("messages, title, user_id")
-    .eq("id", chatId)
-    .single();
+  // Fetch the chat scoped to the signed-in user (defense in depth).
+  const [chat] = await adminDb
+    .select()
+    .from(schema.chats)
+    .where(
+      and(eq(schema.chats.id, chatId), eq(schema.chats.clerkUserId, userId)),
+    )
+    .limit(1);
 
-  if (error || !chat) {
+  if (!chat) {
     return Response.json({ error: "Chat not found" }, { status: 404 });
-  }
-  if (chat.user_id !== user.id) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const messages = chat.messages as Array<{
@@ -74,12 +76,15 @@ export async function POST(request: Request) {
     tokens_output: usage.outputTokens ?? 0,
     estimated_cost_usd: estimateClaudeCostFromUsage("haiku", usage),
     metadata: { model: "claude-haiku-4.5", chatId },
-    user_id: user.id,
+    user_id: userId,
   });
 
   // Update the title
   const trimmed = title.trim().slice(0, 120);
-  await supabase.from("chats").update({ title: trimmed }).eq("id", chatId);
+  await adminDb
+    .update(schema.chats)
+    .set({ title: trimmed })
+    .where(eq(schema.chats.id, chatId));
 
   return Response.json({ title: trimmed });
 }

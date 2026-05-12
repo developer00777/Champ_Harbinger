@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button";
 import { EditableEmail } from "@/components/ui/editable-email";
 import { ScoreBadge } from "@/components/ui/score-badge";
 import { useCampaign } from "@/lib/campaign-context";
-import { createClient } from "@/lib/supabase/client";
 import {
   enrichmentStatusStyles,
   outreachStatusStyles,
@@ -237,27 +236,24 @@ export function CompaniesList({
   };
 
   const updateContactEmail = async (contact: CampaignContact, next: string) => {
-    const supabase = createClient();
     const field: "work_email" | "personal_email" =
       contact.work_email || !contact.personal_email
         ? "work_email"
         : "personal_email";
     const oldEmail = contact[field];
-    const now = new Date().toISOString();
 
-    const { error } = await supabase
-      .from("people")
-      .update({ [field]: next || null, updated_at: now })
-      .eq("id", contact.person_id);
-    if (error) throw new Error(error.message);
-
-    if (oldEmail) {
-      await supabase
-        .from("email_drafts")
-        .update({ to_email: next, updated_at: now })
-        .eq("person_id", contact.person_id)
-        .eq("status", "draft")
-        .eq("to_email", oldEmail);
+    const res = await fetch(`/api/people/${contact.person_id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        field,
+        value: next || null,
+        oldEmail: oldEmail ?? undefined,
+      }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(data.error ?? "Failed to update email");
     }
 
     onDataChanged();

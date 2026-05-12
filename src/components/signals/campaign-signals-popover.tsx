@@ -13,7 +13,6 @@ import {
 import { SafeLink } from "@/components/safe-link";
 import { Switch } from "@/components/ui/switch";
 import { signalIconMap } from "@/lib/signal-icons";
-import { createClient } from "@/lib/supabase/client";
 import type { Signal } from "@/lib/types/signal";
 
 interface CampaignSignalsPopoverProps {
@@ -26,28 +25,21 @@ interface SignalsData {
 }
 
 async function fetchSignalsData(campaignId: string): Promise<SignalsData> {
-  const supabase = createClient();
   const [signalsRes, togglesRes] = await Promise.all([
-    supabase
-      .from("signals")
-      .select("*")
-      .order("is_builtin", { ascending: false })
-      .order("name"),
-    supabase
-      .from("campaign_signals")
-      .select("signal_id, enabled")
-      .eq("campaign_id", campaignId),
+    fetch("/api/signals").then((r) => r.json()),
+    fetch(`/api/campaign-signals?campaignId=${campaignId}`).then((r) =>
+      r.json(),
+    ),
   ]);
 
   const enabled: Record<string, boolean> = {};
-  for (const row of togglesRes.data ?? []) {
-    enabled[(row as Record<string, unknown>).signal_id as string] = (
-      row as Record<string, unknown>
-    ).enabled as boolean;
+  for (const row of Array.isArray(togglesRes) ? togglesRes : []) {
+    const r = row as { signalId: string; enabled: boolean };
+    enabled[r.signalId] = r.enabled;
   }
 
   return {
-    signals: (signalsRes.data as Signal[]) ?? [],
+    signals: Array.isArray(signalsRes) ? (signalsRes as Signal[]) : [],
     enabled,
   };
 }
@@ -83,16 +75,18 @@ export function CampaignSignalsPopover({
         ? { ...prev, enabled: { ...prev.enabled, [signalId]: enabled } }
         : prev,
     );
-    const supabase = createClient();
-    const { error } = await supabase.from("campaign_signals").upsert(
-      {
-        campaign_id: campaignId,
-        signal_id: signalId,
-        enabled,
-      },
-      { onConflict: "campaign_id,signal_id" },
-    );
-    if (error) {
+    try {
+      const res = await fetch("/api/campaign-signals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaign_id: campaignId,
+          signal_id: signalId,
+          enabled,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+    } catch {
       toast.error("Failed to toggle signal");
       setData((prev) =>
         prev
