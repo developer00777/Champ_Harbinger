@@ -9,6 +9,7 @@ const isPublicRoute = createRouteMatcher([
   "/login(.*)", // Clerk sign-in
   "/signup(.*)", // Clerk sign-up
   "/ingest(.*)", // PostHog proxy rewrites
+  "/api/metrics", // Prometheus scraping (no browser session)
   "/api/email/track(.*)", // email open/click tracking (public webhook)
   "/api/email/cleanup(.*)", // email cleanup webhooks
   "/api/tracking/(.*)", // tracking pixel/webhooks
