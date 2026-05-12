@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { currentUser } from "@clerk/nextjs/server";
 
-export function MarketingHeader() {
+export async function MarketingHeader() {
+  const user = await currentUser();
+
   return (
     <header className="sticky top-0 z-50 border-b border-champions-border bg-white/90 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
@@ -16,18 +19,29 @@ export function MarketingHeader() {
 
         {/* Nav actions */}
         <nav className="flex items-center gap-4">
-          <Link
-            href="/login"
-            className="text-sm font-medium text-champions-ink-soft hover:text-champions-orange transition-colors"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/signup"
-            className="inline-flex items-center justify-center rounded-md bg-champions-orange px-4 py-2 text-sm font-semibold text-white transition hover:bg-champions-deep-orange"
-          >
-            Get started
-          </Link>
+          {user ? (
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center justify-center rounded-md bg-champions-orange px-4 py-2 text-sm font-semibold text-white transition hover:bg-champions-deep-orange"
+            >
+              Open dashboard →
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="text-sm font-medium text-champions-ink-soft hover:text-champions-orange transition-colors"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/signup"
+                className="inline-flex items-center justify-center rounded-md bg-champions-orange px-4 py-2 text-sm font-semibold text-white transition hover:bg-champions-deep-orange"
+              >
+                Get started
+              </Link>
+            </>
+          )}
         </nav>
       </div>
     </header>

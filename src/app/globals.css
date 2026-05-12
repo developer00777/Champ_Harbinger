@@ -9,23 +9,39 @@
 
 @theme inline {
   /* Champions Group brand palette */
-  --color-champions-orange: #F26722;
-  --color-champions-deep-orange: #D94F0A;
-  --color-champions-bright-orange: #FF8544;
-  --color-champions-soft-peach: #FFF4EC;
-  --color-champions-warm-tint: #FFE8D6;
-  --color-champions-ink: #1A1A1A;
-  --color-champions-ink-soft: #2E2E2E;
-  --color-champions-warm-gray: #6B6B6B;
-  --color-champions-border: #E5E7EB;
-  --color-champions-off-white: #FAFAFA;
-  --color-champions-light-gray: #F5F5F5;
+  --color-champions-orange: #f26722;
+  --color-champions-deep-orange: #d94f0a;
+  --color-champions-bright-orange: #ff8544;
+  --color-champions-soft-peach: #fff4ec;
+  --color-champions-warm-tint: #ffe8d6;
+  --color-champions-ink: #1a1a1a;
+  --color-champions-ink-soft: #2e2e2e;
+  --color-champions-warm-gray: #6b6b6b;
+  --color-champions-border: #e5e7eb;
+  --color-champions-off-white: #fafafa;
+  --color-champions-light-gray: #f5f5f5;
 
   /* Champions Group gradient utilities */
-  --background-image-champions-gradient: linear-gradient(135deg, #F26722 0%, #D94F0A 100%);
-  --background-image-warm-sunset: linear-gradient(135deg, #FF8544 0%, #F26722 100%);
-  --background-image-peach-wash: linear-gradient(180deg, #FFF4EC 0%, #FFFFFF 100%);
-  --background-image-orange-fade: linear-gradient(180deg, #F26722 0%, #FFE8D6 100%);
+  --background-image-champions-gradient: linear-gradient(
+    135deg,
+    #f26722 0%,
+    #d94f0a 100%
+  );
+  --background-image-warm-sunset: linear-gradient(
+    135deg,
+    #ff8544 0%,
+    #f26722 100%
+  );
+  --background-image-peach-wash: linear-gradient(
+    180deg,
+    #fff4ec 0%,
+    #ffffff 100%
+  );
+  --background-image-orange-fade: linear-gradient(
+    180deg,
+    #f26722 0%,
+    #ffe8d6 100%
+  );
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -74,18 +90,18 @@
 
 :root {
   /* Champions Group CSS custom properties */
-  --cg-orange: #F26722;
-  --cg-deep-orange: #D94F0A;
-  --cg-bright-orange: #FF8544;
-  --cg-soft-peach: #FFF4EC;
-  --cg-warm-tint: #FFE8D6;
-  --cg-ink: #1A1A1A;
-  --cg-ink-soft: #2E2E2E;
-  --cg-white: #FFFFFF;
-  --cg-warm-gray: #6B6B6B;
-  --cg-border: #E5E7EB;
-  --cg-light-gray: #F5F5F5;
-  --cg-off-white: #FAFAFA;
+  --cg-orange: #f26722;
+  --cg-deep-orange: #d94f0a;
+  --cg-bright-orange: #ff8544;
+  --cg-soft-peach: #fff4ec;
+  --cg-warm-tint: #ffe8d6;
+  --cg-ink: #1a1a1a;
+  --cg-ink-soft: #2e2e2e;
+  --cg-white: #ffffff;
+  --cg-warm-gray: #6b6b6b;
+  --cg-border: #e5e7eb;
+  --cg-light-gray: #f5f5f5;
+  --cg-off-white: #fafafa;
 
   --radius: 0.625rem;
   --background: oklch(0.99 0.002 260);
@@ -174,8 +190,7 @@
   }
 }
 
-html,
-body {
+[data-app-shell] {
   overflow: hidden;
   overscroll-behavior: none;
   height: 100dvh;

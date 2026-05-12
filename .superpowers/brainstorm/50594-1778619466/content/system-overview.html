@@ -1,0 +1,484 @@
+<h2>The Two-Tool Architecture</h2>
+<p class="subtitle">
+  Confirm this mental model before we design the connection between them
+</p>
+
+<div style="display: flex; gap: 12px; align-items: stretch; margin: 28px 0">
+  <!-- ChampHarbinger -->
+  <div
+    style="
+      flex: 1;
+      background: #1a1a2e;
+      border: 2px solid #e86c3a;
+      border-radius: 12px;
+      padding: 24px;
+    "
+  >
+    <div
+      style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px"
+    >
+      <div
+        style="
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: #e86c3a;
+        "
+      ></div>
+      <span
+        style="
+          font-size: 18px;
+          font-weight: 700;
+          color: #e86c3a;
+          letter-spacing: 0.02em;
+        "
+        >ChampHarbinger</span
+      >
+    </div>
+    <p
+      style="
+        font-size: 13px;
+        color: #aaa;
+        margin-bottom: 18px;
+        font-style: italic;
+      "
+    >
+      "Who should we talk to, and why right now?"
+    </p>
+
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <div
+        style="
+          background: rgba(232, 108, 58, 0.1);
+          border-left: 3px solid #e86c3a;
+          padding: 10px 14px;
+          border-radius: 4px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            font-weight: 600;
+            color: #e86c3a;
+            margin-bottom: 3px;
+          "
+        >
+          SIGNAL ENGINE
+        </div>
+        <div style="font-size: 13px; color: #ddd">
+          Hiring surges · Funding rounds · Exec changes · Product launches ·
+          Sentiment shifts
+        </div>
+      </div>
+      <div
+        style="
+          background: rgba(232, 108, 58, 0.1);
+          border-left: 3px solid #e86c3a;
+          padding: 10px 14px;
+          border-radius: 4px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            font-weight: 600;
+            color: #e86c3a;
+            margin-bottom: 3px;
+          "
+        >
+          COMPANY DISCOVERY
+        </div>
+        <div style="font-size: 13px; color: #ddd">
+          Directory scraping · Semantic search · ICP matching · Batch
+          qualification
+        </div>
+      </div>
+      <div
+        style="
+          background: rgba(232, 108, 58, 0.1);
+          border-left: 3px solid #e86c3a;
+          padding: 10px 14px;
+          border-radius: 4px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            font-weight: 600;
+            color: #e86c3a;
+            margin-bottom: 3px;
+          "
+        >
+          ENRICHMENT PIPELINE
+        </div>
+        <div style="font-size: 13px; color: #ddd">
+          Exa · Browserbase · Apify · LakeB2B · LinkedIn · GitHub → contacts +
+          scores
+        </div>
+      </div>
+      <div
+        style="
+          background: rgba(232, 108, 58, 0.1);
+          border-left: 3px solid #e86c3a;
+          padding: 10px 14px;
+          border-radius: 4px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            font-weight: 600;
+            color: #e86c3a;
+            margin-bottom: 3px;
+          "
+        >
+          CHAT INTERFACE (internal)
+        </div>
+        <div style="font-size: 13px; color: #ddd">
+          Used by team to build signals · run ad-hoc research · test enrichment
+        </div>
+      </div>
+    </div>
+
+    <div
+      style="
+        margin-top: 20px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 8px;
+        text-align: center;
+      "
+    >
+      <div
+        style="
+          font-size: 11px;
+          color: #888;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+        "
+      >
+        Stack
+      </div>
+      <div style="font-size: 12px; color: #bbb; margin-top: 4px">
+        Next.js 16 · TypeScript · Drizzle · PostgreSQL · Clerk
+      </div>
+    </div>
+  </div>
+
+  <!-- Arrow / handoff -->
+  <div
+    style="
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-width: 110px;
+    "
+  >
+    <div
+      style="
+        font-size: 11px;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        text-align: center;
+      "
+    >
+      Qualified<br />prospect + signal
+    </div>
+    <div
+      style="
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      "
+    >
+      <div
+        style="
+          width: 2px;
+          height: 40px;
+          background: linear-gradient(to bottom, #e86c3a, #6c63ff);
+        "
+      ></div>
+      <div
+        style="
+          width: 0;
+          height: 0;
+          border-left: 8px solid transparent;
+          border-right: 8px solid transparent;
+          border-top: 12px solid #6c63ff;
+        "
+      ></div>
+    </div>
+    <div
+      style="
+        background: #111;
+        border: 1px solid #444;
+        border-radius: 6px;
+        padding: 8px 12px;
+        text-align: center;
+      "
+    >
+      <div style="font-size: 10px; color: #888; margin-bottom: 2px">
+        Handoff
+      </div>
+      <div style="font-size: 12px; color: #fff; font-weight: 600">?</div>
+    </div>
+    <div
+      style="
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      "
+    >
+      <div
+        style="
+          width: 0;
+          height: 0;
+          border-left: 8px solid transparent;
+          border-right: 8px solid transparent;
+          border-bottom: 12px solid #444;
+        "
+      ></div>
+      <div style="width: 2px; height: 30px; background: #444"></div>
+    </div>
+    <div
+      style="
+        font-size: 11px;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        text-align: center;
+      "
+    >
+      Reply<br />outcome
+    </div>
+  </div>
+
+  <!-- ChampIQ -->
+  <div
+    style="
+      flex: 1;
+      background: #0f1a2e;
+      border: 2px solid #6c63ff;
+      border-radius: 12px;
+      padding: 24px;
+    "
+  >
+    <div
+      style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px"
+    >
+      <div
+        style="
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: #6c63ff;
+        "
+      ></div>
+      <span
+        style="
+          font-size: 18px;
+          font-weight: 700;
+          color: #6c63ff;
+          letter-spacing: 0.02em;
+        "
+        >ChampIQ</span
+      >
+    </div>
+    <p
+      style="
+        font-size: 13px;
+        color: #aaa;
+        margin-bottom: 18px;
+        font-style: italic;
+      "
+    >
+      "Go get them — and don't stop until they reply."
+    </p>
+
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <div
+        style="
+          background: rgba(108, 99, 255, 0.1);
+          border-left: 3px solid #6c63ff;
+          padding: 10px 14px;
+          border-radius: 4px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c63ff;
+            margin-bottom: 3px;
+          "
+        >
+          AI-SDR CANVAS (Pixie)
+        </div>
+        <div style="font-size: 13px; color: #ddd">
+          Visual drag-and-drop workflow builder · Chat-to-workflow via LLM
+        </div>
+      </div>
+      <div
+        style="
+          background: rgba(108, 99, 255, 0.1);
+          border-left: 3px solid #6c63ff;
+          padding: 10px 14px;
+          border-radius: 4px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c63ff;
+            margin-bottom: 3px;
+          "
+        >
+          CHAMPMIAL SEQUENCES
+        </div>
+        <div style="font-size: 13px; color: #ddd">
+          Multi-step email campaigns · Personalisation variables · Open / reply
+          tracking
+        </div>
+      </div>
+      <div
+        style="
+          background: rgba(108, 99, 255, 0.1);
+          border-left: 3px solid #6c63ff;
+          padding: 10px 14px;
+          border-radius: 4px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c63ff;
+            margin-bottom: 3px;
+          "
+        >
+          LINKEDIN AUTOMATION
+        </div>
+        <div style="font-size: 13px; color: #ddd">
+          LakeB2B Pulse · Page tracking · Scheduled engagement · Comment
+          scheduling
+        </div>
+      </div>
+      <div
+        style="
+          background: rgba(108, 99, 255, 0.1);
+          border-left: 3px solid #6c63ff;
+          padding: 10px 14px;
+          border-radius: 4px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c63ff;
+            margin-bottom: 3px;
+          "
+        >
+          EXECUTION ENGINE
+        </div>
+        <div style="font-size: 13px; color: #ddd">
+          WebSocket real-time logs · APScheduler + Redis · ChampGraph knowledge
+          base
+        </div>
+      </div>
+    </div>
+
+    <div
+      style="
+        margin-top: 20px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 8px;
+        text-align: center;
+      "
+    >
+      <div
+        style="
+          font-size: 11px;
+          color: #888;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+        "
+      >
+        Stack
+      </div>
+      <div style="font-size: 12px; color: #bbb; margin-top: 4px">
+        React + Vite · FastAPI · SQLAlchemy · Redis · PostgreSQL
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  style="
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-top: 4px;
+  "
+>
+  <div
+    style="
+      font-size: 12px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    "
+  >
+    What flows between them
+  </div>
+  <div style="display: flex; gap: 20px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 8px">
+      <div
+        style="width: 8px; height: 8px; border-radius: 50%; background: #e86c3a"
+      ></div>
+      <span style="font-size: 13px; color: #ccc"
+        >Company name, domain, size, industry</span
+      >
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <div
+        style="width: 8px; height: 8px; border-radius: 50%; background: #e86c3a"
+      ></div>
+      <span style="font-size: 13px; color: #ccc"
+        >Contact: name, email, title, LinkedIn</span
+      >
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <div
+        style="width: 8px; height: 8px; border-radius: 50%; background: #e86c3a"
+      ></div>
+      <span style="font-size: 13px; color: #ccc"
+        >Signal that fired + reasoning</span
+      >
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <div
+        style="width: 8px; height: 8px; border-radius: 50%; background: #e86c3a"
+      ></div>
+      <span style="font-size: 13px; color: #ccc"
+        >ICP fit score + talking points</span
+      >
+    </div>
+  </div>
+</div>
+
+<p style="text-align: center; color: #888; font-size: 13px; margin-top: 24px">
+  Does this split match your vision? The big open question is the middle —
+  <strong style="color: #fff">how does the handoff happen?</strong> We'll design
+  that next.
+</p>
