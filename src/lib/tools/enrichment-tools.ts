@@ -22,7 +22,6 @@ import {
   filterContactsByCompany,
   type CandidateContact,
 } from "@/lib/services/contact-filter";
-import { recordVerifiedEmail } from "@/lib/services/email-pattern";
 
 export const searchPeople = tool({
   description:

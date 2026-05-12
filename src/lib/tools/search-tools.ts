@@ -2,7 +2,7 @@ import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { generateObject, tool } from "ai";
 import { z } from "zod";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { adminDb as db } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { ExaService, type SearchCategory } from "@/lib/services/exa-service";
@@ -832,7 +832,6 @@ export const searchYCCompanies = tool({
   execute: async (input) => {
     // ── Step 1: Check cache ──────────────────────────────────────────────
     // Use adminDb for shared org table (no user scoping needed)
-    const { ilike } = await import("drizzle-orm");
     let cachedOrgs = await db
       .select()
       .from(schema.organizations)

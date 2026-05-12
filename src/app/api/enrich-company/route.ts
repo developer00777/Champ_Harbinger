@@ -183,7 +183,8 @@ async function findContactsForCompany(
   orgId: string,
   company: CompanyContext,
   campaignId: string,
-  linkId?: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _linkId?: string,
 ): Promise<{ totalFound: number }> {
   let totalFound = 0;
 

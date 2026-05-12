@@ -8,6 +8,18 @@ import type { Signal } from "@/lib/types/signal";
 
 export const maxDuration = 60;
 
+/** Map confidence label to a 0–1 numeric score for champiq_queue.score */
+function confidenceToScore(confidence: "high" | "medium" | "low"): number {
+  switch (confidence) {
+    case "high":
+      return 0.9;
+    case "medium":
+      return 0.6;
+    case "low":
+      return 0.3;
+  }
+}
+
 export async function POST(request: Request) {
   let ctx: Awaited<ReturnType<typeof validateApiKey>>;
   try {
@@ -15,8 +27,6 @@ export async function POST(request: Request) {
   } catch (e) {
     return e as Response;
   }
-
-  void ctx; // userId available for future scoping
 
   const body = (await request.json()) as {
     signal_id?: string;
@@ -63,10 +73,43 @@ export async function POST(request: Request) {
     useAdmin: true,
   });
 
+  // When the signal fired, stage the company in champiq_queue
+  let queued = false;
+  if (output.found) {
+    const [settings] = await adminDb
+      .select({
+        champiqHandoffMode: schema.userSettings.champiqHandoffMode,
+        champiqSignalConfig: schema.userSettings.champiqSignalConfig,
+      })
+      .from(schema.userSettings)
+      .where(eq(schema.userSettings.clerkUserId, ctx.userId))
+      .limit(1);
+
+    const handoffMode = settings?.champiqHandoffMode ?? "review";
+
+    await adminDb.insert(schema.champiqQueue).values({
+      clerkUserId: ctx.userId,
+      companyName: body.domain,
+      companyDomain: body.domain,
+      companyData: output.data ?? {},
+      contacts: [],
+      signalId: signal.id,
+      signalName: signal.name,
+      signalReasoning: output.summary ?? "",
+      signalData: output.data ?? {},
+      score: confidenceToScore(output.confidence),
+      talkingPoints: [],
+      status: handoffMode === "auto" ? "pushed" : "pending",
+    });
+
+    queued = true;
+  }
+
   return NextResponse.json({
     fired: output.found,
-    reasoning: output.summary,
-    data: output.data,
+    reasoning: output.summary ?? "",
+    data: output.data ?? {},
     fired_at: output.found ? new Date().toISOString() : null,
+    queued,
   });
 }

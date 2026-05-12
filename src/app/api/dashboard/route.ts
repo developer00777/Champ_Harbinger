@@ -1,7 +1,7 @@
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
-import { eq, inArray, sql, count } from "drizzle-orm";
+import { eq, inArray, sql, count, desc } from "drizzle-orm";
 
 export async function GET(request: Request) {
   let userId: string;
@@ -35,6 +35,7 @@ export async function GET(request: Request) {
       totals: { leads: 0, sent: 0, opened: 0, replied: 0, bounced: 0 },
       timeSeries: [],
       campaigns: [],
+      topSignals: [],
     });
   }
 
@@ -153,5 +154,27 @@ export async function GET(request: Request) {
     })
     .sort((a, b) => b.replyRate - a.replyRate);
 
-  return Response.json({ totals, timeSeries, campaigns });
+  const signalResults = campaignIds.length
+    ? await adminDb
+        .select({ signalName: schema.signals.name, firedCount: count() })
+        .from(schema.signalResults)
+        .innerJoin(
+          schema.signals,
+          eq(schema.signalResults.signalId, schema.signals.id),
+        )
+        .where(inArray(schema.signalResults.campaignId, campaignIds))
+        .groupBy(schema.signals.name)
+        .orderBy(desc(count()))
+        .limit(5)
+    : [];
+
+  return Response.json({
+    totals,
+    timeSeries,
+    campaigns,
+    topSignals: signalResults.map((r) => ({
+      name: r.signalName,
+      count: Number(r.firedCount),
+    })),
+  });
 }

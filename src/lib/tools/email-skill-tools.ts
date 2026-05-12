@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { eq, and, or, desc } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { getScopedDb, schema } from "@/lib/db/scoped";
 import { db } from "@/db";
 

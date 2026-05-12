@@ -307,13 +307,11 @@ export function CompaniesList({
                 contactsByOrgId.get(company.organization_id) ?? [];
               let enrichedCount = 0;
               let missingEmailCount = 0;
-              let scoredCount = 0;
               let topScore: number | null = null;
               for (const c of companyContacts) {
                 if (c.enrichment_status === "enriched") enrichedCount++;
                 if (!c.work_email) missingEmailCount++;
                 if (c.priority_score != null && c.priority_score > 0) {
-                  scoredCount++;
                   if (topScore === null || c.priority_score > topScore) {
                     topScore = c.priority_score;
                   }

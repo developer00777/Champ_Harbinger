@@ -51,6 +51,7 @@ interface DashboardData {
     replied: number;
     replyRate: number;
   }>;
+  topSignals?: Array<{ name: string; count: number }>;
 }
 
 export default function DashboardPage() {
@@ -58,6 +59,9 @@ export default function DashboardPage() {
   const [range, setRange] = useState("30d");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [topSignals, setTopSignals] = useState<
+    { name: string; count: number }[]
+  >([]);
 
   const fetchData = useCallback(async (r: string) => {
     setLoading(true);
@@ -67,6 +71,7 @@ export default function DashboardPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
+      setTopSignals(json.topSignals ?? []);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       console.error("[dashboard] Failed to fetch:", err);
@@ -138,6 +143,24 @@ export default function DashboardPage() {
           range={range}
           onRangeChange={handleRangeChange}
         />
+
+        {topSignals.length > 0 && (
+          <section className="rounded-lg border p-4">
+            <h2 className="text-sm font-semibold text-muted-foreground mb-3">
+              Top signals fired
+            </h2>
+            <div className="space-y-2">
+              {topSignals.map((s) => (
+                <div key={s.name} className="flex justify-between text-sm">
+                  <span>{s.name}</span>
+                  <span className="font-medium text-champions-orange">
+                    {s.count}×
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <div>
           <h2 className="mb-3 text-lg font-semibold">Campaigns</h2>

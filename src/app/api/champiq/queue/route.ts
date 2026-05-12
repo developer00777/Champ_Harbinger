@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { getCurrentUser } from "@/lib/auth";
@@ -16,7 +16,7 @@ export async function GET() {
         eq(schema.champiqQueue.status, "pending"),
       ),
     )
-    .orderBy(schema.champiqQueue.createdAt)
+    .orderBy(desc(schema.champiqQueue.createdAt))
     .limit(20);
 
   return NextResponse.json(
@@ -38,12 +38,39 @@ export async function POST(request: Request) {
 
   const body = (await request.json()) as {
     id?: string;
-    action?: "push" | "discard";
+    action?: "push" | "discard" | "push_all";
   };
 
-  if (!body.id || !body.action || !["push", "discard"].includes(body.action)) {
+  if (!body.action || !["push", "discard", "push_all"].includes(body.action)) {
     return NextResponse.json(
-      { error: "id and action (push|discard) are required" },
+      { error: "action (push|discard|push_all) is required" },
+      { status: 400 },
+    );
+  }
+
+  // Bulk-approve all pending items for this user
+  if (body.action === "push_all") {
+    await adminDb
+      .update(schema.champiqQueue)
+      .set({
+        status: "pushed",
+        pushedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.champiqQueue.clerkUserId, userId),
+          eq(schema.champiqQueue.status, "pending"),
+        ),
+      );
+
+    return NextResponse.json({ ok: true, action: "push_all" });
+  }
+
+  // Single-item push or discard
+  if (!body.id) {
+    return NextResponse.json(
+      { error: "id is required for push and discard actions" },
       { status: 400 },
     );
   }

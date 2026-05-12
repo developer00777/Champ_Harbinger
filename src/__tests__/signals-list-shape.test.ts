@@ -5,7 +5,7 @@ vi.mock("@/lib/signals/runner", () => ({ runRecipe: vi.fn() }));
 vi.mock("@/lib/signals/executor", () => ({ executeSignal: vi.fn() }));
 
 // The tool calls: db.select({...}).from(schema.signals).where(...).orderBy(...)
-const { mockOrderBy, mockWhere, mockFrom, mockSelect } = vi.hoisted(() => {
+const { mockSelect } = vi.hoisted(() => {
   const mockOrderBy = vi.fn().mockResolvedValue([
     {
       id: "s1",
@@ -20,7 +20,7 @@ const { mockOrderBy, mockWhere, mockFrom, mockSelect } = vi.hoisted(() => {
     .fn()
     .mockReturnValue({ where: mockWhere, orderBy: mockOrderBy });
   const mockSelect = vi.fn().mockReturnValue({ from: mockFrom });
-  return { mockOrderBy, mockWhere, mockFrom, mockSelect };
+  return { mockSelect };
 });
 
 vi.mock("@/lib/db/admin", () => ({
