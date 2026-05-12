@@ -12,6 +12,7 @@ import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { EmailSkillsAttacher } from "@/components/email-skills/email-skills-attacher";
 import { ApiKeysPanel } from "@/components/settings/api-keys-panel";
+import { ChampIQPanel } from "@/components/settings/champiq-panel";
 
 const noop = () => () => {};
 const getTrue = () => true;
@@ -59,6 +60,7 @@ export default function SettingsPage() {
             <TabsTrigger value="preferences">Preferences</TabsTrigger>
             <TabsTrigger value="usage">Usage</TabsTrigger>
             <TabsTrigger value="keys">Keys</TabsTrigger>
+            <TabsTrigger value="champiq">ChampIQ</TabsTrigger>
           </TabsList>
 
           <TabsContent value="email" className="space-y-8">
@@ -97,6 +99,15 @@ export default function SettingsPage() {
               description="Bring your own API keys. Stored encrypted and used only for your account. They override server-level environment variables."
             >
               <ApiKeysPanel />
+            </SettingsSection>
+          </TabsContent>
+
+          <TabsContent value="champiq">
+            <SettingsSection
+              title="ChampIQ Integration"
+              description="Connect ChampHarbinger as the signal intelligence engine for ChampIQ. ChampIQ will call ChampHarbinger's API to run signals, discover companies, and pull qualified prospects."
+            >
+              <ChampIQPanel />
             </SettingsSection>
           </TabsContent>
         </Tabs>
