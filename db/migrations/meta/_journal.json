@@ -15,6 +15,13 @@
       "when": 1778619995985,
       "tag": "0001_redundant_triton",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778621847568,
+      "tag": "0002_wise_mysterio",
+      "breakpoints": true
     }
   ]
 }

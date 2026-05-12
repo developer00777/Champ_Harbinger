@@ -180,6 +180,12 @@ export const userSettings = pgTable(
     agentmailInboxId: text("agentmail_inbox_id"),
     fromName: text("from_name"),
     replyToEmail: text("reply_to_email"),
+    // ChampIQ integration settings
+    champiqUrl: text("champiq_url"),
+    champiqHandoffMode: text("champiq_handoff_mode").default("review"),
+    champiqSignalConfig: jsonb("champiq_signal_config")
+      .$type<Record<string, { mode: "auto" | "review"; min_score: number }>>()
+      .default({}),
     ...timestamps,
   },
   (t) => ({
@@ -844,5 +850,49 @@ export const userApiKeys = pgTable(
       t.keyName,
     ),
     byUser: index("user_api_keys_clerk_user_id_idx").on(t.clerkUserId),
+  }),
+);
+
+// ─── ChampIQ queue ────────────────────────────────────────────────────────────
+
+/**
+ * Prospects that have cleared the ChampHarbinger handoff threshold and are
+ * waiting to be pushed (or have been pushed/discarded) to ChampIQ.
+ */
+export const champiqQueue = pgTable(
+  "champiq_queue",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    clerkOrgId: text("clerk_org_id"),
+    companyName: text("company_name").notNull(),
+    companyDomain: text("company_domain").notNull(),
+    companyData: jsonb("company_data")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    contacts: jsonb("contacts")
+      .$type<Array<Record<string, unknown>>>()
+      .default([])
+      .notNull(),
+    signalId: uuid("signal_id"),
+    signalName: text("signal_name"),
+    signalReasoning: text("signal_reasoning"),
+    signalData: jsonb("signal_data")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    score: real("score"),
+    talkingPoints: jsonb("talking_points")
+      .$type<string[]>()
+      .default([])
+      .notNull(),
+    status: text("status").notNull().default("pending"),
+    ...timestamps,
+    pushedAt: timestamp("pushed_at", { withTimezone: true }),
+  },
+  (t) => ({
+    byUser: index("champiq_queue_clerk_user_id_idx").on(t.clerkUserId),
+    byStatus: index("champiq_queue_status_idx").on(t.status),
   }),
 );
