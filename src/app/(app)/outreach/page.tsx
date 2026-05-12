@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useChampIQStatus } from "@/hooks/use-champiq-status";
 
 import {
   classifyDraft,
@@ -38,6 +39,10 @@ export interface EnrollmentCard {
 }
 
 export default function OutreachPage() {
+  const champiqStatus = useChampIQStatus();
+  const [outreachMode, setOutreachMode] = useState<"champiq" | "standalone">(
+    "champiq",
+  );
   const [sequences, setSequences] = useState<SequenceRow[]>([]);
   const [enrollments, setEnrollments] = useState<EnrollmentCard[]>([]);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
@@ -112,9 +117,43 @@ export default function OutreachPage() {
               Buying-signal-driven email sequences across all campaigns.
             </p>
           </div>
+          {champiqStatus === "connected" && (
+            <div className="flex overflow-hidden rounded-md border text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setOutreachMode("champiq")}
+                className={`px-3 py-1.5 transition-colors ${
+                  outreachMode === "champiq"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                ChampIQ
+              </button>
+              <button
+                type="button"
+                onClick={() => setOutreachMode("standalone")}
+                className={`px-3 py-1.5 transition-colors ${
+                  outreachMode === "standalone"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Standalone
+              </button>
+            </div>
+          )}
         </div>
 
-        {loading ? (
+        {champiqStatus === "connected" && outreachMode === "champiq" ? (
+          <div className="text-muted-foreground rounded-lg border bg-muted/20 p-4 text-sm">
+            Outreach is being managed by ChampIQ. Visit your ChampIQ canvas to
+            review sequences and track replies.{" "}
+            <a href="/settings?tab=champiq" className="underline">
+              Manage connection →
+            </a>
+          </div>
+        ) : loading ? (
           <div className="flex items-center gap-2">
             <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />
             <span className="text-muted-foreground text-sm">Loading...</span>

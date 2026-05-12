@@ -17,6 +17,7 @@ import {
 import { NavUser } from "@/components/nav-user";
 import { SidebarCampaigns } from "@/components/sidebar-campaigns";
 import { useCampaign } from "@/lib/campaign-context";
+import { useChampIQStatus } from "@/hooks/use-champiq-status";
 import {
   Sidebar,
   SidebarContent,
@@ -77,13 +78,17 @@ const defaultUser = {
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const { activeCampaignId, setActiveCampaignId } = useCampaign();
+  const champiqStatus = useChampIQStatus();
 
   return (
     <Sidebar variant="inset" collapsible="icon" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<SafeLink href="/dashboard" />}>
+            <SidebarMenuButton
+              size="lg"
+              render={<SafeLink href="/dashboard" />}
+            >
               <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
                 <span className="text-sm font-bold">CH</span>
               </div>
@@ -122,6 +127,24 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
         />
       </SidebarContent>
       <SidebarFooter>
+        {champiqStatus === "connected" && (
+          <div className="mx-2 mb-1 flex items-center gap-1.5 px-2 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+            <span className="text-muted-foreground text-xs">ChampIQ live</span>
+          </div>
+        )}
+        {champiqStatus === "unconfigured" && (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              render={<SafeLink href="/settings?tab=champiq" />}
+              tooltip="Connect ChampIQ"
+              className="text-muted-foreground"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              <span className="text-xs">Connect ChampIQ</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
