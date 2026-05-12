@@ -11,6 +11,7 @@ import { EmailSettings } from "@/components/settings/email-settings";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { EmailSkillsAttacher } from "@/components/email-skills/email-skills-attacher";
+import { ApiKeysPanel } from "@/components/settings/api-keys-panel";
 
 const noop = () => () => {};
 const getTrue = () => true;
@@ -57,6 +58,7 @@ export default function SettingsPage() {
             <TabsTrigger value="integrations">Integrations</TabsTrigger>
             <TabsTrigger value="preferences">Preferences</TabsTrigger>
             <TabsTrigger value="usage">Usage</TabsTrigger>
+            <TabsTrigger value="keys">Keys</TabsTrigger>
           </TabsList>
 
           <TabsContent value="email" className="space-y-8">
@@ -87,6 +89,15 @@ export default function SettingsPage() {
 
           <TabsContent value="usage">
             <CostCenter />
+          </TabsContent>
+
+          <TabsContent value="keys">
+            <SettingsSection
+              title="API Keys"
+              description="Bring your own API keys. Stored encrypted and used only for your account. They override server-level environment variables."
+            >
+              <ApiKeysPanel />
+            </SettingsSection>
           </TabsContent>
         </Tabs>
       </div>

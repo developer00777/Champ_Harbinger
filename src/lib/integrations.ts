@@ -53,6 +53,12 @@ export interface Integration {
   keysUrl?: string;
   /** Suggested fix command — usually "pnpm setup" or "Add X to .env.local". */
   fixHint?: string;
+  /**
+   * The key name used in the BYOK (Bring Your Own Key) settings table.
+   * When set, the integration appears in the API Keys settings tab.
+   * System-level integrations (Clerk, Postgres) omit this field.
+   */
+  keyName?: string;
 }
 
 export const INTEGRATIONS: Integration[] = [
@@ -97,6 +103,7 @@ export const INTEGRATIONS: Integration[] = [
     signupUrl: "https://openrouter.ai",
     keysUrl: "https://openrouter.ai/keys",
     fixHint: "Add `OPENROUTER_API_KEY=sk-or-...` to .env.local",
+    keyName: "openrouter_api_key",
   },
 
   // ─── OPTIONAL ────────────────────────────────────────────────────────────
@@ -112,6 +119,7 @@ export const INTEGRATIONS: Integration[] = [
     signupUrl: "https://console.anthropic.com",
     keysUrl: "https://console.anthropic.com/settings/admin-keys",
     fixHint: "Add `ANTHROPIC_ADMIN_KEY=sk-ant-admin...` to .env.local",
+    keyName: "anthropic_admin_key",
   },
   {
     id: "browserbase",
@@ -125,6 +133,7 @@ export const INTEGRATIONS: Integration[] = [
     signupUrl: "https://www.browserbase.com",
     keysUrl: "https://www.browserbase.com/settings",
     fixHint: "Add BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID to .env.local",
+    keyName: "browserbase_api_key",
   },
   {
     id: "champmail",
@@ -137,6 +146,7 @@ export const INTEGRATIONS: Integration[] = [
     envVars: ["CHAMPMAIL_API_KEY"],
     fixHint:
       "Add `CHAMPMAIL_API_KEY=...` to .env.local (ChampMail integration coming soon)",
+    keyName: "champmail_api_key",
   },
   {
     id: "qstash",
@@ -155,6 +165,7 @@ export const INTEGRATIONS: Integration[] = [
     keysUrl: "https://console.upstash.com/qstash",
     fixHint:
       "Add QSTASH_TOKEN + QSTASH_CURRENT_SIGNING_KEY + QSTASH_NEXT_SIGNING_KEY",
+    keyName: "qstash_token",
   },
   {
     id: "exa",
@@ -168,6 +179,7 @@ export const INTEGRATIONS: Integration[] = [
     signupUrl: "https://exa.ai",
     keysUrl: "https://dashboard.exa.ai/api-keys",
     fixHint: "Add `EXA_API_KEY=...` to .env.local",
+    keyName: "exa_api_key",
   },
   {
     id: "google_places",
@@ -181,6 +193,7 @@ export const INTEGRATIONS: Integration[] = [
       "https://developers.google.com/maps/documentation/places/web-service",
     keysUrl: "https://console.cloud.google.com/apis/credentials",
     fixHint: "Add `GOOGLE_API_KEY=...` to .env.local",
+    keyName: "google_api_key",
   },
   {
     id: "apify",
@@ -193,6 +206,7 @@ export const INTEGRATIONS: Integration[] = [
     signupUrl: "https://apify.com",
     keysUrl: "https://console.apify.com/account/integrations",
     fixHint: "Add `APIFY_API_TOKEN=apify_api_...` to .env.local",
+    keyName: "apify_api_token",
   },
   {
     id: "github",
@@ -206,6 +220,7 @@ export const INTEGRATIONS: Integration[] = [
     signupUrl: "https://github.com/settings/tokens",
     keysUrl: "https://github.com/settings/tokens",
     fixHint: "Generate a fine-grained token with read-only public_repo scope",
+    keyName: "github_token",
   },
 ];
 
