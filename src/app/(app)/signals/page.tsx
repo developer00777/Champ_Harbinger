@@ -11,7 +11,6 @@ import { TogglePill } from "@/components/ui/toggle-pill";
 import { SignalCard } from "@/components/signals/signal-card";
 import { SignalDetailDialog } from "@/components/signals/signal-detail-dialog";
 import { useCampaign } from "@/lib/campaign-context";
-import { createClient } from "@/lib/supabase/client";
 import type { Signal, SignalCategory } from "@/lib/types/signal";
 import type { Campaign } from "@/lib/types/campaign";
 
@@ -61,21 +60,39 @@ function SignalsPageContent() {
   const mountedRef = useRef(true);
 
   const fetchData = useCallback(async () => {
-    const supabase = createClient();
     const [signalsRes, campaignsRes] = await Promise.all([
-      supabase
-        .from("signals")
-        .select("*")
-        .order("is_builtin", { ascending: false })
-        .order("name"),
-      supabase
-        .from("campaigns")
-        .select("id, name, status")
-        .order("updated_at", { ascending: false }),
+      fetch("/api/signals"),
+      fetch("/api/campaigns"),
     ]);
     if (!mountedRef.current) return;
-    setSignals((signalsRes.data as Signal[]) ?? []);
-    setCampaigns((campaignsRes.data as Campaign[]) ?? []);
+    if (signalsRes.ok) {
+      setSignals((await signalsRes.json()) as Signal[]);
+    }
+    if (campaignsRes.ok) {
+      const rawCampaigns = (await campaignsRes.json()) as Array<{
+        id: string;
+        name: string;
+        status: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+      // Map camelCase API response to the Campaign type used by the component
+      setCampaigns(
+        rawCampaigns.map((c) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          profile_id: null,
+          icp: {},
+          offering: {},
+          positioning: {},
+          search_criteria: {},
+          notes: null,
+          created_at: c.createdAt,
+          updated_at: c.updatedAt,
+        })),
+      );
+    }
     setLoading(false);
   }, []);
 
@@ -84,17 +101,18 @@ function SignalsPageContent() {
       setEnabledMap({});
       return;
     }
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("campaign_signals")
-      .select("signal_id, enabled")
-      .eq("campaign_id", campaignId);
+    const res = await fetch(
+      `/api/campaign-signals?campaignId=${encodeURIComponent(campaignId)}`,
+    );
     if (!mountedRef.current) return;
+    if (!res.ok) return;
+    const data = (await res.json()) as Array<{
+      signalId: string;
+      enabled: boolean;
+    }>;
     const map: Record<string, boolean> = {};
-    for (const row of data ?? []) {
-      map[(row as Record<string, unknown>).signal_id as string] = (
-        row as Record<string, unknown>
-      ).enabled as boolean;
+    for (const row of data) {
+      map[row.signalId] = row.enabled;
     }
     setEnabledMap(map);
   }, []);
@@ -102,7 +120,8 @@ function SignalsPageContent() {
   useEffect(() => {
     mountedRef.current = true;
 
-    fetchData();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchData();
     return () => {
       mountedRef.current = false;
     };
@@ -110,23 +129,23 @@ function SignalsPageContent() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (selectedCampaignId) fetchToggles(selectedCampaignId);
+    if (selectedCampaignId) void fetchToggles(selectedCampaignId);
     else setEnabledMap({});
   }, [selectedCampaignId, fetchToggles]);
 
   const handleToggle = async (signalId: string, enabled: boolean) => {
     if (!selectedCampaignId) return;
     setEnabledMap((prev) => ({ ...prev, [signalId]: enabled }));
-    const supabase = createClient();
-    const { error } = await supabase.from("campaign_signals").upsert(
-      {
+    const res = await fetch("/api/campaign-signals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         campaign_id: selectedCampaignId,
         signal_id: signalId,
         enabled,
-      },
-      { onConflict: "campaign_id,signal_id" },
-    );
-    if (error) {
+      }),
+    });
+    if (!res.ok) {
       toast.error("Failed to toggle signal");
       setEnabledMap((prev) => ({ ...prev, [signalId]: !enabled }));
     }
@@ -153,12 +172,12 @@ function SignalsPageContent() {
   };
 
   const handleMakePublic = async (signal: Signal) => {
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("signals")
-      .update({ is_public: true })
-      .eq("id", signal.id);
-    if (error) {
+    const res = await fetch("/api/signals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: signal.id, is_public: true }),
+    });
+    if (!res.ok) {
       toast.error("Failed to publish signal");
     } else {
       toast.success("Signal published to community");

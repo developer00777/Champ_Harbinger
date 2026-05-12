@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import { createClient } from "@/lib/supabase/client";
 import {
   classifyDraft,
   type DraftRow,
@@ -46,193 +45,29 @@ export default function OutreachPage() {
   const mountedRef = useRef(true);
 
   const load = useCallback(async () => {
-    const supabase = createClient();
-
-    const [
-      seqsRes,
-      enrollmentCountsRes,
-      enrollmentsRes,
-      draftsRes,
-      settingsRes,
-      stepRowsRes,
-    ] = await Promise.all([
-      supabase
-        .from("sequences")
-        .select("id, name, status, campaign_id, campaigns(name)")
-        .order("created_at", { ascending: false }),
-      supabase.from("sequence_enrollments").select("sequence_id, status"),
-      supabase
-        .from("sequence_enrollments")
-        .select(
-          `
-            id, sequence_id, person_id, campaign_people_id,
-            current_step, status, next_send_at,
-            people(name, title, organization_id, organizations(name)),
-            campaign_people(outreach_status),
-            sequences(name)
-          `,
-        )
-        .in("status", ["waiting", "queued", "active", "replied"])
-        .order("updated_at", { ascending: false }),
-      supabase
-        .from("email_drafts")
-        .select(
-          `
-            id, subject, to_email, review_status, status, sent_at,
-            enrollment_id, sequence_step_id,
-            sequence_enrollments(next_send_at, sequence_id),
-            sequence_steps(step_number),
-            sequences(name),
-            people(name, title, organizations(name))
-          `,
-        )
-        .in("status", ["draft"])
-        .order("created_at", { ascending: false })
-        .limit(200),
-      supabase.from("user_settings").select("from_name").maybeSingle(),
-      supabase.from("sequence_steps").select("sequence_id, step_number"),
-    ]);
-
+    const res = await fetch("/api/outreach");
     if (!mountedRef.current) return;
-
-    const seqs = seqsRes.data ?? [];
-    const enrollmentRows = enrollmentCountsRes.data ?? [];
-    const cards = enrollmentsRes.data ?? [];
-    const rawDrafts = draftsRes.data ?? [];
-    const hasInbox = false; // Email sending disabled until ChampMail or another provider is configured
-
-    // Sequence counts
-    const countsBySeq = new Map<
-      string,
-      { enrolled: number; waiting: number; sent: number; replied: number }
-    >();
-    for (const e of enrollmentRows) {
-      const prev = countsBySeq.get(e.sequence_id) ?? {
-        enrolled: 0,
-        waiting: 0,
-        sent: 0,
-        replied: 0,
-      };
-      prev.enrolled++;
-      if (e.status === "waiting" || e.status === "queued") prev.waiting++;
-      if (e.status === "active") prev.sent++;
-      if (e.status === "replied") prev.replied++;
-      countsBySeq.set(e.sequence_id, prev);
+    if (!res.ok) {
+      setLoading(false);
+      return;
     }
-
-    // Count total steps per sequence (for Step N/M display)
-    const totalStepsBySeq = new Map<string, number>();
-    const stepRows = stepRowsRes.data;
-    for (const s of (stepRows ?? []) as Array<{
-      sequence_id: string;
-      step_number: number;
-    }>) {
-      const cur = totalStepsBySeq.get(s.sequence_id) ?? 0;
-      if (s.step_number > cur)
-        totalStepsBySeq.set(s.sequence_id, s.step_number);
-    }
-
-    const sequenceRows: SequenceRow[] = seqs.map(
-      (
-        s: Record<string, unknown> & {
-          id: string;
-          name: string;
-          campaign_id: string | null;
-        },
-      ) => {
-        const counts = countsBySeq.get(s.id) ?? {
-          enrolled: 0,
-          waiting: 0,
-          sent: 0,
-          replied: 0,
-        };
-        const campaign = s.campaigns as unknown as { name: string } | null;
-        return {
-          id: s.id,
-          name: s.name,
-          status: s.status,
-          campaign_id: s.campaign_id,
-          campaign_name: campaign?.name ?? "Unknown",
-          ...counts,
-        };
-      },
-    );
-
-    const enrollmentCards: EnrollmentCard[] = cards.map(
-      (c: Record<string, unknown>) => {
-        const person = c.people as unknown as {
-          name: string;
-          title: string | null;
-          organization_id: string | null;
-          organizations: { name: string } | null;
-        } | null;
-        const cp = c.campaign_people as unknown as {
-          outreach_status: string;
-        } | null;
-        const seq = c.sequences as unknown as { name: string } | null;
-        return {
-          id: c.id,
-          sequence_id: c.sequence_id,
-          person_id: c.person_id,
-          campaign_people_id: c.campaign_people_id,
-          current_step: c.current_step,
-          status: c.status,
-          next_send_at: c.next_send_at,
-          person_name: person?.name ?? "Unknown",
-          person_title: person?.title ?? null,
-          company_name: person?.organizations?.name ?? null,
-          outreach_status: cp?.outreach_status ?? null,
-          sequence_name: seq?.name ?? "",
-        };
-      },
-    );
-
-    const draftRows: DraftRow[] = rawDrafts.map(
-      (d: Record<string, unknown>) => {
-        const person = d.people as unknown as {
-          name: string;
-          title: string | null;
-          organizations: { name: string } | null;
-        } | null;
-        const enrollment = d.sequence_enrollments as unknown as {
-          next_send_at: string | null;
-          sequence_id: string | null;
-        } | null;
-        const step = d.sequence_steps as unknown as {
-          step_number: number;
-        } | null;
-        const seq = d.sequences as unknown as { name: string } | null;
-        const sequenceId = enrollment?.sequence_id ?? null;
-        return {
-          id: d.id,
-          subject: d.subject ?? "",
-          to_email: d.to_email ?? "",
-          review_status: d.review_status as DraftRow["review_status"],
-          status: d.status ?? "draft",
-          person_name: person?.name ?? "Unknown",
-          person_title: person?.title ?? null,
-          company_name: person?.organizations?.name ?? null,
-          sequence_id: sequenceId,
-          sequence_name: seq?.name ?? null,
-          next_send_at: enrollment?.next_send_at ?? null,
-          step_number: step?.step_number ?? 1,
-          total_steps: sequenceId ? (totalStepsBySeq.get(sequenceId) ?? 1) : 1,
-          enrollment_id: d.enrollment_id ?? null,
-          has_inbox: hasInbox,
-        };
-      },
-    );
-
-    setSequences(sequenceRows);
-    setEnrollments(enrollmentCards);
-    setDrafts(draftRows);
+    const data = (await res.json()) as {
+      sequences: SequenceRow[];
+      enrollments: EnrollmentCard[];
+      drafts: DraftRow[];
+    };
+    if (!mountedRef.current) return;
+    setSequences(data.sequences);
+    setEnrollments(data.enrollments);
+    setDrafts(data.drafts);
     setLoading(false);
   }, []);
 
   useEffect(() => {
     mountedRef.current = true;
 
-    load();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
     return () => {
       mountedRef.current = false;
     };
