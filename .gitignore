@@ -67,3 +67,5 @@ yarn.lock
 
 # clerk configuration (can include secrets)
 /.clerk/
+.superpowers/
+.clerk/
