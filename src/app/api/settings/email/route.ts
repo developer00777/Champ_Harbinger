@@ -1,57 +1,84 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
+
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
 import { getEmailProvider } from "@/lib/email/provider";
 
 export async function GET() {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx)
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  const { supabase, user } = ctx;
-
-  const { data: settings } = await supabase
-    .from("user_settings")
-    .select("from_name, reply_to_email")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const [settings] = await adminDb
+    .select({
+      fromName: schema.userSettings.fromName,
+      replyToEmail: schema.userSettings.replyToEmail,
+    })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.clerkUserId, userId))
+    .limit(1);
 
   const provider = getEmailProvider();
 
   return NextResponse.json({
-    settings: settings ?? {
-      from_name: null,
-      reply_to_email: null,
-    },
+    settings: settings
+      ? {
+          from_name: settings.fromName ?? null,
+          reply_to_email: settings.replyToEmail ?? null,
+        }
+      : {
+          from_name: null,
+          reply_to_email: null,
+        },
     is_configured: provider.enabled,
     provider_name: provider.name,
   });
 }
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx)
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  const { supabase, user } = ctx;
   const body = await request.json();
-
-  // Save/update settings
-  const { from_name, reply_to_email } = body;
-
-  const fields = {
-    user_id: user.id,
-    from_name: from_name ?? null,
-    reply_to_email: reply_to_email ?? null,
-    updated_at: new Date().toISOString(),
+  const { from_name, reply_to_email } = body as {
+    from_name?: string | null;
+    reply_to_email?: string | null;
   };
 
-  const { error } = await supabase.from("user_settings").upsert(fields, {
-    onConflict: "user_id",
-  });
+  const now = new Date();
 
-  if (error) {
+  try {
+    await adminDb
+      .insert(schema.userSettings)
+      .values({
+        clerkUserId: userId,
+        fromName: from_name ?? null,
+        replyToEmail: reply_to_email ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: schema.userSettings.clerkUserId,
+        set: {
+          fromName: from_name ?? null,
+          replyToEmail: reply_to_email ?? null,
+          updatedAt: now,
+        },
+      });
+  } catch (err) {
     return NextResponse.json(
-      { error: `Failed to save settings: ${error.message}` },
+      {
+        error: `Failed to save settings: ${err instanceof Error ? err.message : "unknown error"}`,
+      },
       { status: 500 },
     );
   }

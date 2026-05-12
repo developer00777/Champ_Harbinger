@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq } from "drizzle-orm";
 import { findEmailForPerson } from "@/lib/tools/email-tools";
 
 export const runtime = "nodejs";
@@ -11,11 +14,12 @@ export const maxDuration = 60;
  * can only resolve emails for people in their own campaigns.
  */
 export async function POST(req: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase, user } = ctx;
 
   let body: { personId?: string };
   try {
@@ -30,18 +34,17 @@ export async function POST(req: Request) {
   }
 
   // Ownership check: person must be linked to a campaign owned by this user.
-  const { data: ownership } = await supabase
-    .from("campaign_people")
-    .select("campaign:campaigns!inner(user_id)")
-    .eq("person_id", personId)
-    .limit(1)
-    .maybeSingle();
+  const [ownership] = await adminDb
+    .select({ clerkUserId: schema.campaigns.clerkUserId })
+    .from(schema.campaignPeople)
+    .innerJoin(
+      schema.campaigns,
+      eq(schema.campaignPeople.campaignId, schema.campaigns.id),
+    )
+    .where(eq(schema.campaignPeople.personId, personId))
+    .limit(1);
 
-  const ownerId =
-    (ownership?.campaign as unknown as { user_id?: string } | null)?.user_id ??
-    null;
-
-  if (!ownerId || ownerId !== user.id) {
+  if (!ownership || ownership.clerkUserId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

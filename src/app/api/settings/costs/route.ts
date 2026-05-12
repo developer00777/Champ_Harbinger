@@ -1,12 +1,16 @@
 import { fetchRealSpend } from "@/lib/services/real-spend";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 
 export async function GET(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase } = ctx;
 
   const { searchParams } = new URL(request.url);
   const period = searchParams.get("period") || "30d";
@@ -17,83 +21,106 @@ export async function GET(request: Request) {
   );
 
   // Calculate date cutoff
-  let since: string | null = null;
+  let since: Date | null = null;
   if (period === "24h") {
-    since = new Date(Date.now() - 86400000).toISOString();
+    since = new Date(Date.now() - 86400000);
   } else if (period === "7d") {
-    since = new Date(Date.now() - 7 * 86400000).toISOString();
+    since = new Date(Date.now() - 7 * 86400000);
   } else if (period === "30d") {
-    since = new Date(Date.now() - 30 * 86400000).toISOString();
+    since = new Date(Date.now() - 30 * 86400000);
   }
+
   const nowIso = new Date().toISOString();
   const realSpendStart =
-    since ?? new Date(Date.now() - 365 * 86400000).toISOString();
+    since?.toISOString() ?? new Date(Date.now() - 365 * 86400000).toISOString();
 
-  // Build queries -- apply date filter inline to avoid type gymnastics
-  const totalQuery = supabase.from("api_usage").select("estimated_cost_usd");
-  const serviceQuery = supabase
-    .from("api_usage")
-    .select("service, estimated_cost_usd");
-  const opQuery = supabase
-    .from("api_usage")
-    .select(
-      "service, operation, estimated_cost_usd, tokens_input, tokens_output",
-    );
-  const dailyQuery = supabase
-    .from("api_usage")
-    .select("created_at, service, estimated_cost_usd")
-    .order("created_at", { ascending: true });
-
-  if (since) {
-    totalQuery.gte("created_at", since);
-    serviceQuery.gte("created_at", since);
-    opQuery.gte("created_at", since);
-    dailyQuery.gte("created_at", since);
-  }
-
-  const recentQuery = supabase
-    .from("api_usage")
-    .select("*", { count: "exact" })
-    .order("created_at", { ascending: false })
-    .range((page - 1) * pageSize, page * pageSize - 1);
-  if (since) recentQuery.gte("created_at", since);
+  // Build the base where condition
+  const baseWhere = since
+    ? and(
+        eq(schema.apiUsage.clerkUserId, userId),
+        gte(schema.apiUsage.createdAt, since),
+      )
+    : eq(schema.apiUsage.clerkUserId, userId);
 
   const [
-    totalRes,
-    byServiceRes,
-    byOperationRes,
-    dailyRes,
-    recentRes,
+    totalRows,
+    byServiceRows,
+    byOperationRows,
+    dailyRows,
+    recentResult,
     realSpend,
   ] = await Promise.all([
-    totalQuery,
-    serviceQuery,
-    opQuery,
-    dailyQuery,
-    recentQuery,
+    // Total cost
+    adminDb
+      .select({ cost: schema.apiUsage.estimatedCostUsd })
+      .from(schema.apiUsage)
+      .where(baseWhere),
+
+    // By service
+    adminDb
+      .select({
+        service: schema.apiUsage.service,
+        cost: schema.apiUsage.estimatedCostUsd,
+      })
+      .from(schema.apiUsage)
+      .where(baseWhere),
+
+    // By operation
+    adminDb
+      .select({
+        service: schema.apiUsage.service,
+        operation: schema.apiUsage.operation,
+        cost: schema.apiUsage.estimatedCostUsd,
+        tokensInput: schema.apiUsage.tokensInput,
+        tokensOutput: schema.apiUsage.tokensOutput,
+      })
+      .from(schema.apiUsage)
+      .where(baseWhere),
+
+    // Daily time-series
+    adminDb
+      .select({
+        date: sql<string>`date_trunc('day', ${schema.apiUsage.createdAt})::date::text`,
+        service: schema.apiUsage.service,
+        cost: schema.apiUsage.estimatedCostUsd,
+      })
+      .from(schema.apiUsage)
+      .where(baseWhere)
+      .orderBy(schema.apiUsage.createdAt),
+
+    // Recent rows (paginated) — use a count subquery approach
+    Promise.all([
+      adminDb
+        .select()
+        .from(schema.apiUsage)
+        .where(baseWhere)
+        .orderBy(desc(schema.apiUsage.createdAt))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize),
+      adminDb.select({ total: count() }).from(schema.apiUsage).where(baseWhere),
+    ]),
+
     fetchRealSpend(realSpendStart, nowIso),
   ]);
 
-  // Aggregate total
-  const totalCost = (totalRes.data ?? []).reduce(
-    (sum: number, r: { estimated_cost_usd: number }) =>
-      sum + Number(r.estimated_cost_usd),
-    0,
-  );
+  const [recentRows, [{ total: recentTotal }]] = recentResult;
+
+  // Aggregate total cost
+  const totalCost = totalRows.reduce((sum, r) => sum + Number(r.cost), 0);
 
   // Aggregate by service
   const serviceMap = new Map<
     string,
     { cost: number; calls: number; tokens_input: number; tokens_output: number }
   >();
-  for (const row of byServiceRes.data ?? []) {
+  for (const row of byServiceRows) {
     const prev = serviceMap.get(row.service) ?? {
       cost: 0,
       calls: 0,
       tokens_input: 0,
       tokens_output: 0,
     };
-    prev.cost += Number(row.estimated_cost_usd);
+    prev.cost += Number(row.cost);
     prev.calls++;
     serviceMap.set(row.service, prev);
   }
@@ -103,13 +130,7 @@ export async function GET(request: Request) {
     string,
     { cost: number; calls: number; tokens_input: number; tokens_output: number }
   >();
-  for (const row of (byOperationRes.data ?? []) as Array<{
-    service: string;
-    operation: string;
-    estimated_cost_usd: number;
-    tokens_input: number | null;
-    tokens_output: number | null;
-  }>) {
+  for (const row of byOperationRows) {
     const key = `${row.service}/${row.operation}`;
     const prev = opMap.get(key) ?? {
       cost: 0,
@@ -117,10 +138,10 @@ export async function GET(request: Request) {
       tokens_input: 0,
       tokens_output: 0,
     };
-    prev.cost += Number(row.estimated_cost_usd);
+    prev.cost += Number(row.cost);
     prev.calls++;
-    prev.tokens_input += row.tokens_input ?? 0;
-    prev.tokens_output += row.tokens_output ?? 0;
+    prev.tokens_input += row.tokensInput ?? 0;
+    prev.tokens_output += row.tokensOutput ?? 0;
     opMap.set(key, prev);
   }
 
@@ -134,17 +155,15 @@ export async function GET(request: Request) {
     }
   }
 
-  // Daily time series
+  // Daily time series (already grouped by day from DB)
   const dayMap = new Map<string, Record<string, number>>();
-  for (const row of dailyRes.data ?? []) {
-    const day = (row.created_at as string).slice(0, 10);
+  for (const row of dailyRows) {
+    const day = row.date;
     if (!dayMap.has(day)) dayMap.set(day, {});
     const bucket = dayMap.get(day)!;
-    bucket[row.service as string] =
-      (bucket[row.service as string] ?? 0) + Number(row.estimated_cost_usd);
-    bucket.total = (bucket.total ?? 0) + Number(row.estimated_cost_usd);
+    bucket[row.service] = (bucket[row.service] ?? 0) + Number(row.cost);
+    bucket.total = (bucket.total ?? 0) + Number(row.cost);
   }
-
   const daily = Array.from(dayMap.entries())
     .map(([date, costs]) => ({ date, ...costs }))
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -161,8 +180,6 @@ export async function GET(request: Request) {
     })
     .sort((a, b) => b.cost - a.cost);
 
-  const recentTotal = recentRes.count ?? 0;
-
   return Response.json({
     period,
     totalCost,
@@ -170,7 +187,7 @@ export async function GET(request: Request) {
     byOperation,
     daily,
     realSpend,
-    recent: recentRes.data ?? [],
+    recent: recentRows,
     recentPagination: {
       page,
       pageSize,

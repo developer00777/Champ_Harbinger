@@ -13,7 +13,6 @@ import {
   type ViewMode,
 } from "@/components/tracking/tracking-table";
 import { ReadinessBadge } from "@/components/tracking/readiness-badge";
-import { createClient } from "@/lib/supabase/client";
 import type { Campaign } from "@/lib/types/campaign";
 
 export default function TrackingPage() {
@@ -45,11 +44,7 @@ function TrackingPageContent() {
   const mountedRef = useRef(true);
 
   const fetchCampaigns = useCallback(async () => {
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("campaigns")
-      .select("id, name, status")
-      .order("updated_at", { ascending: false });
+    const data = await fetch("/api/campaigns").then((r) => r.json());
     if (!mountedRef.current) return;
     setCampaigns((data as Campaign[]) ?? []);
     setLoading(false);
@@ -61,108 +56,13 @@ function TrackingPageContent() {
       return;
     }
 
-    const supabase = createClient();
-
-    // Fetch tracking configs with joins -- include organization_id directly
-    const { data: configs } = await supabase
-      .from("tracking_configs")
-      .select(
-        "id, organization_id, schedule, status, last_run_at, next_run_at, organization:organizations(name, domain), signal:signals(name, category)",
-      )
-      .eq("campaign_id", campaignId)
-      .order("created_at", { ascending: false });
-
-    if (!mountedRef.current || !configs) {
-      setRows([]);
-      return;
-    }
-
-    // Build org ID map from configs directly
-    const configOrgMap = new Map<string, string>();
-    for (const c of configs) {
-      const conf = c as Record<string, unknown>;
-      if (conf.organization_id) {
-        configOrgMap.set(conf.id as string, conf.organization_id as string);
-      }
-    }
-
-    // Fetch readiness tags + latest changes in parallel — both depend on
-    // configs but are independent of each other.
-    const uniqueOrgIds = [...new Set(configOrgMap.values())];
-    const configIds = configs.map(
-      (c: Record<string, unknown>) => c.id as string,
+    const params = new URLSearchParams({ campaignId });
+    const data = await fetch(`/api/tracking-data?${params}`).then((r) =>
+      r.json(),
     );
-    const [orgLinksRes, latestChangesRes] = await Promise.all([
-      supabase
-        .from("campaign_organizations")
-        .select("organization_id, readiness_tag")
-        .eq("campaign_id", campaignId)
-        .in(
-          "organization_id",
-          uniqueOrgIds.length > 0 ? uniqueOrgIds : ["__none__"],
-        ),
-      supabase
-        .from("tracking_changes")
-        .select("tracking_config_id, description, detected_at")
-        .in(
-          "tracking_config_id",
-          configIds.length > 0 ? configIds : ["__none__"],
-        )
-        .order("detected_at", { ascending: false }),
-    ]);
-    const orgLinks = orgLinksRes.data;
-    const latestChanges = latestChangesRes.data;
-
-    const readinessMap = new Map<string, string>();
-    for (const link of orgLinks ?? []) {
-      readinessMap.set(
-        link.organization_id as string,
-        (link.readiness_tag as string) || "",
-      );
-    }
-
-    const changeMap = new Map<
-      string,
-      { description: string; detected_at: string }
-    >();
-    for (const change of latestChanges ?? []) {
-      const cid = change.tracking_config_id as string;
-      if (!changeMap.has(cid)) {
-        changeMap.set(cid, {
-          description: change.description as string,
-          detected_at: change.detected_at as string,
-        });
-      }
-    }
 
     if (!mountedRef.current) return;
-
-    const mappedRows: TrackingRow[] = configs.map(
-      (c: Record<string, unknown>) => {
-        const org = c.organization as Record<string, unknown> | null;
-        const signal = c.signal as Record<string, unknown> | null;
-        const orgId = configOrgMap.get(c.id as string);
-        const change = changeMap.get(c.id as string);
-        const tag = orgId ? readinessMap.get(orgId) : null;
-
-        return {
-          id: c.id as string,
-          organizationName: (org?.name as string) || "Unknown",
-          organizationDomain: (org?.domain as string) || null,
-          signalName: (signal?.name as string) || "Unknown Signal",
-          signalCategory: (signal?.category as string) || "",
-          schedule: c.schedule as string,
-          status: c.status as string,
-          lastRunAt: c.last_run_at as string | null,
-          nextRunAt: c.next_run_at as string | null,
-          readinessTag: (tag as TrackingRow["readinessTag"]) || null,
-          latestChangeDescription: change?.description || null,
-          latestChangeDate: change?.detected_at || null,
-        };
-      },
-    );
-
-    setRows(mappedRows);
+    setRows((data as TrackingRow[]) ?? []);
   }, []);
 
   useEffect(() => {

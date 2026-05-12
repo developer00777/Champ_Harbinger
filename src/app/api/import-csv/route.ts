@@ -1,5 +1,8 @@
 import { getPostHogClient } from "@/lib/posthog-server";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq } from "drizzle-orm";
 import {
   findOrCreateOrganization,
   linkOrganizationToCampaign,
@@ -7,11 +10,12 @@ import {
 } from "@/lib/services/knowledge-base";
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase, user } = ctx;
 
   let body: Record<string, unknown>;
   try {
@@ -43,33 +47,35 @@ export async function POST(request: Request) {
   }
 
   // Verify campaign exists and belongs to the signed-in user (defense in
-  // depth on top of RLS).
-  const { data: campaignRow, error: campaignError } = await supabase
-    .from("campaigns")
-    .select("id, user_id")
-    .eq("id", campaignId)
-    .single();
+  // depth).
+  const [campaignRow] = await adminDb
+    .select({
+      id: schema.campaigns.id,
+      clerkUserId: schema.campaigns.clerkUserId,
+    })
+    .from(schema.campaigns)
+    .where(eq(schema.campaigns.id, campaignId))
+    .limit(1);
 
-  if (campaignError || !campaignRow) {
+  if (!campaignRow) {
     return Response.json({ error: "Campaign not found" }, { status: 404 });
   }
-  if (campaignRow.user_id !== user.id) {
+  if (campaignRow.clerkUserId !== userId) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Fetch existing domains already linked to this campaign
-  const { data: existingLinks } = await supabase
-    .from("campaign_organizations")
-    .select("organization:organizations(domain)")
-    .eq("campaign_id", campaignId);
+  const existingLinks = await adminDb
+    .select({ domain: schema.organizations.domain })
+    .from(schema.campaignOrganizations)
+    .leftJoin(
+      schema.organizations,
+      eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
+    )
+    .where(eq(schema.campaignOrganizations.campaignId, campaignId));
 
   const existingDomains = new Set(
-    (existingLinks || [])
-      .map(
-        (l: { organization: unknown }) =>
-          (l.organization as { domain: string | null } | null)?.domain,
-      )
-      .filter(Boolean) as string[],
+    existingLinks.map((l) => l.domain).filter((d): d is string => d !== null),
   );
 
   const seenDomains = new Set<string>();
@@ -125,7 +131,7 @@ export async function POST(request: Request) {
 
   const posthog = getPostHogClient();
   posthog.capture({
-    distinctId: user.id,
+    distinctId: userId,
     event: "csv_import_completed",
     properties: {
       campaign_id: campaignId,

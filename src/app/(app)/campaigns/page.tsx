@@ -16,13 +16,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { createClient } from "@/lib/supabase/client";
 
 interface CampaignRow {
   id: string;
   name: string;
   status: string;
-  created_at: string;
+  createdAt: string;
 }
 
 export default function CampaignsIndexPage() {
@@ -35,19 +34,19 @@ export default function CampaignsIndexPage() {
     mountedRef.current = true;
 
     const fetchCampaigns = async () => {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("campaigns")
-        .select("id, name, status, created_at")
-        .order("updated_at", { ascending: false });
-
+      const res = await fetch("/api/campaigns");
+      if (!res.ok) {
+        if (mountedRef.current) setLoading(false);
+        return;
+      }
+      const data = (await res.json()) as CampaignRow[];
       if (mountedRef.current) {
         setCampaigns(data ?? []);
         setLoading(false);
       }
     };
 
-    fetchCampaigns();
+    void fetchCampaigns();
     return () => {
       mountedRef.current = false;
     };
@@ -55,14 +54,13 @@ export default function CampaignsIndexPage() {
 
   const handleDelete = async (campaign: CampaignRow) => {
     setDeletingId(campaign.id);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("campaigns")
-      .delete()
-      .eq("id", campaign.id);
+    const res = await fetch(`/api/campaigns/${campaign.id}`, {
+      method: "DELETE",
+    });
 
-    if (error) {
-      toast.error(`Failed to delete: ${error.message}`);
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      toast.error(`Failed to delete: ${body.error ?? "Unknown error"}`);
       setDeletingId(null);
       return;
     }

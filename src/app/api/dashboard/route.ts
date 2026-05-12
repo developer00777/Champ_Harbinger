@@ -1,129 +1,136 @@
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq, inArray, sql, count } from "drizzle-orm";
 
 export async function GET(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase } = ctx;
 
   const { searchParams } = new URL(request.url);
   const range = searchParams.get("range") || "30d";
 
   // Calculate date filter for time-series
-  let dateFilter: string | null = null;
-  if (range === "7d") {
-    dateFilter = new Date(Date.now() - 7 * 86400000).toISOString();
-  } else if (range === "30d") {
-    dateFilter = new Date(Date.now() - 30 * 86400000).toISOString();
+  let days = 30;
+  if (range === "7d") days = 7;
+
+  // Fetch all campaigns for this user first (needed to scope junction tables)
+  const userCampaigns = await adminDb
+    .select({
+      id: schema.campaigns.id,
+      name: schema.campaigns.name,
+      status: schema.campaigns.status,
+    })
+    .from(schema.campaigns)
+    .where(eq(schema.campaigns.clerkUserId, userId));
+
+  const campaignIds = userCampaigns.map((c) => c.id);
+
+  if (campaignIds.length === 0) {
+    return Response.json({
+      totals: { leads: 0, sent: 0, opened: 0, replied: 0, bounced: 0 },
+      timeSeries: [],
+      campaigns: [],
+    });
   }
 
-  // Run all queries in parallel -- use count queries instead of fetching rows
-  const [
-    leadsRes,
-    sentRes,
-    openedRes,
-    repliedRes,
-    bouncedRes,
-    timeSeriesRes,
-    campaignsRes,
-    allPeopleRes,
-  ] = await Promise.all([
-    // Aggregate totals via count queries (no row limit issues)
-    supabase
-      .from("campaign_people")
-      .select("*", { count: "exact", head: true }),
-    supabase
-      .from("campaign_people")
-      .select("*", { count: "exact", head: true })
-      .in("outreach_status", ["sent", "opened", "replied"]),
-    supabase
-      .from("campaign_people")
-      .select("*", { count: "exact", head: true })
-      .in("outreach_status", ["opened", "replied"]),
-    supabase
-      .from("campaign_people")
-      .select("*", { count: "exact", head: true })
-      .eq("outreach_status", "replied"),
-    supabase
-      .from("campaign_people")
-      .select("*", { count: "exact", head: true })
-      .eq("outreach_status", "bounced"),
+  const dateThreshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    // Time-series from outreach_events (capped to prevent memory issues)
-    dateFilter
-      ? supabase
-          .from("outreach_events")
-          .select("status, created_at")
-          .gte("created_at", dateFilter)
-          .order("created_at", { ascending: true })
-          .limit(10000)
-      : supabase
-          .from("outreach_events")
-          .select("status, created_at")
-          .order("created_at", { ascending: true })
-          .limit(10000),
+  // Fetch campaign_people and outreach_events scoped via campaign IDs
+  const [allPeople, timeSeriesRows] = await Promise.all([
+    adminDb
+      .select({
+        campaignId: schema.campaignPeople.campaignId,
+        outreachStatus: schema.campaignPeople.outreachStatus,
+      })
+      .from(schema.campaignPeople)
+      .where(inArray(schema.campaignPeople.campaignId, campaignIds)),
 
-    // Campaign list
-    supabase.from("campaigns").select("id, name, status"),
-
-    // All campaign_people with campaign_id + status for per-campaign aggregation (single query)
-    supabase
-      .from("campaign_people")
-      .select("campaign_id, outreach_status")
-      .limit(10000),
+    adminDb
+      .select({
+        date: sql<string>`date_trunc('day', ${schema.outreachEvents.createdAt})::date::text`,
+        status: schema.outreachEvents.status,
+        cnt: count(),
+      })
+      .from(schema.outreachEvents)
+      .where(inArray(schema.outreachEvents.campaignId, campaignIds))
+      .groupBy(
+        sql`date_trunc('day', ${schema.outreachEvents.createdAt})::date`,
+        schema.outreachEvents.status,
+      )
+      .orderBy(
+        sql`date_trunc('day', ${schema.outreachEvents.createdAt})::date`,
+      ),
   ]);
 
+  // Compute totals and per-campaign stats from campaignPeople rows
+  let totalLeads = 0;
+  let totalSent = 0;
+  let totalOpened = 0;
+  let totalReplied = 0;
+  let totalBounced = 0;
+  const campaignMap = new Map<
+    string,
+    { leads: number; sent: number; opened: number; replied: number }
+  >();
+
+  for (const row of allPeople) {
+    totalLeads++;
+    const stats = campaignMap.get(row.campaignId) ?? {
+      leads: 0,
+      sent: 0,
+      opened: 0,
+      replied: 0,
+    };
+    stats.leads++;
+    if (["sent", "opened", "replied"].includes(row.outreachStatus)) {
+      totalSent++;
+      stats.sent++;
+    }
+    if (["opened", "replied"].includes(row.outreachStatus)) {
+      totalOpened++;
+      stats.opened++;
+    }
+    if (row.outreachStatus === "replied") {
+      totalReplied++;
+      stats.replied++;
+    }
+    if (row.outreachStatus === "bounced") totalBounced++;
+    campaignMap.set(row.campaignId, stats);
+  }
+
   const totals = {
-    leads: leadsRes.count ?? 0,
-    sent: sentRes.count ?? 0,
-    opened: openedRes.count ?? 0,
-    replied: repliedRes.count ?? 0,
-    bounced: bouncedRes.count ?? 0,
+    leads: totalLeads,
+    sent: totalSent,
+    opened: totalOpened,
+    replied: totalReplied,
+    bounced: totalBounced,
   };
 
-  // Process time-series: group by day + status
+  // Process time-series: DB has already grouped by day + status
+  const cutoffDateStr = dateThreshold.toISOString().slice(0, 10);
   const eventsByDay = new Map<string, Record<string, number>>();
-  for (const event of timeSeriesRes.data ?? []) {
-    const day = event.created_at.slice(0, 10);
-    if (!eventsByDay.has(day)) {
-      eventsByDay.set(day, { sent: 0, opened: 0, replied: 0, bounced: 0 });
+  for (const row of timeSeriesRows) {
+    if (row.date < cutoffDateStr) continue;
+    if (!eventsByDay.has(row.date)) {
+      eventsByDay.set(row.date, { sent: 0, opened: 0, replied: 0, bounced: 0 });
     }
-    const bucket = eventsByDay.get(day)!;
-    if (bucket[event.status] !== undefined) {
-      bucket[event.status]++;
+    const bucket = eventsByDay.get(row.date)!;
+    const s = row.status;
+    if (s in bucket) {
+      bucket[s] = (bucket[s] ?? 0) + Number(row.cnt);
     }
   }
   const timeSeries = Array.from(eventsByDay.entries())
     .map(([date, counts]) => ({ date, ...counts }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  // Aggregate per-campaign from the single query (no N+1)
-  const campaignPeople = allPeopleRes.data ?? [];
-  const campaignMap = new Map<
-    string,
-    { leads: number; sent: number; opened: number; replied: number }
-  >();
-
-  for (const row of campaignPeople) {
-    if (!campaignMap.has(row.campaign_id)) {
-      campaignMap.set(row.campaign_id, {
-        leads: 0,
-        sent: 0,
-        opened: 0,
-        replied: 0,
-      });
-    }
-    const stats = campaignMap.get(row.campaign_id)!;
-    stats.leads++;
-    if (["sent", "opened", "replied"].includes(row.outreach_status))
-      stats.sent++;
-    if (["opened", "replied"].includes(row.outreach_status)) stats.opened++;
-    if (row.outreach_status === "replied") stats.replied++;
-  }
-
-  const campaigns = (campaignsRes.data ?? [])
-    .map((c: { id: string; name: string; status: string }) => {
+  const campaigns = userCampaigns
+    .map((c) => {
       const stats = campaignMap.get(c.id) ?? {
         leads: 0,
         sent: 0,
@@ -144,10 +151,7 @@ export async function GET(request: Request) {
           stats.sent > 0 ? Math.round((stats.replied / stats.sent) * 100) : 0,
       };
     })
-    .sort(
-      (a: { replyRate: number }, b: { replyRate: number }) =>
-        b.replyRate - a.replyRate,
-    );
+    .sort((a, b) => b.replyRate - a.replyRate);
 
   return Response.json({ totals, timeSeries, campaigns });
 }

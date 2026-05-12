@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq, and, isNull } from "drizzle-orm";
 import { findEmailForPerson } from "@/lib/tools/email-tools";
 
 export const runtime = "nodejs";
@@ -21,11 +24,12 @@ const MAX_TARGETS_PER_REQUEST = 50;
  * click = one company) and prevents accidental campaign-wide Exa fanout.
  */
 export async function POST(req: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase, user } = ctx;
 
   let body: { campaignId?: string; organizationId?: string };
   try {
@@ -46,41 +50,37 @@ export async function POST(req: Request) {
   }
 
   // Ownership check on the campaign.
-  const { data: campaign } = await supabase
-    .from("campaigns")
-    .select("user_id")
-    .eq("id", campaignId)
-    .maybeSingle();
-  if (!campaign || campaign.user_id !== user.id) {
+  const [campaign] = await adminDb
+    .select({ clerkUserId: schema.campaigns.clerkUserId })
+    .from(schema.campaigns)
+    .where(eq(schema.campaigns.id, campaignId))
+    .limit(1);
+
+  if (!campaign || campaign.clerkUserId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Pull every campaign_person → person where work_email is missing, scoped
   // to the requested organization.
-  const { data: rows, error } = await supabase
-    .from("campaign_people")
-    .select("person:people!inner(id, work_email, organization_id)")
-    .eq("campaign_id", campaignId);
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  const rows = await adminDb
+    .select({
+      personId: schema.people.id,
+    })
+    .from(schema.campaignPeople)
+    .innerJoin(
+      schema.people,
+      eq(schema.campaignPeople.personId, schema.people.id),
+    )
+    .where(
+      and(
+        eq(schema.campaignPeople.campaignId, campaignId),
+        eq(schema.people.organizationId, organizationId),
+        isNull(schema.people.workEmail),
+      ),
+    );
 
-  const targets: string[] = [];
-  let pendingTotal = 0;
-  for (const row of rows ?? []) {
-    const person = row.person as unknown as {
-      id: string;
-      work_email: string | null;
-      organization_id: string | null;
-    } | null;
-    if (!person) continue;
-    if (person.work_email) continue;
-    if (person.organization_id !== organizationId) continue;
-    pendingTotal++;
-    if (targets.length < MAX_TARGETS_PER_REQUEST) {
-      targets.push(person.id);
-    }
-  }
+  const pendingTotal = rows.length;
+  const targets = rows.slice(0, MAX_TARGETS_PER_REQUEST).map((r) => r.personId);
 
   const found: Array<{ personId: string; email: string; confidence?: number }> =
     [];

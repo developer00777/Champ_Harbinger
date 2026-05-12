@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { eq, and } from "drizzle-orm";
 
 import { sendApprovedDraft } from "@/lib/services/outreach-sender";
 import { getPostHogClient } from "@/lib/posthog-server";
-import { getAdminClient } from "@/lib/supabase/admin";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
 
 export const maxDuration = 60;
 
@@ -12,11 +14,12 @@ interface Body {
 }
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { user } = ctx;
 
   let body: Body;
   try {
@@ -29,25 +32,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "draftId is required" }, { status: 400 });
   }
 
-  const supabase = getAdminClient();
-
-  const { data: draft, error: draftError } = await supabase
-    .from("email_drafts")
-    .select(
-      "id, user_id, review_status, status, enrollment_id, sequence_step_id",
+  // Load draft — scoped to this user
+  const [draft] = await adminDb
+    .select({
+      id: schema.emailDrafts.id,
+      clerkUserId: schema.emailDrafts.clerkUserId,
+      reviewStatus: schema.emailDrafts.reviewStatus,
+      status: schema.emailDrafts.status,
+      enrollmentId: schema.emailDrafts.enrollmentId,
+      sequenceStepId: schema.emailDrafts.sequenceStepId,
+    })
+    .from(schema.emailDrafts)
+    .where(
+      and(
+        eq(schema.emailDrafts.id, body.draftId),
+        eq(schema.emailDrafts.clerkUserId, userId),
+      ),
     )
-    .eq("id", body.draftId)
-    .single();
+    .limit(1);
 
-  if (draftError || !draft) {
+  if (!draft) {
     return NextResponse.json({ error: "Draft not found" }, { status: 404 });
   }
 
-  if (draft.user_id !== user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  if (draft.review_status !== "approved") {
+  if (draft.reviewStatus !== "approved") {
     return NextResponse.json(
       {
         ok: false,
@@ -69,7 +77,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!draft.enrollment_id) {
+  if (!draft.enrollmentId) {
     return NextResponse.json(
       {
         ok: false,
@@ -80,11 +88,18 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: enrollment } = await supabase
-    .from("sequence_enrollments")
-    .select("id, sequence_id, person_id, campaign_people_id, current_step")
-    .eq("id", draft.enrollment_id)
-    .single();
+  // Load enrollment
+  const [enrollment] = await adminDb
+    .select({
+      id: schema.sequenceEnrollments.id,
+      sequenceId: schema.sequenceEnrollments.sequenceId,
+      personId: schema.sequenceEnrollments.personId,
+      campaignPeopleId: schema.sequenceEnrollments.campaignPeopleId,
+      currentStep: schema.sequenceEnrollments.currentStep,
+    })
+    .from(schema.sequenceEnrollments)
+    .where(eq(schema.sequenceEnrollments.id, draft.enrollmentId))
+    .limit(1);
 
   if (!enrollment) {
     return NextResponse.json(
@@ -93,7 +108,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await sendApprovedDraft(enrollment);
+  const result = await sendApprovedDraft({
+    id: enrollment.id,
+    sequence_id: enrollment.sequenceId,
+    person_id: enrollment.personId,
+    campaign_people_id: enrollment.campaignPeopleId,
+    current_step: enrollment.currentStep,
+  });
 
   if (!result.ok) {
     return NextResponse.json(
@@ -104,13 +125,13 @@ export async function POST(request: Request) {
 
   const posthog = getPostHogClient();
   posthog.capture({
-    distinctId: user.id,
+    distinctId: userId,
     event: "outreach_email_sent",
     properties: {
       draft_id: result.draftId,
-      sequence_id: enrollment.sequence_id,
-      person_id: enrollment.person_id,
-      step: enrollment.current_step,
+      sequence_id: enrollment.sequenceId,
+      person_id: enrollment.personId,
+      step: enrollment.currentStep,
     },
   });
 

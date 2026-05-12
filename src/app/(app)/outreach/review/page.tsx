@@ -15,7 +15,6 @@ import { toast } from "sonner";
 import { ContactDetail } from "@/components/campaign/contact-detail";
 import { Button } from "@/components/ui/button";
 import { EditableEmail } from "@/components/ui/editable-email";
-import { createClient } from "@/lib/supabase/client";
 import type { CampaignContact, EnrichmentData } from "@/lib/types/campaign";
 
 function htmlToPlain(html: string): string {
@@ -148,113 +147,18 @@ function ReviewPageInner() {
     if (!sequenceId) return;
 
     const load = async () => {
-      const supabase = createClient();
-      const [draftsRes, stepsRes] = await Promise.all([
-        supabase
-          .from("email_drafts")
-          .select(
-            `
-          id, to_email, subject, body_html, body_text, ai_reasoning,
-          review_status, status, sequence_step_id, enrollment_id, person_id,
-          people(
-            name, title, organization_id, enrichment_data,
-            enrichment_status, last_enriched_at,
-            work_email, work_email_confidence,
-            personal_email, linkedin_url, twitter_url,
-            organizations(name, domain, industry)
-          ),
-          campaign_people(priority_score),
-          sequence_enrollments(current_step),
-          sequence_steps(step_number, delay_days, delay_hours)
-        `,
-          )
-          .eq("sequence_id", sequenceId)
-          .eq("review_status", "pending")
-          .order("person_id")
-          .order("sequence_step_id"),
-        supabase
-          .from("sequence_steps")
-          .select("id")
-          .eq("sequence_id", sequenceId),
-      ]);
-
+      const res = await fetch(`/api/outreach/drafts?sequence=${sequenceId}`);
       if (!mountedRef.current) return;
 
-      const rawDrafts = draftsRes.data;
-      const steps = stepsRes.data;
-      const totalSteps = steps?.length ?? 1;
+      if (!res.ok) {
+        setLoading(false);
+        return;
+      }
 
-      const mapped: DraftForReview[] = (rawDrafts ?? []).map(
-        (d: Record<string, unknown>) => {
-          const person = d.people as unknown as {
-            name: string;
-            title: string | null;
-            organization_id: string | null;
-            enrichment_data: EnrichmentData;
-            enrichment_status:
-              | "pending"
-              | "in_progress"
-              | "enriched"
-              | "failed";
-            last_enriched_at: string | null;
-            work_email: string | null;
-            work_email_confidence: number | null;
-            personal_email: string | null;
-            linkedin_url: string | null;
-            twitter_url: string | null;
-            organizations: {
-              name: string;
-              domain: string | null;
-              industry: string | null;
-            } | null;
-          } | null;
-          const cp = d.campaign_people as unknown as {
-            priority_score: number | null;
-          } | null;
-          const enrollment = d.sequence_enrollments as unknown as {
-            current_step: number | null;
-          } | null;
-          const stepData = d.sequence_steps as unknown as {
-            step_number: number;
-            delay_days: number | null;
-            delay_hours: number | null;
-          } | null;
+      const data = (await res.json()) as { drafts: DraftForReview[] };
+      if (!mountedRef.current) return;
 
-          return {
-            id: d.id,
-            to_email: d.to_email,
-            subject: d.subject,
-            body_html: d.body_html,
-            body_text: d.body_text,
-            ai_reasoning: d.ai_reasoning,
-            review_status: d.review_status ?? "pending",
-            status: d.status ?? "draft",
-            sequence_step_id: d.sequence_step_id,
-            enrollment_id: d.enrollment_id,
-            enrollment_current_step: enrollment?.current_step ?? null,
-            person_id: d.person_id,
-            person_name: person?.name ?? "Unknown",
-            person_title: person?.title ?? null,
-            person_work_email: person?.work_email ?? null,
-            person_work_email_confidence: person?.work_email_confidence ?? null,
-            person_personal_email: person?.personal_email ?? null,
-            person_linkedin_url: person?.linkedin_url ?? null,
-            person_twitter_url: person?.twitter_url ?? null,
-            company_name: person?.organizations?.name ?? null,
-            company_domain: person?.organizations?.domain ?? null,
-            company_industry: person?.organizations?.industry ?? null,
-            priority_score: cp?.priority_score ?? null,
-            enrichment_status: person?.enrichment_status ?? "pending",
-            last_enriched_at: person?.last_enriched_at ?? null,
-            enrichment_data: person?.enrichment_data ?? ({} as EnrichmentData),
-            step_number: stepData?.step_number ?? 1,
-            total_steps: totalSteps,
-            delay_days: stepData?.delay_days ?? null,
-            delay_hours: stepData?.delay_hours ?? null,
-          };
-        },
-      );
-
+      const mapped = data.drafts;
       setDrafts(mapped);
 
       const init: Record<string, EditState> = {};
@@ -338,39 +242,65 @@ function ReviewPageInner() {
       if (!currentContact || saving) return;
       setSaving(true);
 
-      const supabase = createClient();
-      const now = new Date().toISOString();
-
       // Save edits for drafts whose subject or body changed
-      const editPromises = currentDrafts.map(async (d) => {
-        const edit = edits[d.id];
-        if (!edit) return;
-        const baseBody = d.body_text ?? htmlToPlain(d.body_html);
-        const subjectChanged = edit.subject !== d.subject;
-        const bodyChanged = edit.bodyText !== baseBody;
-        if (!subjectChanged && !bodyChanged) return;
-        await supabase
-          .from("email_drafts")
-          .update({
+      const editUpdates = currentDrafts
+        .map((d) => {
+          const edit = edits[d.id];
+          if (!edit) return null;
+          const baseBody = d.body_text ?? htmlToPlain(d.body_html);
+          const subjectChanged = edit.subject !== d.subject;
+          const bodyChanged = edit.bodyText !== baseBody;
+          if (!subjectChanged && !bodyChanged) return null;
+          return {
+            id: d.id,
             subject: edit.subject,
-            body_html: plainToHtml(edit.bodyText),
-            body_text: edit.bodyText,
-            updated_at: now,
-          })
-          .eq("id", d.id);
-      });
-      await Promise.all(editPromises);
+            bodyHtml: plainToHtml(edit.bodyText),
+            bodyText: edit.bodyText,
+          };
+        })
+        .filter((u): u is NonNullable<typeof u> => u !== null);
 
       // Mark all pending drafts for this contact
       const pendingIds = currentDrafts
         .filter((d) => d.review_status === "pending")
         .map((d) => d.id);
 
-      if (pendingIds.length > 0) {
-        await supabase
-          .from("email_drafts")
-          .update({ review_status: action, updated_at: now })
-          .in("id", pendingIds);
+      const reviewUpdates = pendingIds.map((id) => ({
+        id,
+        reviewStatus: action,
+      }));
+
+      const allUpdates = [
+        ...editUpdates,
+        ...reviewUpdates.filter((u) => !editUpdates.find((e) => e.id === u.id)),
+        // Merge review_status into edit updates for drafts that also changed
+        ...editUpdates
+          .filter((e) => pendingIds.includes(e.id))
+          .map((e) => ({ ...e, reviewStatus: action })),
+      ].reduce<
+        Array<{
+          id: string;
+          subject?: string;
+          bodyHtml?: string;
+          bodyText?: string;
+          reviewStatus?: string;
+        }>
+      >((acc, cur) => {
+        const existing = acc.find((a) => a.id === cur.id);
+        if (existing) {
+          Object.assign(existing, cur);
+        } else {
+          acc.push(cur);
+        }
+        return acc;
+      }, []);
+
+      if (allUpdates.length > 0) {
+        await fetch("/api/outreach/drafts", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: allUpdates }),
+        });
       }
 
       posthog.capture(
@@ -499,38 +429,47 @@ function ReviewPageInner() {
       if (!draft) return;
 
       setSendingDraftIds((prev) => new Set(prev).add(draftId));
-      const supabase = createClient();
-      const now = new Date().toISOString();
 
       try {
         const edit = edits[draftId];
+        const patchUpdates: Array<{
+          id: string;
+          subject?: string;
+          bodyHtml?: string;
+          bodyText?: string;
+          reviewStatus?: string;
+        }> = [];
+
         if (edit) {
           const baseBody = draft.body_text ?? htmlToPlain(draft.body_html);
           const subjectChanged = edit.subject !== draft.subject;
           const bodyChanged = edit.bodyText !== baseBody;
           if (subjectChanged || bodyChanged) {
-            const { error: editErr } = await supabase
-              .from("email_drafts")
-              .update({
-                subject: edit.subject,
-                body_html: plainToHtml(edit.bodyText),
-                body_text: edit.bodyText,
-                updated_at: now,
-              })
-              .eq("id", draftId);
-            if (editErr) {
-              toast.error(editErr.message);
-              return;
-            }
+            patchUpdates.push({
+              id: draftId,
+              subject: edit.subject,
+              bodyHtml: plainToHtml(edit.bodyText),
+              bodyText: edit.bodyText,
+            });
           }
         }
 
-        const { error: approveErr } = await supabase
-          .from("email_drafts")
-          .update({ review_status: "approved", updated_at: now })
-          .eq("id", draftId);
-        if (approveErr) {
-          toast.error(approveErr.message);
+        // Approve the draft
+        const approveUpdate = patchUpdates.find((u) => u.id === draftId);
+        if (approveUpdate) {
+          approveUpdate.reviewStatus = "approved";
+        } else {
+          patchUpdates.push({ id: draftId, reviewStatus: "approved" });
+        }
+
+        const patchRes = await fetch("/api/outreach/drafts", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: patchUpdates }),
+        });
+        if (!patchRes.ok) {
+          const d = await patchRes.json();
+          toast.error(d.error ?? "Failed to save draft");
           return;
         }
 
@@ -665,26 +604,17 @@ function ReviewPageInner() {
         .filter((d) => d.person_id === personId)
         .map((d) => d.id);
       if (draftIds.length === 0) return;
-      const supabase = createClient();
-      const now = new Date().toISOString();
 
-      const { error: draftErr } = await supabase
-        .from("email_drafts")
-        .update({ to_email: next, updated_at: now })
-        .in("id", draftIds);
-      if (draftErr) throw new Error(draftErr.message);
-
-      // Also persist on the person so future drafts/sequences use the
-      // corrected address. Update work_email since saveDraft reads it first.
-      const { error: personErr } = await supabase
-        .from("people")
-        .update({ work_email: next, updated_at: now })
-        .eq("id", personId);
-      if (personErr) throw new Error(personErr.message);
+      await fetch("/api/outreach/drafts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          personEmailUpdate: { personId, email: next, draftIds },
+        }),
+      });
 
       // Promote to user_entered source + recompute the org pattern. Fire-and-
-      // forget so a slow recompute doesn't block the UI; the prior person
-      // update already persisted the email.
+      // forget so a slow recompute doesn't block the UI.
       void fetch("/api/email/record-verified", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

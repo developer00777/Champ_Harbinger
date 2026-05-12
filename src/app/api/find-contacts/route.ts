@@ -1,5 +1,8 @@
 import { withAction } from "@/lib/services/cost-tracker";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq } from "drizzle-orm";
 import { ExaService } from "@/lib/services/exa-service";
 import {
   findOrCreatePerson,
@@ -10,17 +13,21 @@ import {
   filterContactsByCompany,
   type CandidateContact,
 } from "@/lib/services/contact-filter";
-import { recordVerifiedEmail } from "@/lib/services/email-pattern";
+import {
+  recordVerifiedEmail,
+  makeEmailPatternDb,
+} from "@/lib/services/email-pattern";
 import { parseLinkedInTitle } from "@/lib/utils";
 
 export const maxDuration = 120;
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase, user } = ctx;
 
   let body: Record<string, unknown>;
   try {
@@ -41,17 +48,20 @@ export async function POST(request: Request) {
   }
 
   // Get campaign ICP for target titles (also ownership check -- defense in
-  // depth on top of RLS)
-  const { data: campaign, error: campaignError } = await supabase
-    .from("campaigns")
-    .select("icp, user_id")
-    .eq("id", campaignId)
-    .single();
+  // depth)
+  const [campaign] = await adminDb
+    .select({
+      icp: schema.campaigns.icp,
+      clerkUserId: schema.campaigns.clerkUserId,
+    })
+    .from(schema.campaigns)
+    .where(eq(schema.campaigns.id, campaignId))
+    .limit(1);
 
-  if (campaignError || !campaign) {
+  if (!campaign) {
     return Response.json({ error: "Campaign not found" }, { status: 404 });
   }
-  if (campaign.user_id !== user.id) {
+  if (campaign.clerkUserId !== userId) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -61,20 +71,31 @@ export async function POST(request: Request) {
   const boundedTitles = targetTitles.slice(0, 5);
 
   // companyId is a campaign_organizations link ID -- resolve the organization
-  const { data: link, error: linkError } = await supabase
-    .from("campaign_organizations")
-    .select(
-      "organization_id, organization:organizations(name, domain, industry, location, description)",
+  const [link] = await adminDb
+    .select({
+      organizationId: schema.campaignOrganizations.organizationId,
+      org: {
+        name: schema.organizations.name,
+        domain: schema.organizations.domain,
+        industry: schema.organizations.industry,
+        location: schema.organizations.location,
+        description: schema.organizations.description,
+      },
+    })
+    .from(schema.campaignOrganizations)
+    .leftJoin(
+      schema.organizations,
+      eq(schema.campaignOrganizations.organizationId, schema.organizations.id),
     )
-    .eq("id", companyId)
-    .single();
+    .where(eq(schema.campaignOrganizations.id, companyId))
+    .limit(1);
 
-  if (linkError || !link) {
+  if (!link || !link.org?.name) {
     return Response.json({ error: "Company not found" }, { status: 404 });
   }
 
-  const orgId = link.organization_id;
-  const org = link.organization as unknown as {
+  const orgId = link.organizationId;
+  const org = link.org as {
     name: string;
     domain: string | null;
     industry: string | null;
@@ -86,19 +107,22 @@ export async function POST(request: Request) {
     let totalFound = 0;
 
     // Dedup against existing people linked to this campaign (by LinkedIn URL)
-    const { data: existingLinks } = await supabase
-      .from("campaign_people")
-      .select("person:people(linkedin_url)")
-      .eq("campaign_id", campaignId);
+    const existingLinks = await adminDb
+      .select({ linkedinUrl: schema.people.linkedinUrl })
+      .from(schema.campaignPeople)
+      .leftJoin(
+        schema.people,
+        eq(schema.campaignPeople.personId, schema.people.id),
+      )
+      .where(eq(schema.campaignPeople.campaignId, campaignId));
 
     const existingUrls = new Set(
-      (existingLinks || [])
-        .map(
-          (l: { person: unknown }) =>
-            (l.person as { linkedin_url: string | null } | null)?.linkedin_url,
-        )
-        .filter(Boolean) as string[],
+      existingLinks
+        .map((l) => l.linkedinUrl)
+        .filter((u): u is string => u !== null),
     );
+
+    const epDb = makeEmailPatternDb(adminDb);
 
     // ── Phase 1: Search the company's own website for team/staff ───────
     if (org.domain) {
@@ -117,7 +141,7 @@ export async function POST(request: Request) {
           });
 
           if (dp.email) {
-            await recordVerifiedEmail(supabase, {
+            await recordVerifiedEmail(epDb, {
               personId: person.id,
               email: dp.email,
               source: "team_page",

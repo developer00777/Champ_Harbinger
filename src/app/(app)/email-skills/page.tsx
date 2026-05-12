@@ -20,7 +20,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { TogglePill } from "@/components/ui/toggle-pill";
 import { EmailSkillCard } from "@/components/email-skills/email-skill-card";
 import { EmailSkillDetailDialog } from "@/components/email-skills/email-skill-detail-dialog";
-import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@clerk/nextjs";
 import type { EmailSkill, EmailSkillScopeType } from "@/lib/types/email-skill";
 import type { Campaign } from "@/lib/types/campaign";
@@ -61,27 +60,16 @@ export default function EmailSkillsPage() {
   const mountedRef = useRef(true);
 
   const fetchData = useCallback(async () => {
-    const supabase = createClient();
     const [skillsRes, campaignsRes, profilesRes] = await Promise.all([
-      supabase
-        .from("email_skills")
-        .select("*")
-        .order("is_builtin", { ascending: false })
-        .order("name"),
-      supabase
-        .from("campaigns")
-        .select("id, name, status")
-        .order("updated_at", { ascending: false }),
-      supabase
-        .from("user_profile")
-        .select("*")
-        .order("created_at", { ascending: false }),
+      fetch("/api/email-skills").then((r) => r.json()),
+      fetch("/api/campaigns").then((r) => r.json()),
+      fetch("/api/profile").then((r) => r.json()),
     ]);
 
     if (!mountedRef.current) return;
-    setSkills((skillsRes.data as EmailSkill[]) ?? []);
-    setCampaigns((campaignsRes.data as Campaign[]) ?? []);
-    setProfiles((profilesRes.data as UserProfile[]) ?? []);
+    setSkills((skillsRes as EmailSkill[]) ?? []);
+    setCampaigns((campaignsRes as Campaign[]) ?? []);
+    setProfiles((profilesRes as UserProfile[]) ?? []);
     setLoading(false);
   }, []);
 
@@ -101,16 +89,13 @@ export default function EmailSkillsPage() {
         setAttachedIds(new Set());
         return;
       }
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("email_skill_attachments")
-        .select("skill_id, enabled")
-        .eq("scope_type", scopeType)
-        .eq("scope_id", scopeId)
-        .eq("enabled", true);
+      const params = new URLSearchParams({ scopeType, scopeId });
+      const data = await fetch(`/api/email-skills/attachments?${params}`).then(
+        (r) => r.json(),
+      );
       if (!mountedRef.current) return;
       setAttachedIds(
-        new Set((data ?? []).map((r: { skill_id: string }) => r.skill_id)),
+        new Set((data as Array<{ skill_id: string }>).map((r) => r.skill_id)),
       );
     },
     [],
@@ -145,18 +130,18 @@ export default function EmailSkillsPage() {
       else next.delete(skillId);
       return next;
     });
-    const supabase = createClient();
+
     if (attached) {
-      const { error } = await supabase.from("email_skill_attachments").upsert(
-        {
-          skill_id: skillId,
-          scope_type: currentScopeType,
-          scope_id: currentScopeId,
-          enabled: true,
-        },
-        { onConflict: "skill_id,scope_type,scope_id" },
-      );
-      if (error) {
+      const res = await fetch("/api/email-skills/attachments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          skillId,
+          scopeType: currentScopeType,
+          scopeId: currentScopeId,
+        }),
+      });
+      if (!res.ok) {
         toast.error("Failed to attach skill");
         setAttachedIds((prev) => {
           const next = new Set(prev);
@@ -165,13 +150,15 @@ export default function EmailSkillsPage() {
         });
       }
     } else {
-      const { error } = await supabase
-        .from("email_skill_attachments")
-        .delete()
-        .eq("skill_id", skillId)
-        .eq("scope_type", currentScopeType)
-        .eq("scope_id", currentScopeId);
-      if (error) {
+      const params = new URLSearchParams({
+        skillId,
+        scopeType: currentScopeType,
+        scopeId: currentScopeId,
+      });
+      const res = await fetch(`/api/email-skills/attachments?${params}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
         toast.error("Failed to detach skill");
         setAttachedIds((prev) => new Set(prev).add(skillId));
       }
@@ -337,7 +324,6 @@ function CreateSkillButton({
   onOpenChange: (open: boolean) => void;
   onCreated: (skill: EmailSkill) => void;
 }) {
-  const { userId } = useAuth();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -360,31 +346,25 @@ function CreateSkillButton({
   const handleCreate = async () => {
     if (!name || !instructions) return;
     setSaving(true);
-    if (!userId) {
-      toast.error("Not signed in");
-      setSaving(false);
-      return;
-    }
-    const supabase = createClient();
-    const { data, error } = await supabase
-      .from("email_skills")
-      .insert({
-        user_id: userId,
+    const res = await fetch("/api/email-skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         name,
         slug: slugify(name) || `skill-${Date.now()}`,
         description: description || null,
         instructions,
-        is_builtin: false,
-      })
-      .select("*")
-      .single();
+      }),
+    });
     setSaving(false);
-    if (error || !data) {
-      toast.error(error?.message ?? "Failed to create");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      toast.error((err as { error?: string }).error ?? "Failed to create");
       return;
     }
+    const data = (await res.json()) as EmailSkill;
     toast.success("Skill created");
-    onCreated(data as EmailSkill);
+    onCreated(data);
     reset();
     onOpenChange(false);
   };

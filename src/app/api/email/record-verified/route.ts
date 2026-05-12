@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
-import { recordVerifiedEmail } from "@/lib/services/email-pattern";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq } from "drizzle-orm";
+import {
+  recordVerifiedEmail,
+  makeEmailPatternDb,
+} from "@/lib/services/email-pattern";
 
 export const runtime = "nodejs";
 
@@ -12,11 +18,12 @@ export const runtime = "nodejs";
  * confirmation.
  */
 export async function POST(req: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase } = ctx;
 
   let body: { personId?: string; email?: string };
   try {
@@ -36,22 +43,22 @@ export async function POST(req: Request) {
   // Ownership: person must be linked to a campaign owned by this user. Without
   // this check any logged-in user could overwrite anyone's work_email and
   // poison the org's email_pattern (cross-tenant).
-  const { data: ownership } = await supabase
-    .from("campaign_people")
-    .select("campaign:campaigns!inner(user_id)")
-    .eq("person_id", personId)
-    .limit(1)
-    .maybeSingle();
+  const [ownership] = await adminDb
+    .select({ clerkUserId: schema.campaigns.clerkUserId })
+    .from(schema.campaignPeople)
+    .innerJoin(
+      schema.campaigns,
+      eq(schema.campaignPeople.campaignId, schema.campaigns.id),
+    )
+    .where(eq(schema.campaignPeople.personId, personId))
+    .limit(1);
 
-  const ownerId =
-    (ownership?.campaign as unknown as { user_id?: string } | null)?.user_id ??
-    null;
-
-  if (!ownerId || ownerId !== ctx.user.id) {
+  if (!ownership || ownership.clerkUserId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  await recordVerifiedEmail(supabase, {
+  const epDb = makeEmailPatternDb(adminDb);
+  await recordVerifiedEmail(epDb, {
     personId,
     email,
     source: "user_entered",

@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useCampaign } from "@/lib/campaign-context";
 import { useStreaming } from "@/lib/streaming-context";
-import { createClient } from "@/lib/supabase/client";
 import posthog from "posthog-js";
 
 import { cn } from "@/lib/utils";
@@ -79,104 +78,24 @@ export default function CampaignDetailPage() {
   }, [isStreaming]);
 
   const fetchData = useCallback(async () => {
-    const supabase = createClient();
-
-    const [campaignRes, companiesRes, contactsRes] = await Promise.all([
-      supabase.from("campaigns").select("*").eq("id", campaignId).single(),
-      supabase
-        .from("campaign_organizations")
-        .select("*, organization:organizations(*)")
-        .eq("campaign_id", campaignId)
-        .order("relevance_score", { ascending: false }),
-      supabase
-        .from("campaign_people")
-        .select(
-          "*, person:people(*, organization:organizations(name, domain, industry))",
-        )
-        .eq("campaign_id", campaignId)
-        .order("priority_score", { ascending: false, nullsFirst: false })
-        .order("created_at", { ascending: false }),
-    ]);
+    const res = await fetch(`/api/campaigns/${campaignId}`);
 
     if (!mountedRef.current) return;
 
-    if (campaignRes.error) {
+    if (!res.ok) {
       setError("Campaign not found");
       setLoading(false);
       return;
     }
 
-    const newCompanies: CampaignCompany[] = (companiesRes.data || [])
-      .filter((row: Record<string, unknown>) => row.organization != null)
-      .map((row: Record<string, unknown>) => {
-        const org = row.organization as Record<string, unknown>;
-        return {
-          id: row.id as string,
-          organization_id: row.organization_id as string,
-          campaign_id: row.campaign_id as string,
-          name: org.name as string,
-          domain: org.domain as string | null,
-          url: org.url as string | null,
-          industry: org.industry as string | null,
-          location: org.location as string | null,
-          description: org.description as string | null,
-          relevance_score: row.relevance_score as number | null,
-          score_reason: row.score_reason as string | null,
-          status: row.status as CampaignCompany["status"],
-          readiness_tag:
-            (row.readiness_tag as CampaignCompany["readiness_tag"]) || null,
-          enrichment_data: (org.enrichment_data ||
-            {}) as CampaignCompany["enrichment_data"],
-          source: org.source as string | null,
-          created_at: row.created_at as string,
-          updated_at: row.updated_at as string,
-        };
-      });
+    const json = (await res.json()) as {
+      campaign: Campaign;
+      companies: CampaignCompany[];
+      contacts: CampaignContact[];
+    };
 
-    const newContacts: CampaignContact[] = (contactsRes.data || [])
-      .filter((row: Record<string, unknown>) => row.person != null)
-      .map((row: Record<string, unknown>) => {
-        const person = row.person as Record<string, unknown>;
-        const org = person?.organization as unknown as {
-          name: string;
-          domain: string | null;
-          industry: string | null;
-        } | null;
-        return {
-          id: row.id as string,
-          person_id: row.person_id as string,
-          campaign_id: row.campaign_id as string,
-          organization_id: (person?.organization_id as string) || null,
-          name: person.name as string,
-          title: person.title as string | null,
-          work_email: person.work_email as string | null,
-          personal_email: person.personal_email as string | null,
-          work_email_verified_at: person.work_email_verified_at as
-            | string
-            | null,
-          personal_email_verified_at: person.personal_email_verified_at as
-            | string
-            | null,
-          linkedin_url: person.linkedin_url as string | null,
-          twitter_url: person.twitter_url as string | null,
-          enrichment_status:
-            person.enrichment_status as CampaignContact["enrichment_status"],
-          enrichment_data: (person.enrichment_data ||
-            {}) as CampaignContact["enrichment_data"],
-          outreach_status:
-            row.outreach_status as CampaignContact["outreach_status"],
-          priority_score: row.priority_score as number | null,
-          score_reason: row.score_reason as string | null,
-          readiness_tag:
-            (row.readiness_tag as CampaignContact["readiness_tag"]) || null,
-          source: person.source as string | null,
-          created_at: row.created_at as string,
-          updated_at: row.updated_at as string,
-          company: org
-            ? { name: org.name, domain: org.domain, industry: org.industry }
-            : null,
-        };
-      });
+    const newCompanies: CampaignCompany[] = json.companies;
+    const newContacts: CampaignContact[] = json.contacts;
 
     if (!isInitialLoad.current) {
       const changed = new Set<string>();
@@ -246,7 +165,7 @@ export default function CampaignDetailPage() {
       newContacts.map((c) => [c.id, c.outreach_status ?? ""]),
     );
 
-    setCampaign(campaignRes.data as Campaign);
+    setCampaign(json.campaign);
     setCompanies(newCompanies);
     setContacts(newContacts);
     setLoading(false);

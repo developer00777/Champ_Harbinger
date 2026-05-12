@@ -8,7 +8,10 @@ import {
   trackUsage,
   withAction,
 } from "@/lib/services/cost-tracker";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { eq } from "drizzle-orm";
 import {
   UNTRUSTED_NOTICE,
   stringify,
@@ -18,11 +21,12 @@ import {
 export const maxDuration = 120;
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { supabase, user } = ctx;
 
   let body: Record<string, unknown>;
   try {
@@ -37,44 +41,62 @@ export async function POST(request: Request) {
   }
 
   // Fetch campaign ICP (also serves as ownership check -- defense in depth
-  // layered on top of RLS)
-  const { data: campaign, error: campaignError } = await supabase
-    .from("campaigns")
-    .select("name, icp, offering, positioning, user_id")
-    .eq("id", campaignId)
-    .single();
+  // layered on top of application-level scoping)
+  const [campaign] = await adminDb
+    .select({
+      name: schema.campaigns.name,
+      icp: schema.campaigns.icp,
+      offering: schema.campaigns.offering,
+      positioning: schema.campaigns.positioning,
+      clerkUserId: schema.campaigns.clerkUserId,
+    })
+    .from(schema.campaigns)
+    .where(eq(schema.campaigns.id, campaignId))
+    .limit(1);
 
-  if (campaignError || !campaign) {
+  if (!campaign) {
     return Response.json({ error: "Campaign not found" }, { status: 404 });
   }
-  if (campaign.user_id !== user.id) {
+  if (campaign.clerkUserId !== userId) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   return withAction(`Score contacts: ${campaign.name}`, async () => {
-    // Fetch campaign_people linked to enriched people
-    const { data: links, error: linksError } = await supabase
-      .from("campaign_people")
-      .select(
-        "id, person_id, person:people(id, name, title, linkedin_url, twitter_url, enrichment_data, enrichment_status, organization:organizations(name, domain, industry, enrichment_data))",
+    // Fetch campaign_people linked to enriched people, with org join
+    const links = await adminDb
+      .select({
+        id: schema.campaignPeople.id,
+        personId: schema.campaignPeople.personId,
+        person: {
+          id: schema.people.id,
+          name: schema.people.name,
+          title: schema.people.title,
+          linkedinUrl: schema.people.linkedinUrl,
+          twitterUrl: schema.people.twitterUrl,
+          enrichmentData: schema.people.enrichmentData,
+          enrichmentStatus: schema.people.enrichmentStatus,
+        },
+        org: {
+          name: schema.organizations.name,
+          domain: schema.organizations.domain,
+          industry: schema.organizations.industry,
+          enrichmentData: schema.organizations.enrichmentData,
+        },
+      })
+      .from(schema.campaignPeople)
+      .innerJoin(
+        schema.people,
+        eq(schema.campaignPeople.personId, schema.people.id),
       )
-      .eq("campaign_id", campaignId);
-
-    if (linksError) {
-      return Response.json(
-        { error: `Failed to fetch contacts: ${linksError.message}` },
-        { status: 500 },
-      );
-    }
+      .leftJoin(
+        schema.organizations,
+        eq(schema.people.organizationId, schema.organizations.id),
+      )
+      .where(eq(schema.campaignPeople.campaignId, campaignId));
 
     // Filter to only enriched people
-    const enrichedLinks = (links || []).filter(
-      (l: { id: string; person: unknown }) => {
-        const person = l.person as unknown as {
-          enrichment_status: string;
-        } | null;
-        return person?.enrichment_status === "enriched";
-      },
+    const enrichedLinks = links.filter(
+      (l) => l.person.enrichmentStatus === "enriched",
     );
 
     if (enrichedLinks.length === 0) {
@@ -87,52 +109,44 @@ export async function POST(request: Request) {
     const profile = await getProfileForPrompt(campaignId);
 
     // Build a compact summary of each contact for scoring
-    const contactSummaries = enrichedLinks.map(
-      (l: { id: string; person: unknown }) => {
-        const person = l.person as unknown as Record<string, unknown>;
-        const enrichment = person.enrichment_data as Record<
-          string,
-          unknown
-        > | null;
-        const org = person.organization as {
-          name?: string;
-          domain?: string;
-          industry?: string;
-        } | null;
+    const contactSummaries = enrichedLinks.map((l) => {
+      const enrichment = l.person.enrichmentData as Record<
+        string,
+        unknown
+      > | null;
 
-        const summary: Record<string, unknown> = {
-          id: l.id, // campaign_people link ID
-          name: person.name,
-          title: person.title,
-          company: org?.name || "Unknown",
-          industry: org?.industry || null,
-        };
+      const summary: Record<string, unknown> = {
+        id: l.id, // campaign_people link ID
+        name: l.person.name,
+        title: l.person.title,
+        company: l.org?.name || "Unknown",
+        industry: l.org?.industry || null,
+      };
 
-        // Include LinkedIn headline and recent post topics
-        const linkedin = enrichment?.linkedin as {
-          profileInfo?: { headline?: string };
-          posts?: Array<{ text: string }>;
-        } | null;
-        if (linkedin?.profileInfo?.headline) {
-          summary.headline = linkedin.profileInfo.headline;
-        }
-        if (linkedin?.posts && linkedin.posts.length > 0) {
-          summary.recentPostTopics = linkedin.posts
-            .slice(0, 3)
-            .map((p) => p.text.slice(0, 150));
-        }
+      // Include LinkedIn headline and recent post topics
+      const linkedin = enrichment?.linkedin as {
+        profileInfo?: { headline?: string };
+        posts?: Array<{ text: string }>;
+      } | null;
+      if (linkedin?.profileInfo?.headline) {
+        summary.headline = linkedin.profileInfo.headline;
+      }
+      if (linkedin?.posts && linkedin.posts.length > 0) {
+        summary.recentPostTopics = linkedin.posts
+          .slice(0, 3)
+          .map((p) => p.text.slice(0, 150));
+      }
 
-        // Include Twitter bio
-        const twitter = enrichment?.twitter as {
-          user?: { description?: string; followers_count?: number };
-        } | null;
-        if (twitter?.user?.description) {
-          summary.twitterBio = twitter.user.description;
-        }
+      // Include Twitter bio
+      const twitter = enrichment?.twitter as {
+        user?: { description?: string; followers_count?: number };
+      } | null;
+      if (twitter?.user?.description) {
+        summary.twitterBio = twitter.user.description;
+      }
 
-        return summary;
-      },
-    );
+      return summary;
+    });
 
     // Build the scoring prompt
     const profileContext = profile
@@ -200,18 +214,22 @@ ${wrapUntrusted(JSON.stringify(contactSummaries, null, 2))}`,
         cache_read_tokens: result.usage.inputTokenDetails?.cacheReadTokens,
       },
       campaign_id: campaignId,
-      user_id: user.id,
+      user_id: userId,
     });
 
     // Batch update scores on campaign_people junction table
-    const updates = result.object.scores.map((s) =>
-      supabase
-        .from("campaign_people")
-        .update({ priority_score: s.score, score_reason: s.reason })
-        .eq("id", s.id),
+    await Promise.all(
+      result.object.scores.map((s) =>
+        adminDb
+          .update(schema.campaignPeople)
+          .set({
+            priorityScore: String(s.score),
+            scoreReason: s.reason,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.campaignPeople.id, s.id)),
+      ),
     );
-
-    await Promise.all(updates);
 
     return Response.json({
       scored: result.object.scores.length,

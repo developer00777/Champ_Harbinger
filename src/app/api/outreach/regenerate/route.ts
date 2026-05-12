@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { eq, and, count } from "drizzle-orm";
 
 import { composeEmail } from "@/lib/email-composition/compose";
 import { loadActiveEmailSkills } from "@/lib/email-composition/load-skills";
-import { getAdminClient } from "@/lib/supabase/admin";
-import { getSupabaseAndUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
 
 export const maxDuration = 120;
 
@@ -12,11 +14,12 @@ interface Body {
 }
 
 export async function POST(request: Request) {
-  const ctx = await getSupabaseAndUser();
-  if (!ctx) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { user } = ctx;
 
   let body: Body;
   try {
@@ -29,22 +32,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "draftId is required" }, { status: 400 });
   }
 
-  const supabase = getAdminClient();
-
-  const { data: draft, error: draftErr } = await supabase
-    .from("email_drafts")
-    .select(
-      "id, user_id, campaign_id, person_id, sequence_id, sequence_step_id, ai_reasoning, review_status, status",
+  // Load draft — scoped to this user
+  const [draft] = await adminDb
+    .select({
+      id: schema.emailDrafts.id,
+      clerkUserId: schema.emailDrafts.clerkUserId,
+      campaignId: schema.emailDrafts.campaignId,
+      personId: schema.emailDrafts.personId,
+      sequenceId: schema.emailDrafts.sequenceId,
+      sequenceStepId: schema.emailDrafts.sequenceStepId,
+      aiReasoning: schema.emailDrafts.aiReasoning,
+      reviewStatus: schema.emailDrafts.reviewStatus,
+      status: schema.emailDrafts.status,
+    })
+    .from(schema.emailDrafts)
+    .where(
+      and(
+        eq(schema.emailDrafts.id, body.draftId),
+        eq(schema.emailDrafts.clerkUserId, userId),
+      ),
     )
-    .eq("id", body.draftId)
-    .single();
+    .limit(1);
 
-  if (draftErr || !draft) {
+  if (!draft) {
     return NextResponse.json({ error: "Draft not found" }, { status: 404 });
-  }
-
-  if (draft.user_id !== user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (draft.status !== "draft") {
@@ -54,105 +65,137 @@ export async function POST(request: Request) {
     );
   }
 
-  if (draft.review_status !== "pending") {
+  if (draft.reviewStatus !== "pending") {
     return NextResponse.json(
-      { error: `Cannot regenerate a ${draft.review_status} email` },
+      { error: `Cannot regenerate a ${draft.reviewStatus} email` },
       { status: 409 },
     );
   }
 
-  const { data: person } = await supabase
-    .from("people")
-    .select(
-      "id, name, title, work_email, personal_email, organization_id, enrichment_data",
-    )
-    .eq("id", draft.person_id)
-    .single();
+  // Load person
+  const [person] = await adminDb
+    .select({
+      id: schema.people.id,
+      name: schema.people.name,
+      title: schema.people.title,
+      workEmail: schema.people.workEmail,
+      personalEmail: schema.people.personalEmail,
+      organizationId: schema.people.organizationId,
+      enrichmentData: schema.people.enrichmentData,
+    })
+    .from(schema.people)
+    .where(eq(schema.people.id, draft.personId))
+    .limit(1);
 
   if (!person) {
     return NextResponse.json({ error: "Person not found" }, { status: 404 });
   }
 
-  const { data: campaign } = await supabase
-    .from("campaigns")
-    .select("name, icp, offering, positioning, profile_id")
-    .eq("id", draft.campaign_id)
-    .single();
+  // Load campaign
+  const [campaign] = await adminDb
+    .select({
+      name: schema.campaigns.name,
+      icp: schema.campaigns.icp,
+      offering: schema.campaigns.offering,
+      positioning: schema.campaigns.positioning,
+      profileId: schema.campaigns.profileId,
+    })
+    .from(schema.campaigns)
+    .where(eq(schema.campaigns.id, draft.campaignId))
+    .limit(1);
 
-  let senderProfile: Record<string, unknown> | null = null;
-  if (campaign?.profile_id) {
-    const { data: profile } = await supabase
-      .from("user_profile")
-      .select("name, role_title, company_name, offering_summary")
-      .eq("id", campaign.profile_id)
-      .single();
-    senderProfile = (profile as Record<string, unknown>) ?? null;
+  // Load sender profile if present
+  let senderProfile: {
+    name: string | null;
+    roleTitle: string | null;
+    companyName: string | null;
+  } | null = null;
+
+  if (campaign?.profileId) {
+    const [profile] = await adminDb
+      .select({
+        name: schema.userProfile.name,
+        roleTitle: schema.userProfile.roleTitle,
+        companyName: schema.userProfile.companyName,
+      })
+      .from(schema.userProfile)
+      .where(eq(schema.userProfile.id, campaign.profileId))
+      .limit(1);
+    senderProfile = profile ?? null;
   }
 
-  type OrgRow = {
+  // Load organization if the person has one
+  let org: {
     name: string | null;
     domain: string | null;
     industry: string | null;
-    enrichment_data: Record<string, unknown> | null;
-  };
-  let org: OrgRow | null = null;
-  if (person.organization_id) {
-    const { data } = await supabase
-      .from("organizations")
-      .select("name, domain, industry, enrichment_data")
-      .eq("id", person.organization_id)
-      .single();
-    org = (data as OrgRow | null) ?? null;
+    enrichmentData: Record<string, unknown>;
+  } | null = null;
+
+  if (person.organizationId) {
+    const [orgRow] = await adminDb
+      .select({
+        name: schema.organizations.name,
+        domain: schema.organizations.domain,
+        industry: schema.organizations.industry,
+        enrichmentData: schema.organizations.enrichmentData,
+      })
+      .from(schema.organizations)
+      .where(eq(schema.organizations.id, person.organizationId))
+      .limit(1);
+    org = orgRow ?? null;
   }
 
+  // Load step info
   let stepNumber = 1;
   let totalSteps = 1;
   let condition = "always";
   let isFinal = true;
 
-  if (draft.sequence_step_id && draft.sequence_id) {
-    const { data: stepRow } = await supabase
-      .from("sequence_steps")
-      .select("step_number, condition")
-      .eq("id", draft.sequence_step_id)
-      .single();
+  if (draft.sequenceStepId && draft.sequenceId) {
+    const [stepRow] = await adminDb
+      .select({
+        stepNumber: schema.sequenceSteps.stepNumber,
+        condition: schema.sequenceSteps.condition,
+      })
+      .from(schema.sequenceSteps)
+      .where(eq(schema.sequenceSteps.id, draft.sequenceStepId))
+      .limit(1);
+
     if (stepRow) {
-      stepNumber = (stepRow.step_number as number) ?? 1;
-      condition = (stepRow.condition as string) ?? "always";
+      stepNumber = stepRow.stepNumber;
+      condition = stepRow.condition ?? "always";
     }
 
-    const { count } = await supabase
-      .from("sequence_steps")
-      .select("*", { count: "exact", head: true })
-      .eq("sequence_id", draft.sequence_id);
-    totalSteps = count ?? 1;
+    const [countRow] = await adminDb
+      .select({ cnt: count() })
+      .from(schema.sequenceSteps)
+      .where(eq(schema.sequenceSteps.sequenceId, draft.sequenceId));
+
+    totalSteps = Number(countRow?.cnt ?? 1);
     isFinal = stepNumber === totalSteps;
   }
 
-  const skills = await loadActiveEmailSkills(supabase, {
-    userId: user.id,
-    profileId: (campaign?.profile_id as string | null) ?? null,
-    campaignId: draft.campaign_id,
+  const skills = await loadActiveEmailSkills({
+    userId,
+    profileId: campaign?.profileId ?? null,
+    campaignId: draft.campaignId,
   });
 
   const composed = await composeEmail({
     skills,
     contact: {
-      name: (person.name as string) ?? null,
-      title: (person.title as string) ?? null,
-      email:
-        (person.work_email as string) ??
-        (person.personal_email as string) ??
-        "unknown@example.com",
-      enrichmentData:
-        (person.enrichment_data as Record<string, unknown>) ?? null,
+      name: person.name ?? null,
+      title: person.title ?? null,
+      email: person.workEmail ?? person.personalEmail ?? "unknown@example.com",
+      enrichmentData: person.enrichmentData ?? null,
     },
     company: org
       ? {
           name: org.name,
           domain: org.domain,
           industry: org.industry,
-          enrichmentData: org.enrichment_data,
+          enrichmentData: org.enrichmentData,
         }
       : null,
     step: {
@@ -162,18 +205,18 @@ export async function POST(request: Request) {
       isFinal,
     },
     campaign: {
-      name: (campaign?.name as string) ?? "Campaign",
-      icp: (campaign?.icp as Record<string, unknown>) ?? null,
-      offering: (campaign?.offering as Record<string, unknown>) ?? null,
-      positioning: (campaign?.positioning as Record<string, unknown>) ?? null,
+      name: campaign?.name ?? "Campaign",
+      icp: campaign?.icp ?? null,
+      offering: campaign?.offering ?? null,
+      positioning: campaign?.positioning ?? null,
     },
     senderProfile: {
-      name: (senderProfile?.name as string) ?? null,
-      title: (senderProfile?.role_title as string) ?? null,
-      company: (senderProfile?.company_name as string) ?? null,
+      name: senderProfile?.name ?? null,
+      title: senderProfile?.roleTitle ?? null,
+      company: senderProfile?.companyName ?? null,
       signature: null,
     },
-    triggerReason: (draft.ai_reasoning as string) ?? null,
+    triggerReason: draft.aiReasoning ?? null,
   });
 
   if (!composed.ok) {
@@ -183,21 +226,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const now = new Date().toISOString();
-  const { error: updateErr } = await supabase
-    .from("email_drafts")
-    .update({
+  const now = new Date();
+  await adminDb
+    .update(schema.emailDrafts)
+    .set({
       subject: composed.email.subject,
-      body_html: composed.email.bodyHtml,
-      body_text: composed.email.bodyText ?? null,
-      ai_reasoning: composed.email.aiReasoning ?? draft.ai_reasoning,
-      updated_at: now,
+      bodyHtml: composed.email.bodyHtml,
+      bodyText: composed.email.bodyText ?? null,
+      aiReasoning: composed.email.aiReasoning ?? draft.aiReasoning,
+      updatedAt: now,
     })
-    .eq("id", draft.id);
-
-  if (updateErr) {
-    return NextResponse.json({ error: updateErr.message }, { status: 500 });
-  }
+    .where(
+      and(
+        eq(schema.emailDrafts.id, draft.id),
+        eq(schema.emailDrafts.clerkUserId, userId),
+      ),
+    );
 
   return NextResponse.json({
     ok: true,

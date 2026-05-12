@@ -14,8 +14,6 @@ import {
 } from "@/components/ui/skeleton-presets";
 import { Textarea } from "@/components/ui/textarea";
 import { EmailSkillsAttacher } from "@/components/email-skills/email-skills-attacher";
-import { createClient } from "@/lib/supabase/client";
-import { useUser } from "@clerk/nextjs";
 import { profileDisplayName } from "@/lib/types/profile";
 import type { UserProfile, ProfileFormData } from "@/lib/types/profile";
 
@@ -34,7 +32,6 @@ const emptyForm: ProfileFormData = {
 };
 
 export default function ProfilePage() {
-  const { user: clerkUser } = useUser();
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<ProfileFormData>(emptyForm);
@@ -59,13 +56,10 @@ export default function ProfilePage() {
 
   useEffect(() => {
     const load = async () => {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("user_profile")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      const list: UserProfile[] = Array.isArray(data) ? data : [];
+      const res = await fetch("/api/profile");
+      const list: UserProfile[] = res.ok
+        ? ((await res.json()) as UserProfile[])
+        : [];
       setProfiles(list);
 
       if (list.length > 0) {
@@ -95,7 +89,6 @@ export default function ProfilePage() {
 
   const handleSave = async () => {
     setSaving(true);
-    const supabase = createClient();
 
     const payload = Object.fromEntries(
       Object.entries(form).map(([k, v]) => [k, v === "" ? null : v]),
@@ -103,32 +96,35 @@ export default function ProfilePage() {
 
     try {
       if (selectedId) {
-        const { error } = await supabase
-          .from("user_profile")
-          .update(payload)
-          .eq("id", selectedId);
-        if (error) throw error;
-
+        const res = await fetch(`/api/profile?id=${selectedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          throw new Error(body.error ?? "Failed to save");
+        }
+        const updated = (await res.json()) as UserProfile;
         setProfiles((prev) =>
-          prev.map((p) =>
-            p.id === selectedId ? ({ ...p, ...payload } as UserProfile) : p,
-          ),
+          prev.map((p) => (p.id === selectedId ? updated : p)),
         );
         toast.success("Profile saved");
       } else {
-        if (!clerkUser?.id) {
-          toast.error("Still signing in — try again in a moment");
-          setSaving(false);
-          return;
+        const res = await fetch("/api/profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          throw new Error(body.error ?? "Failed to create");
         }
-        const { data, error } = await supabase
-          .from("user_profile")
-          .insert({ ...payload, user_id: clerkUser.id })
-          .select("*")
-          .single();
-        if (error) throw error;
-
-        const newProfile = data as UserProfile;
+        const newProfile = (await res.json()) as UserProfile;
         setProfiles((prev) => [newProfile, ...prev]);
         setSelectedId(newProfile.id);
         toast.success("Profile created");
@@ -149,14 +145,13 @@ export default function ProfilePage() {
       return;
     }
 
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("user_profile")
-      .delete()
-      .eq("id", selectedId);
+    const res = await fetch(`/api/profile?id=${selectedId}`, {
+      method: "DELETE",
+    });
 
-    if (error) {
-      toast.error(`Failed to delete: ${error.message}`);
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      toast.error(`Failed to delete: ${body.error ?? "Unknown error"}`);
       return;
     }
 
