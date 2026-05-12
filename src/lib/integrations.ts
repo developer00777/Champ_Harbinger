@@ -62,44 +62,35 @@ export const INTEGRATIONS: Integration[] = [
     name: "Clerk",
     category: "auth",
     severity: "required",
-    feature: "Sign-in, user identity, JWTs for Supabase RLS",
+    feature: "Sign-in and user identity",
     consequence:
-      "Without all three set, you're in Keyless dev mode: sign-in works but Supabase RLS rejects Clerk-issued JWTs, so every dashboard query returns empty.",
-    envVars: [
-      "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-      "CLERK_SECRET_KEY",
-      "CLERK_FRONTEND_API_DOMAIN",
-    ],
+      "Authentication is broken. Users cannot sign in and all protected routes are inaccessible.",
+    envVars: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"],
     publicEnvVar: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
     signupUrl: "https://clerk.com",
-    keysUrl: "https://dashboard.clerk.com (API Keys → Frontend API URL)",
+    keysUrl: "https://dashboard.clerk.com → API Keys",
     fixHint:
-      "Run `pnpm setup` (option [2]) or paste the keys + frontend API domain into .env.local",
+      "Paste NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY into .env.local",
   },
   {
-    id: "supabase",
-    name: "Supabase",
+    id: "postgres",
+    name: "Postgres",
     category: "data",
     severity: "required",
-    feature: "Database, storage, RLS",
+    feature: "Database (all reads and writes)",
     consequence:
-      "The app can't read or write data. Every page will fail or show empty state.",
-    envVars: [
-      "NEXT_PUBLIC_SUPABASE_URL",
-      "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY",
-      "SUPABASE_SERVICE_ROLE_KEY",
-    ],
-    publicEnvVar: "NEXT_PUBLIC_SUPABASE_URL",
-    signupUrl: "https://supabase.com/dashboard",
-    keysUrl: "https://supabase.com/dashboard (Project Settings → API)",
-    fixHint: "Run `pnpm setup` or paste keys into .env.local",
+      "The app cannot read or write any data. Every page will be empty.",
+    envVars: ["DATABASE_URL"],
+    fixHint:
+      "Set DATABASE_URL=postgres://user:pass@host:5432/champ_harbinger in .env.local",
   },
   {
     id: "openrouter",
     name: "OpenRouter",
     category: "ai",
     severity: "required",
-    feature: "Chat, enrichment, email drafts (routes to any LLM via OpenRouter)",
+    feature:
+      "Chat, enrichment, email drafts (routes to any LLM via OpenRouter)",
     consequence:
       "Every chat request will fail with a 500. The agent and email composer are non-functional.",
     envVars: ["OPENROUTER_API_KEY"],
@@ -126,7 +117,7 @@ export const INTEGRATIONS: Integration[] = [
     id: "browserbase",
     name: "Browserbase",
     category: "scraping",
-    severity: "required",
+    severity: "optional",
     feature: "Web scraping, YC scraper, hiring signals",
     consequence:
       "Any signal that needs browser automation will fail with 'not configured'.",
@@ -144,7 +135,8 @@ export const INTEGRATIONS: Integration[] = [
     consequence:
       "Outreach sequences can be drafted but not sent. Delivery / reply tracking is disabled.",
     envVars: ["CHAMPMAIL_API_KEY"],
-    fixHint: "Add `CHAMPMAIL_API_KEY=...` to .env.local (ChampMail integration coming soon)",
+    fixHint:
+      "Add `CHAMPMAIL_API_KEY=...` to .env.local (ChampMail integration coming soon)",
   },
   {
     id: "qstash",
@@ -168,7 +160,7 @@ export const INTEGRATIONS: Integration[] = [
     id: "exa",
     name: "Exa",
     category: "enrichment",
-    severity: "required",
+    severity: "optional",
     feature: "Neural web search inside chat",
     consequence:
       "Chat web-search and Exa-backed signals (changelog monitor, etc.) will return 'not configured'.",
