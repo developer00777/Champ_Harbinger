@@ -5,8 +5,19 @@ import { useSearchParams } from "next/navigation";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { TogglePill } from "@/components/ui/toggle-pill";
 import { SignalCard } from "@/components/signals/signal-card";
 import { SignalDetailDialog } from "@/components/signals/signal-detail-dialog";
@@ -27,6 +38,235 @@ const CATEGORIES: {
   { label: "Custom", value: "custom" },
   { label: "Community", value: "community" },
 ];
+
+const SIGNAL_CATEGORY_OPTIONS: { value: SignalCategory; label: string }[] = [
+  { value: "hiring", label: "Hiring" },
+  { value: "funding", label: "Funding" },
+  { value: "executive", label: "Executive" },
+  { value: "product", label: "Product" },
+  { value: "engagement", label: "Engagement" },
+  { value: "custom", label: "Custom" },
+];
+
+function NewSignalDialog({
+  onCreated,
+}: {
+  onCreated: (signal: Signal) => void;
+}) {
+  const { openAgentWith } = useCampaign();
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"choose" | "quick">("choose");
+
+  // Quick-create form state
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState<SignalCategory>("custom");
+  const [creating, setCreating] = useState(false);
+
+  const resetForm = () => {
+    setName("");
+    setDescription("");
+    setCategory("custom");
+    setMode("choose");
+  };
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) resetForm();
+  };
+
+  const handleCreateWithAI = () => {
+    setOpen(false);
+    resetForm();
+    openAgentWith(
+      "I want to create a new signal. Help me design it -- ask what I want to track, what the threshold should be, and then create it.",
+    );
+  };
+
+  const handleQuickCreate = async () => {
+    if (!name.trim()) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/signals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim(),
+          category,
+          executionType: "exa_search",
+          config: description.trim() ? { query: description.trim() } : {},
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        toast.error(
+          `Failed to create signal: ${body.error ?? "Unknown error"}`,
+        );
+        return;
+      }
+      const raw = (await res.json()) as {
+        id: string;
+        name: string;
+        slug: string;
+        description: string;
+        long_description: string | null;
+        category: SignalCategory;
+        icon: string | null;
+        execution_type: string;
+        tool_key: string | null;
+        config: Record<string, unknown>;
+        is_builtin: boolean;
+        is_public: boolean;
+        created_by: string | null;
+        created_at: string;
+        updated_at: string;
+      };
+      const signal: Signal = {
+        id: raw.id,
+        name: raw.name,
+        slug: raw.slug,
+        description: raw.description,
+        long_description: raw.long_description,
+        category: raw.category,
+        icon: raw.icon,
+        execution_type: raw.execution_type as Signal["execution_type"],
+        tool_key: raw.tool_key,
+        config: raw.config,
+        is_builtin: raw.is_builtin,
+        is_public: raw.is_public,
+        created_by: raw.created_by,
+        created_at: raw.created_at,
+        updated_at: raw.updated_at,
+      };
+      toast.success(`Signal "${signal.name}" created`);
+      onCreated(signal);
+      setOpen(false);
+      resetForm();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger
+        render={
+          <Button variant="outline" size="sm" className="gap-1.5">
+            <Plus className="size-3.5" />
+            New Signal
+          </Button>
+        }
+      />
+      <DialogContent>
+        {mode === "choose" ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>New signal</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-2">
+              <Button
+                variant="outline"
+                className="h-auto flex-col items-start gap-0.5 px-4 py-3 text-left"
+                onClick={handleCreateWithAI}
+              >
+                <span className="font-medium">Create with AI</span>
+                <span className="text-muted-foreground text-xs font-normal">
+                  The agent walks you through signal design and creates it for
+                  you.
+                </span>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-auto flex-col items-start gap-0.5 px-4 py-3 text-left"
+                onClick={() => setMode("quick")}
+              >
+                <span className="font-medium">Quick create</span>
+                <span className="text-muted-foreground text-xs font-normal">
+                  Define a simple exa_search signal with a name and search
+                  query.
+                </span>
+              </Button>
+            </div>
+            <DialogFooter>
+              <DialogClose render={<Button variant="outline" />}>
+                Cancel
+              </DialogClose>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>Quick create signal</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label
+                  htmlFor="signal-name"
+                  className="mb-1 block text-xs font-medium"
+                >
+                  Signal name <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  id="signal-name"
+                  placeholder="e.g. Hiring surge"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="signal-description"
+                  className="mb-1 block text-xs font-medium"
+                >
+                  What to look for{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (becomes the search query)
+                  </span>
+                </label>
+                <Textarea
+                  id="signal-description"
+                  placeholder="e.g. company is actively hiring senior engineers or DevOps roles"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="signal-category"
+                  className="mb-1 block text-xs font-medium"
+                >
+                  Category
+                </label>
+                <Select
+                  id="signal-category"
+                  value={category}
+                  onValueChange={(v) => setCategory(v as SignalCategory)}
+                  items={SIGNAL_CATEGORY_OPTIONS}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setMode("choose")}>
+                Back
+              </Button>
+              <Button
+                onClick={() => void handleQuickCreate()}
+                disabled={creating || !name.trim()}
+              >
+                {creating ? "Creating..." : "Create"}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function SignalsPage() {
   return (
@@ -224,19 +464,9 @@ function SignalsPageContent() {
               to research for each prospect.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() =>
-              openAgentWith(
-                "I want to create a new signal. Help me design it -- ask what I want to track, what the threshold should be, and then create it.",
-              )
-            }
-          >
-            <Plus className="size-3.5" />
-            New Signal
-          </Button>
+          <NewSignalDialog
+            onCreated={(signal) => setSignals((prev) => [signal, ...prev])}
+          />
         </div>
 
         {/* Campaign selector */}

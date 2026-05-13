@@ -12,6 +12,8 @@ import {
 import { formatRelative } from "@/components/ui/relative-time";
 import { toast } from "sonner";
 
+const hasLakeb2b = INTEGRATIONS.some((i) => i.id === "lakeb2b");
+
 interface SavedKey {
   keyName: string;
   keyPrefix: string;
@@ -26,6 +28,8 @@ export function ApiKeysPanel() {
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [showValue, setShowValue] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [lakeb2bUrl, setLakeb2bUrl] = useState("");
+  const [savingLakeb2bUrl, setSavingLakeb2bUrl] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings/keys")
@@ -36,6 +40,33 @@ export function ApiKeysPanel() {
       })
       .catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!hasLakeb2b) return;
+    fetch("/api/settings/lakeb2b")
+      .then((r) => r.json())
+      .then((data: { baseUrl: string | null }) => {
+        setLakeb2bUrl(data.baseUrl ?? "");
+      })
+      .catch(() => {});
+  }, []);
+
+  async function saveLakeb2bUrl() {
+    setSavingLakeb2bUrl(true);
+    try {
+      const res = await fetch("/api/settings/lakeb2b", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl: lakeb2bUrl.trim() }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      toast.success("Lake B2B base URL saved");
+    } catch {
+      toast.error("Failed to save Lake B2B base URL");
+    } finally {
+      setSavingLakeb2bUrl(false);
+    }
+  }
 
   const keyableIntegrations = INTEGRATIONS.filter((i) => i.keyName);
 
@@ -216,6 +247,34 @@ export function ApiKeysPanel() {
           </div>
         );
       })}
+
+      {/* LakeB2B Base URL — shown when lakeb2b is configured */}
+      {hasLakeb2b && (
+        <div className="mt-6 rounded-lg border border-dashed border-champions-border p-4">
+          <h3 className="text-sm font-semibold mb-2">
+            Lake B2B API Configuration
+          </h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Paste your Lake B2B REST API base URL when available. This enables
+            criteria-based discovery from 120M+ verified records.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              placeholder="https://api.lakeb2b.com/v1"
+              value={lakeb2bUrl}
+              onChange={(e) => setLakeb2bUrl(e.target.value)}
+              className="font-mono text-sm"
+            />
+            <Button
+              size="sm"
+              onClick={saveLakeb2bUrl}
+              disabled={savingLakeb2bUrl}
+            >
+              {savingLakeb2bUrl ? "Saving…" : "Save URL"}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "user_settings" ADD COLUMN "lakeb2b_base_url" text;

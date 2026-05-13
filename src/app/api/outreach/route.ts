@@ -358,3 +358,73 @@ export async function GET() {
 
   return NextResponse.json({ sequences, enrollments, drafts });
 }
+
+/**
+ * POST /api/outreach
+ * Creates a new sequence (and optional steps) for a campaign.
+ */
+export async function POST(request: Request) {
+  let userId: string;
+  try {
+    ({ userId } = await getCurrentUser());
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = (await request.json()) as {
+    campaignId: string;
+    name: string;
+    steps?: Array<{
+      subject?: string;
+      bodyTemplate?: string;
+      delayDays?: number;
+      position?: number;
+    }>;
+  };
+
+  if (!body.campaignId || !body.name?.trim()) {
+    return NextResponse.json(
+      { error: "campaignId and name are required" },
+      { status: 400 },
+    );
+  }
+
+  // Verify campaign ownership
+  const [campaign] = await adminDb
+    .select({ id: schema.campaigns.id })
+    .from(schema.campaigns)
+    .where(
+      and(
+        eq(schema.campaigns.id, body.campaignId),
+        eq(schema.campaigns.clerkUserId, userId),
+      ),
+    )
+    .limit(1);
+
+  if (!campaign) {
+    return NextResponse.json({ error: "campaign not found" }, { status: 404 });
+  }
+
+  const [sequence] = await adminDb
+    .insert(schema.sequences)
+    .values({
+      clerkUserId: userId,
+      campaignId: body.campaignId,
+      name: body.name.trim(),
+      status: "draft",
+    })
+    .returning();
+
+  if (body.steps?.length) {
+    await adminDb.insert(schema.sequenceSteps).values(
+      body.steps.map((s, i) => ({
+        sequenceId: sequence.id,
+        stepNumber: s.position ?? i + 1,
+        stepType: "email" as const,
+        delayDays: s.delayDays ?? 0,
+      })),
+    );
+  }
+
+  return NextResponse.json(sequence, { status: 201 });
+}

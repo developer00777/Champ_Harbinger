@@ -222,6 +222,19 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Generate a fine-grained token with read-only public_repo scope",
     keyName: "github_token",
   },
+  {
+    id: "lakeb2b",
+    name: "Lake B2B",
+    category: "enrichment",
+    severity: "optional",
+    feature:
+      "Criteria-based company and contact discovery from 120M+ verified records",
+    consequence:
+      "Discovery uses Exa web search instead of Lake B2B database. Results will be less accurate and comprehensive.",
+    envVars: ["LAKEB2B_API_KEY"],
+    keyName: "lakeb2b_api_key",
+    fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",
+  },
 ];
 
 /**

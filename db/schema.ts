@@ -186,6 +186,8 @@ export const userSettings = pgTable(
     champiqSignalConfig: jsonb("champiq_signal_config")
       .$type<Record<string, { mode: "auto" | "review"; min_score: number }>>()
       .default({}),
+    // Lake B2B integration settings
+    lakeb2bBaseUrl: text("lakeb2b_base_url"),
     ...timestamps,
   },
   (t) => ({

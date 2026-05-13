@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import posthog from "posthog-js";
 import { toast } from "sonner";
 
@@ -13,15 +14,132 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 interface CampaignRow {
   id: string;
   name: string;
   status: string;
   createdAt: string;
+}
+
+function NewCampaignDialog({
+  onCreated,
+}: {
+  onCreated: (campaign: CampaignRow) => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [icp, setIcp] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const handleCreate = async () => {
+    if (!name.trim()) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          icp: icp.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        toast.error(`Failed to create: ${body.error ?? "Unknown error"}`);
+        return;
+      }
+      const campaign = (await res.json()) as CampaignRow;
+      posthog.capture("campaign_created", { campaign_id: campaign.id });
+      onCreated(campaign);
+      setOpen(false);
+      setName("");
+      setIcp("");
+      router.push(`/campaigns/${campaign.id}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button variant="outline" size="sm" className="gap-1.5">
+            <Plus className="size-3.5" />
+            New campaign
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New campaign</DialogTitle>
+          <DialogDescription>
+            Give your campaign a name and optionally describe your ideal
+            customer profile.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <div>
+            <label
+              htmlFor="campaign-name"
+              className="mb-1 block text-xs font-medium"
+            >
+              Campaign name <span className="text-destructive">*</span>
+            </label>
+            <Input
+              id="campaign-name"
+              placeholder="e.g. SaaS CTOs in Series A"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) void handleCreate();
+              }}
+              autoFocus
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="campaign-icp"
+              className="mb-1 block text-xs font-medium"
+            >
+              ICP description{" "}
+              <span className="text-muted-foreground font-normal">
+                (optional)
+              </span>
+            </label>
+            <Textarea
+              id="campaign-icp"
+              placeholder="e.g. Series A SaaS companies with 10-50 employees in the US"
+              value={icp}
+              onChange={(e) => setIcp(e.target.value)}
+              rows={3}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" />}>
+            Cancel
+          </DialogClose>
+          <Button
+            onClick={() => void handleCreate()}
+            disabled={creating || !name.trim()}
+          >
+            {creating ? "Creating..." : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export default function CampaignsIndexPage() {
@@ -77,12 +195,17 @@ export default function CampaignsIndexPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="space-y-6 p-4 md:p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Campaigns</h1>
-          <p className="text-muted-foreground text-sm">
-            All campaigns in your workspace. Click a name to open it; delete
-            ones you no longer need.
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Campaigns</h1>
+            <p className="text-muted-foreground text-sm">
+              All campaigns in your workspace. Click a name to open it; delete
+              ones you no longer need.
+            </p>
+          </div>
+          <NewCampaignDialog
+            onCreated={(c) => setCampaigns((prev) => [c, ...prev])}
+          />
         </div>
 
         {loading ? (
@@ -92,9 +215,15 @@ export default function CampaignsIndexPage() {
             <div className="bg-muted/40 h-9 w-full animate-pulse rounded" />
           </div>
         ) : campaigns.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            No campaigns yet. Start one from the chat or the Overview page.
-          </p>
+          <div className="border-border flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-12 text-center">
+            <p className="text-sm font-medium">No campaigns yet</p>
+            <p className="text-muted-foreground text-xs">
+              Create your first campaign to start discovering prospects.
+            </p>
+            <NewCampaignDialog
+              onCreated={(c) => setCampaigns((prev) => [c, ...prev])}
+            />
+          </div>
         ) : (
           <div className="border-border overflow-hidden rounded-lg border">
             <table className="w-full text-sm">

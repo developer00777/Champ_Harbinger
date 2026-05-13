@@ -266,8 +266,36 @@ export function buildSystemPrompt(options?: {
   campaignId?: string | null;
   signals?: Signal[] | null;
   pageContext?: string | null;
+  isNewUser?: boolean;
 }): string {
-  let prompt = SYSTEM_PROMPT;
+  const sections: string[] = [SYSTEM_PROMPT];
+
+  const isNewUser =
+    options?.isNewUser ?? (!options?.profile && !options?.campaignId);
+
+  if (isNewUser) {
+    sections.push(`
+## Getting started — new user guidance
+
+The user appears to be setting up ChampHarbinger for the first time. Proactively guide them:
+
+1. **Set up their profile** first — ask: "What does your company sell, and who's your ideal customer?"
+   Use updateUserProfile to save: company name, product description, ICP (industry, size, role, geography).
+
+2. **Create their first campaign** — once profile is set, call saveCampaign with a name and ICP.
+   Example: "SaaS CTOs in Series A companies" or "E-commerce brands doing $5M-$50M revenue".
+
+3. **Enable signals** — suggest 3 relevant signals from the library based on their ICP.
+   Call getCampaignSignals and toggleCampaignSignal to activate them.
+
+4. **Start discovery** — once signals are enabled, offer to find their first batch of companies:
+   "Want me to find 20 companies that match your ICP and run your signals on them?"
+
+Keep responses short and action-oriented. Do one thing at a time.
+`);
+  }
+
+  let prompt = sections.join("\n");
 
   if (options?.pageContext) {
     prompt += `\n\n## Where the User Is Right Now\nThe user is currently viewing: ${options.pageContext}\n\nUse this to ground your response:\n- Reference what they can see on-screen rather than asking them to navigate away.\n- If a task requires data only available on a different page, say so explicitly before switching context.\n- Tailor suggestions to actions that make sense from this page (e.g. on the Signals page, default to signal-related work).`;
@@ -326,6 +354,15 @@ ${signalLines.join("\n\n")}
 Store signal findings in your scoring rationale. Reference specific signal outputs when scoring companies and contacts.
 Weight scoring toward enabled signal findings. If a signal is not listed here, do not run its corresponding enrichment.`;
   }
+
+  prompt += `\n\n## What you can ask me
+
+- "Find companies like [description]" -- discovers and scores prospects
+- "Run signals on [company]" -- checks all active signals for that company
+- "Draft outreach for [company]" -- creates a personalized email draft
+- "Create a campaign for [ICP]" -- sets up a new campaign with signals
+- "Show me my pipeline" -- summarizes active campaigns and top prospects
+- "Set up a hiring surge signal" -- enables signal tracking for hiring activity`;
 
   return prompt;
 }

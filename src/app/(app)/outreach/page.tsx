@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { useChampIQStatus } from "@/hooks/use-champiq-status";
+import { useCampaign } from "@/lib/campaign-context";
+import { Button } from "@/components/ui/button";
 
 import {
   classifyDraft,
@@ -40,6 +42,7 @@ export interface EnrollmentCard {
 
 export default function OutreachPage() {
   const champiqStatus = useChampIQStatus();
+  const { activeCampaignId, openAgentWith } = useCampaign();
   const [outreachMode, setOutreachMode] = useState<"champiq" | "standalone">(
     "champiq",
   );
@@ -107,6 +110,13 @@ export default function OutreachPage() {
     };
   }, [load]);
 
+  const handleNewSequence = () => {
+    const prompt = activeCampaignId
+      ? `Create a 3-step outreach sequence for campaign ${activeCampaignId}. Ask me for the tone, the goal, and any specific talking points I want to include.`
+      : "Create a 3-step outreach sequence. First ask me which campaign to use, then ask for the tone, the goal, and any specific talking points I want to include.";
+    openAgentWith(prompt);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="space-y-8 p-4 md:p-6">
@@ -117,32 +127,43 @@ export default function OutreachPage() {
               Buying-signal-driven email sequences across all campaigns.
             </p>
           </div>
-          {champiqStatus === "connected" && (
-            <div className="flex overflow-hidden rounded-md border text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setOutreachMode("champiq")}
-                className={`px-3 py-1.5 transition-colors ${
-                  outreachMode === "champiq"
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                ChampIQ
-              </button>
-              <button
-                type="button"
-                onClick={() => setOutreachMode("standalone")}
-                className={`px-3 py-1.5 transition-colors ${
-                  outreachMode === "standalone"
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Standalone
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleNewSequence}
+            >
+              <Plus className="size-3.5" />
+              New Sequence
+            </Button>
+            {champiqStatus === "connected" && (
+              <div className="flex overflow-hidden rounded-md border text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setOutreachMode("champiq")}
+                  className={`px-3 py-1.5 transition-colors ${
+                    outreachMode === "champiq"
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  ChampIQ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOutreachMode("standalone")}
+                  className={`px-3 py-1.5 transition-colors ${
+                    outreachMode === "standalone"
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Standalone
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {champiqStatus === "connected" && outreachMode === "champiq" ? (
@@ -162,8 +183,18 @@ export default function OutreachPage() {
           <div className="border-border flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
             <p className="text-sm font-medium">No outreach sequences yet</p>
             <p className="text-muted-foreground text-xs">
-              Open a campaign and ask the agent to set up a sequence.
+              Create a sequence and the agent will help you design the steps,
+              tone, and talking points.
             </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1 gap-1.5"
+              onClick={handleNewSequence}
+            >
+              <Plus className="size-3.5" />
+              New Sequence
+            </Button>
           </div>
         ) : (
           <>
