@@ -5,7 +5,7 @@ const features = [
   },
   {
     title: "Contact enrichment",
-    body: "Pull company and contact data from Lake B2B, Exa, and the open web. Verified, accurate, and ready for outreach — 120M+ contacts in the Champions Group network.",
+    body: "Pull company and contact data from Lake B2B, Exa, and the open web. Verified, accurate, and ready for outreach. 120M+ contacts in the Champions Group network.",
   },
   {
     title: "Outreach drafting",
@@ -21,7 +21,7 @@ const features = [
   },
   {
     title: "Own your data",
-    body: "Bring your own Postgres. Bring your own LLM via OpenRouter — any model, any time. No vendor lock, no shared multi-tenant database.",
+    body: "Bring your own Postgres. Bring your own LLM via OpenRouter: any model, any time. No vendor lock, no shared multi-tenant database.",
   },
 ];
 
@@ -33,8 +33,8 @@ export function FeatureGrid() {
           Built for sales teams that move first.
         </h2>
         <p className="mt-4 max-w-2xl text-base leading-relaxed text-champions-ink-soft">
-          From signal to sent email in a single workspace. No stitching
-          together five tools — ChampHarbinger handles the full pipeline.
+          From signal to sent email in a single workspace. No stitching together
+          five tools. ChampHarbinger handles the full pipeline.
         </p>
         <div className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((f) => (

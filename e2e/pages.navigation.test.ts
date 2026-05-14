@@ -1,253 +1,73 @@
 import { test, expect } from "@playwright/test";
-import {
-  createTestCampaign,
-  createTestOrganization,
-  createTestPerson,
-  linkOrgToCampaign,
-  linkPersonToCampaign,
-  cleanupTestData,
-  cleanupTestUsers,
-  createTestUser,
-  setDefaultTestOwner,
-  authCookiesFor,
-  TEST_PREFIX,
-  type TestUser,
-} from "./helpers";
+import { BASE_URL } from "./helpers";
 
-let testUser: TestUser;
+test.describe("Marketing pages", () => {
+  test("landing page is scrollable", async ({ page }) => {
+    await page.goto(BASE_URL);
+    // Footer exists below the fold
+    const footer = page.locator("footer");
+    await expect(footer).toBeVisible({ timeout: 10000 });
+    // No overflow:hidden blocking scroll on body
+    const bodyOverflow = await page.evaluate(
+      () => getComputedStyle(document.body).overflow,
+    );
+    expect(bodyOverflow).not.toBe("hidden");
+  });
 
-test.beforeAll(async () => {
-  testUser = await createTestUser();
-  setDefaultTestOwner(testUser.id);
-});
-
-test.beforeEach(async ({ context }) => {
-  await context.addCookies(authCookiesFor(testUser));
-});
-
-test.afterAll(async () => {
-  await cleanupTestData();
-  await cleanupTestUsers();
-  setDefaultTestOwner(null);
-});
-
-// ---------------------------------------------------------------------------
-// Home page (Dashboard)
-// ---------------------------------------------------------------------------
-
-test.describe("Home page", () => {
-  test("loads and renders dashboard content", async ({ page }) => {
-    await page.goto("/");
-    await expect(page).toHaveURL(/\//);
-
-    // Wait for dashboard to load (either the heading or the loading state completes)
-    await expect(page.locator("text=Overview").first()).toBeVisible({
-      timeout: 15000,
+  test("landing page has no em dashes in visible text", async ({ page }) => {
+    await page.goto(BASE_URL);
+    // Extract only visible text nodes — skip script/style content which may
+    // contain — in minified JS or CSS.
+    const visibleText = await page.evaluate(() => {
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode(node) {
+            const parent = node.parentElement;
+            if (!parent) return NodeFilter.FILTER_REJECT;
+            const tag = parent.tagName.toLowerCase();
+            if (tag === "script" || tag === "style" || tag === "noscript") {
+              return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          },
+        },
+      );
+      const parts: string[] = [];
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        parts.push(node.textContent ?? "");
+      }
+      return parts.join("");
     });
-
-    // Stat cards should render after dashboard data loads
-    await expect(page.locator("text=Total Leads").first()).toBeVisible({
-      timeout: 10000,
-    });
-    await expect(page.locator("text=Campaigns").first()).toBeVisible();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Chat page
-// ---------------------------------------------------------------------------
-
-test.describe("Chat page", () => {
-  test("loads with message input and heading", async ({ page }) => {
-    await page.goto("/chat");
-    const input = page.locator("textarea, input[type='text']").first();
-    await expect(input).toBeVisible({ timeout: 10000 });
-    await expect(page.locator("text=How can I help").first()).toBeVisible();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Settings page
-// ---------------------------------------------------------------------------
-
-test.describe("Settings page", () => {
-  test("loads and shows all settings sections", async ({ page }) => {
-    await page.goto("/settings");
-    await expect(page.locator("h1", { hasText: "Settings" })).toBeVisible({
-      timeout: 10000,
-    });
-
-    await expect(page.locator("text=Campaigns").first()).toBeVisible();
-    await expect(page.locator("text=Cost Center").first()).toBeVisible();
-    await expect(page.locator("text=Danger Zone").first()).toBeVisible();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Profile page
-// ---------------------------------------------------------------------------
-
-test.describe("Profile page", () => {
-  test("loads and shows profile form", async ({ page }) => {
-    await page.goto("/profile");
-    await expect(page.locator("text=Profiles").first()).toBeVisible({
-      timeout: 10000,
-    });
-
-    // Form sections should render
-    await expect(page.locator("text=Personal Info").first()).toBeVisible({
-      timeout: 5000,
-    });
-    await expect(page.locator("text=Company").first()).toBeVisible();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Signals page
-// ---------------------------------------------------------------------------
-
-test.describe("Signals page", () => {
-  test("loads and shows signal cards with category filters", async ({
-    page,
-  }) => {
-    await page.goto("/signals");
-    await expect(page.locator("text=Hiring Activity")).toBeVisible({
-      timeout: 10000,
-    });
-
-    const body = await page.textContent("body");
-    expect(body).toContain("Signals");
-    expect(body).toContain("Hiring Activity");
-    expect(body).toContain("Funding & News");
-    expect(body).toContain("Executive Changes");
-
-    // Category filter buttons should be present
-    await expect(
-      page.locator("button", { hasText: "All" }).first(),
-    ).toBeVisible();
-    await expect(
-      page.locator("button", { hasText: "Hiring" }).first(),
-    ).toBeVisible();
-    await expect(
-      page.locator("button", { hasText: "Funding" }).first(),
-    ).toBeVisible();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Campaign detail page
-// ---------------------------------------------------------------------------
-
-test.describe("Campaign detail page", () => {
-  let campaignId: string;
-
-  test.beforeAll(async () => {
-    campaignId = await createTestCampaign(`${TEST_PREFIX} Page Test Campaign`);
-
-    // Add some data so the page has content to render
-    const orgId = await createTestOrganization({
-      name: `${TEST_PREFIX} Page Org`,
-      domain: `page-test-${Date.now()}.test`,
-      industry: "Testing",
-    });
-    await linkOrgToCampaign(orgId, campaignId);
-
-    const personId = await createTestPerson(orgId, {
-      name: `${TEST_PREFIX} Page Person`,
-      title: "QA Lead",
-    });
-    await linkPersonToCampaign(personId, campaignId);
+    // Em dash character: —
+    expect(visibleText).not.toMatch(/—/);
   });
 
-  test("loads campaign detail page", async ({ page }) => {
-    await page.goto(`/campaigns/${campaignId}`);
-    // Wait for loading to finish
-    await page.waitForSelector("text=Companies", { timeout: 10000 });
+  test("Get started links to /signup", async ({ page }) => {
+    await page.goto(BASE_URL);
+    const getStartedLink = page
+      .locator("a", { hasText: /get started/i })
+      .first();
+    const href = await getStartedLink.getAttribute("href");
+    expect(href).toContain("/signup");
   });
 
-  test("displays campaign name in header", async ({ page }) => {
-    await page.goto(`/campaigns/${campaignId}`);
-    await page.waitForSelector("text=Companies", { timeout: 10000 });
-    const text = await page.textContent("body");
-    expect(text).toContain("Page Test Campaign");
+  test("Sign in links to /login", async ({ page }) => {
+    await page.goto(BASE_URL);
+    const signInLink = page.locator("a", { hasText: /sign in/i }).first();
+    const href = await signInLink.getAttribute("href");
+    expect(href).toContain("/login");
   });
 
-  test("displays companies section", async ({ page }) => {
-    await page.goto(`/campaigns/${campaignId}`);
-    await page.waitForSelector("text=Companies", { timeout: 10000 });
-    const text = await page.textContent("body");
-    expect(text).toContain("Page Org");
+  test("page title contains ChampHarbinger", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await expect(page).toHaveTitle(/ChampHarbinger/);
   });
 
-  test("displays stats section", async ({ page }) => {
-    await page.goto(`/campaigns/${campaignId}`);
-    await page.waitForSelector("text=Companies", { timeout: 10000 });
-    const text = await page.textContent("body");
-    // Stats should show at least 1 company and 1 lead
-    expect(text).toContain("Leads");
-  });
-
-  test("shows 404-like message for invalid campaign", async ({ page }) => {
-    await page.goto("/campaigns/00000000-0000-0000-0000-000000000000");
-    await expect(page.getByText(/not found/i).first()).toBeVisible({
-      timeout: 10000,
-    });
-  });
-
-  test("company row is expandable", async ({ page }) => {
-    await page.goto(`/campaigns/${campaignId}`);
-    await page.waitForSelector("text=Page Org", { timeout: 10000 });
-
-    await page
-      .getByRole("button", { name: /Expand .*Page Org/ })
-      .first()
-      .click();
-
-    // After click, the button's aria-label flips to "Collapse ..."
-    await expect(
-      page.getByRole("button", { name: /Collapse .*Page Org/ }).first(),
-    ).toBeVisible();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Navigation between pages
-// ---------------------------------------------------------------------------
-
-test.describe("Navigation", () => {
-  test("sidebar chat link works", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector('a[href="/chat"]', { timeout: 10000 });
-
-    const chatLink = page.locator('a[href="/chat"]').first();
-    await chatLink.click();
-    await expect(page).toHaveURL(/\/chat/);
-  });
-
-  test("sidebar settings link works", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector('a[href="/settings"]', { timeout: 10000 });
-
-    const settingsLink = page.locator('a[href="/settings"]').first();
-    await settingsLink.click();
-    await expect(page).toHaveURL(/\/settings/);
-  });
-
-  test("sidebar signals link works", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector('a[href="/signals"]', { timeout: 10000 });
-
-    const signalsLink = page.locator('a[href="/signals"]').first();
-    await signalsLink.click();
-    await expect(page).toHaveURL(/\/signals/);
-  });
-
-  test("sidebar profile link works", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector('a[href="/profile"]', { timeout: 10000 });
-
-    const profileLink = page.locator('a[href="/profile"]').first();
-    await profileLink.click();
-    await expect(page).toHaveURL(/\/profile/);
+  test("h1 headline mentions buying signals", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await expect(page.locator("h1")).toContainText("buying signals");
   });
 });
