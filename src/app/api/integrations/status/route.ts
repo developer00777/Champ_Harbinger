@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { INTEGRATIONS } from "@/lib/integrations";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
@@ -44,8 +44,10 @@ export async function GET() {
       .select({ keyName: schema.userApiKeys.keyName })
       .from(schema.userApiKeys)
       .where(
-        eq(schema.userApiKeys.clerkUserId, userId) &&
+        and(
+          eq(schema.userApiKeys.clerkUserId, userId),
           inArray(schema.userApiKeys.keyName, byokKeyNames),
+        ),
       );
     storedKeyNames = new Set(rows.map((r) => r.keyName));
   }

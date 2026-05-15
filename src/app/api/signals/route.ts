@@ -115,10 +115,8 @@ export async function PATCH(request: Request) {
     .where(
       and(
         eq(schema.signals.id, body.id),
-        or(
-          eq(schema.signals.clerkUserId, userId),
-          eq(schema.signals.isBuiltin, true), // built-ins can have is_public toggled
-        ),
+        eq(schema.signals.clerkUserId, userId),
+        eq(schema.signals.isBuiltin, false),
       ),
     )
     .returning({ id: schema.signals.id });

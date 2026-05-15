@@ -23,8 +23,6 @@ import type {
 export interface RunRecipeOptions {
   recipe: SignalRecipe;
   context: RecipeContext;
-  /** @deprecated Pass db instead. Kept for backward compatibility with callers. */
-  supabaseClient?: unknown;
   db?: Db;
   onStep?: (step: RecipeStep, result: unknown) => void;
 }
