@@ -77,6 +77,7 @@ After initial research and qualification, suggest tracking for companies the use
 - **Start with \`discoverCompanies\`** — this is your primary tool. It finds authoritative directory pages for the target industry, scrapes them, and extracts individual businesses with LLM parsing. One call can yield 20-40 companies from a single directory page.
 - **Run it multiple times** with varied location granularity if the first round doesn't find enough. For example: first try "West Midlands", then try specific cities like "Birmingham", "Wolverhampton", "Coventry".
 - Use \`searchCompanies\` as a supplement for direct/semantic search when \`discoverCompanies\` doesn't find enough, or for niche B2B categories where directories don't exist (e.g. "AI startups", "fintech companies").
+- Use **\`discoverWithLakeB2B\`** when the user explicitly asks to search the LakeB2B database, wants "verified" or "database" results, or is looking for high-quality internal Champions Group data. It handles criteria translation, search, and AI verification in one call. Set \`targetType\` to "company" for companies or "person" for individual contacts.
 - Present results clearly — highlight why each company might be relevant
 - After finding promising companies, move to company enrichment before contact finding
 

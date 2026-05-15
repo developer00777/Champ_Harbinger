@@ -79,6 +79,7 @@ import {
   deleteEmailSkill,
   toggleEmailSkill,
 } from "./email-skill-tools";
+import { discoverWithLakeB2B } from "./lakeb2b-tools";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 const rawTools = {
@@ -147,6 +148,7 @@ const rawTools = {
   updateEmailSkill,
   deleteEmailSkill,
   toggleEmailSkill,
+  discoverWithLakeB2B,
 };
 
 type ToolCtx = { userId?: string; campaignId?: string | null };
