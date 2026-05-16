@@ -4,11 +4,15 @@
  * specific (cheap classifier vs. heavy drafting model).
  */
 export const Models = {
-  default: () => process.env.HARBINGER_DEFAULT_MODEL || 'anthropic/claude-sonnet-4.6',
-  drafting: 'anthropic/claude-sonnet-4.6',
-  classification: 'openai/gpt-4o-mini',
-  cheap: 'openai/gpt-4o-mini',
-  reasoning: 'openai/o1-mini',
+  default: () =>
+    process.env.HARBINGER_DEFAULT_MODEL || "anthropic/claude-sonnet-4.6",
+  drafting: "anthropic/claude-sonnet-4.6",
+  // claude-haiku-4.5 is cheap, fast, and v3-spec compliant via OpenRouter.
+  // openai/gpt-4o-mini returned a v1 spec response that AI SDK 6 rejects
+  // for generateObject calls.
+  classification: "anthropic/claude-haiku-4.5",
+  cheap: "anthropic/claude-haiku-4.5",
+  reasoning: "openai/o1-mini",
 } as const;
 
 export type ModelKey = keyof typeof Models;

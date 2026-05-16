@@ -1,6 +1,5 @@
 import "server-only";
-import { generateObject } from "ai";
-import { z } from "zod";
+import { generateText } from "ai";
 import { getModelSync } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import type { Company, Person } from "./schemas";
@@ -15,22 +14,38 @@ export interface VerifiedPerson extends Person {
   reason: string;
 }
 
-const COMPANY_BATCH_SIZE = 10;
-const PERSON_BATCH_SIZE = 10;
+const BATCH_SIZE = 10;
 
-const verificationResultSchema = z.object({
-  verifications: z.array(
-    z.object({
-      id: z.string(),
-      passes: z.boolean(),
-      reason: z.string().max(200),
-    }),
-  ),
-});
+interface VerificationResult {
+  id: string;
+  passes: boolean;
+  reason: string;
+}
 
-// ---------------------------------------------------------------------------
-// verifyCompanies
-// ---------------------------------------------------------------------------
+function extractVerifications(text: string): VerificationResult[] {
+  const stripped = text
+    .replace(/```(?:json)?\n?/g, "")
+    .replace(/\n?```/g, "")
+    .trim();
+  const start = stripped.indexOf("[");
+  const end = stripped.lastIndexOf("]");
+  if (start === -1 || end === -1) return [];
+  try {
+    const arr = JSON.parse(stripped.slice(start, end + 1)) as unknown[];
+    return arr
+      .filter(
+        (v): v is Record<string, unknown> =>
+          typeof v === "object" && v !== null,
+      )
+      .map((v) => ({
+        id: String(v.id ?? ""),
+        passes: Boolean(v.passes),
+        reason: String(v.reason ?? ""),
+      }));
+  } catch {
+    return [];
+  }
+}
 
 export async function verifyCompanies(
   companies: Company[],
@@ -38,8 +53,8 @@ export async function verifyCompanies(
 ): Promise<VerifiedCompany[]> {
   const results: VerifiedCompany[] = [];
 
-  for (let i = 0; i < companies.length; i += COMPANY_BATCH_SIZE) {
-    const batch = companies.slice(i, i + COMPANY_BATCH_SIZE);
+  for (let i = 0; i < companies.length; i += BATCH_SIZE) {
+    const batch = companies.slice(i, i + BATCH_SIZE);
 
     const batchPayload = batch.map((c) => ({
       id: c.id,
@@ -52,28 +67,29 @@ export async function verifyCompanies(
       description: c.description,
     }));
 
-    const { object } = await generateObject({
+    const { text } = await generateText({
       model: getModelSync(Models.classification),
-      schema: verificationResultSchema,
       system:
         "You are verifying whether B2B companies match a set of criteria. " +
         "For each company, determine if it clearly satisfies ALL stated criteria. " +
         "Be strict — if a criterion is ambiguous or unclear from the data, mark it as failing. " +
-        "Keep reasons under 200 characters.",
+        "Return ONLY a JSON array — no explanation, no markdown, no code fences. " +
+        'Each element: { "id": "<company id>", "passes": true/false, "reason": "<one sentence under 150 chars>" }',
       prompt:
         `Criteria: ${criteria}\n\n` +
-        `Companies to verify:\n${JSON.stringify(batchPayload, null, 2)}`,
+        `Companies to verify:\n${JSON.stringify(batchPayload, null, 2)}\n\n` +
+        "Return a JSON array of verifications:",
     });
 
-    // Build a lookup map for verification results
-    const verificationMap = new Map(object.verifications.map((v) => [v.id, v]));
+    const verifications = extractVerifications(text);
+    const verificationMap = new Map(verifications.map((v) => [v.id, v]));
 
     for (const company of batch) {
-      const verification = verificationMap.get(company.id);
+      const v = verificationMap.get(company.id);
       results.push({
         ...company,
-        passes: verification?.passes ?? false,
-        reason: verification?.reason ?? "No verification result returned.",
+        passes: v?.passes ?? false,
+        reason: v?.reason ?? "Could not verify against criteria.",
       });
     }
   }
@@ -81,18 +97,14 @@ export async function verifyCompanies(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// verifyPeople
-// ---------------------------------------------------------------------------
-
 export async function verifyPeople(
   people: Person[],
   criteria: string,
 ): Promise<VerifiedPerson[]> {
   const results: VerifiedPerson[] = [];
 
-  for (let i = 0; i < people.length; i += PERSON_BATCH_SIZE) {
-    const batch = people.slice(i, i + PERSON_BATCH_SIZE);
+  for (let i = 0; i < people.length; i += BATCH_SIZE) {
+    const batch = people.slice(i, i + BATCH_SIZE);
 
     const batchPayload = batch.map((p) => ({
       id: p.id,
@@ -102,27 +114,29 @@ export async function verifyPeople(
       location: p.location,
     }));
 
-    const { object } = await generateObject({
+    const { text } = await generateText({
       model: getModelSync(Models.classification),
-      schema: verificationResultSchema,
       system:
         "You are verifying whether B2B contacts match a set of criteria. " +
         "For each person, determine if it clearly satisfies ALL stated criteria. " +
         "Be strict — if a criterion is ambiguous or unclear from the data, mark it as failing. " +
-        "Keep reasons under 200 characters.",
+        "Return ONLY a JSON array — no explanation, no markdown, no code fences. " +
+        'Each element: { "id": "<person id>", "passes": true/false, "reason": "<one sentence under 150 chars>" }',
       prompt:
         `Criteria: ${criteria}\n\n` +
-        `People to verify:\n${JSON.stringify(batchPayload, null, 2)}`,
+        `People to verify:\n${JSON.stringify(batchPayload, null, 2)}\n\n` +
+        "Return a JSON array of verifications:",
     });
 
-    const verificationMap = new Map(object.verifications.map((v) => [v.id, v]));
+    const verifications = extractVerifications(text);
+    const verificationMap = new Map(verifications.map((v) => [v.id, v]));
 
     for (const person of batch) {
-      const verification = verificationMap.get(person.id);
+      const v = verificationMap.get(person.id);
       results.push({
         ...person,
-        passes: verification?.passes ?? false,
-        reason: verification?.reason ?? "No verification result returned.",
+        passes: v?.passes ?? false,
+        reason: v?.reason ?? "Could not verify against criteria.",
       });
     }
   }
