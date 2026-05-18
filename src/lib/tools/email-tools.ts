@@ -3,7 +3,6 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { adminDb as db } from "@/lib/db/admin";
 import { schema } from "@/db";
-import { ExaService } from "@/lib/services/exa-service";
 import { getEmailProvider } from "@/lib/email/provider";
 import { trackUsage } from "@/lib/services/cost-tracker";
 import { saveDraft } from "@/lib/email-composition/save";
@@ -28,7 +27,6 @@ const PATTERN_CONFIDENCE_THRESHOLD = 0.5;
 // Cap for pattern-derived confidence. Stays strictly below the UI's
 // "verified" threshold (0.9) so a pattern guess can never display as verified.
 const PATTERN_DERIVED_CONFIDENCE_FACTOR = 0.85;
-const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
 export async function findEmailForPerson(personId: string): Promise<{
   email: string | null;
@@ -117,51 +115,8 @@ export async function findEmailForPerson(personId: string): Promise<{
     }
   }
 
-  // ── 2) Exa search — kept as the discovery path when pattern is missing/weak.
-  const searchQuery = domain
-    ? `"${person.name}" "${domain}" email`
-    : `"${person.name}" email contact`;
-
-  let foundEmail: string | null = null;
-  let foundDomainMatched = false;
-
-  try {
-    const exa = new ExaService();
-    const results = await exa.search(searchQuery, {
-      numResults: 5,
-      includeText: true,
-    });
-
-    for (const result of results.results) {
-      if (!result.text) continue;
-      const emails = result.text.match(EMAIL_REGEX) ?? [];
-      for (const candidate of emails) {
-        const lower = candidate.toLowerCase();
-        const atIndex = lower.lastIndexOf("@");
-        const candidateDomain = atIndex >= 0 ? lower.slice(atIndex + 1) : "";
-        if (candidateDomain === "example.com") continue;
-        const local = lower.split("@")[0];
-        if (isRolePrefix(local)) continue;
-        if (!emailMatchesName(lower, first, last)) continue;
-        if (domain && lower.endsWith(`@${domain}`)) {
-          foundEmail = lower;
-          foundDomainMatched = true;
-          break;
-        }
-        if (!foundEmail) foundEmail = lower;
-      }
-      if (foundEmail && foundDomainMatched) break;
-    }
-
-    trackUsage({
-      service: "exa",
-      operation: "find-email",
-      estimated_cost_usd: 0.007,
-      metadata: { personId, query: searchQuery },
-    });
-  } catch {
-    // Exa search failed, fall through to on-the-fly pattern inference.
-  }
+  // ── 2) Discovery path — no external search available; fall through to pattern inference.
+  const foundEmail: string | null = null;
 
   // ── 3) On-the-fly inference: if Exa whiffed, try inferring the pattern from
   //       any verified emails on the org RIGHT NOW.

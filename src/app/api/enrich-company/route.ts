@@ -7,7 +7,6 @@ import {
   summarizeSearchResults,
   summarizeWebsite,
 } from "@/lib/services/enrichment-summarizer";
-import { ExaService } from "@/lib/services/exa-service";
 import { filterRelevantResults } from "@/lib/services/relevance-filter";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
 import {
@@ -18,15 +17,12 @@ import {
 } from "@/lib/services/knowledge-base";
 import {
   findPeopleOnDomain,
-  filterContactsByCompany,
   type CompanyContext,
-  type CandidateContact,
 } from "@/lib/services/contact-filter";
 import {
   recordVerifiedEmail,
   makeEmailPatternDb,
 } from "@/lib/services/email-pattern";
-import { parseLinkedInTitle } from "@/lib/utils";
 
 export const maxDuration = 120;
 
@@ -188,17 +184,6 @@ async function findContactsForCompany(
 ): Promise<{ totalFound: number }> {
   let totalFound = 0;
 
-  const [campaign] = await adminDb
-    .select({ icp: schema.campaigns.icp })
-    .from(schema.campaigns)
-    .where(eq(schema.campaigns.id, campaignId))
-    .limit(1);
-
-  const icp = campaign?.icp as Record<string, unknown> | null;
-  const targetTitles = (icp?.targetTitles as string[] | undefined) || [];
-  // Bound to avoid per-user Exa spend blowouts.
-  const boundedTitles = targetTitles.slice(0, 5);
-
   // Dedup against existing campaign contacts (by LinkedIn URL only)
   const existingLinks = await adminDb
     .select({ linkedinUrl: schema.people.linkedinUrl })
@@ -251,76 +236,6 @@ async function findContactsForCompany(
     }
   }
 
-  // ── Phase 2: LinkedIn search with LLM filtering ────────────────────
-  if (boundedTitles.length > 0) {
-    const exa = new ExaService();
-
-    const searchResults = await Promise.all(
-      boundedTitles.map(async (title: string) => {
-        const query = `"${company.name}" ${title} site:linkedin.com`;
-        try {
-          const result = await exa.search(query, {
-            numResults: 3,
-            category: "people" as const,
-            includeText: true,
-          });
-          return { title, results: result.results };
-        } catch {
-          return { title, results: [] };
-        }
-      }),
-    );
-
-    // Collect deduplicated candidates for LLM filtering
-    const seenUrls = new Set<string>();
-    const candidates: Array<
-      CandidateContact & { searchTitle: string; linkedinUrl: string | null }
-    > = [];
-
-    for (const search of searchResults) {
-      for (const result of search.results) {
-        if (seenUrls.has(result.url)) continue;
-        seenUrls.add(result.url);
-
-        const linkedinUrl = result.url.includes("linkedin.com")
-          ? result.url
-          : null;
-        if (linkedinUrl && existingUrls.has(linkedinUrl)) continue;
-
-        const parsed = parseLinkedInTitle(result.title);
-
-        candidates.push({
-          name: parsed.name,
-          title: parsed.title || search.title,
-          linkedinUrl,
-          rawHeadline: result.title,
-          searchTitle: search.title,
-        });
-      }
-    }
-
-    if (candidates.length > 0) {
-      // LLM filter: verify each candidate actually works at this company
-      const verified = await filterContactsByCompany(company, candidates);
-
-      for (const v of verified) {
-        const candidate = candidates[v.index];
-        if (!candidate) continue;
-
-        const person = await findOrCreatePerson({
-          name: v.name,
-          title: v.title,
-          linkedin_url: candidate.linkedinUrl,
-          organization_id: orgId,
-          source: "exa",
-        });
-
-        await linkPersonToCampaign(person.id, campaignId);
-        totalFound++;
-      }
-    }
-  }
-
   return { totalFound };
 }
 
@@ -362,61 +277,32 @@ async function enrichOrganization(
     }
 
     // Website extraction always runs -- it's core enrichment, not a signal.
-    // Exa searches are gated by active signals when configured.
+    // Search enrichment (product/funding/executive) is gated by active signals.
     const runProduct = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_PRODUCT);
     const runFunding = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_FUNDING);
     const runExecutive = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_EXECUTIVE);
     const runGoogleReviews =
       !activeSlugs || activeSlugs.has(SIGNAL_SLUG_GOOGLE_REVIEWS);
 
-    const exa = new ExaService();
     const extractor = new WebExtractionService();
     const errors: string[] = [];
 
     const companyUrl =
       (org.url as string) || (org.domain ? `https://${org.domain}` : null);
 
-    const contextParts: string[] = [];
-    if (org.industry) contextParts.push(org.industry as string);
-    if (org.location) contextParts.push(org.location as string);
-    const context = contextParts.length > 0 ? ` ${contextParts.join(" ")}` : "";
-    const domainHint = org.domain ? ` ${org.domain}` : "";
-    const specificName = `"${org.name}"${domainHint}${context}`;
-
     const companyDomain =
       (org.domain as string) ||
       (companyUrl ? new URL(companyUrl).hostname : null);
 
-    // Website extraction always runs; Exa searches gated by signals
+    // Website extraction always runs; search enrichment (product/funding/executive)
+    // uses empty fallbacks since Exa has been removed.
     const operations = await Promise.allSettled([
       companyUrl
         ? extractor.extract(companyUrl, { includeLinks: false })
         : Promise.resolve(null),
-      runProduct
-        ? exa.search(
-            companyDomain
-              ? `${org.name} products services`
-              : `${specificName} product services offering`,
-            {
-              numResults: 5,
-              includeText: true,
-              ...(companyDomain ? { includeDomains: [companyDomain] } : {}),
-            },
-          )
-        : Promise.resolve({ results: [] }),
-      runFunding
-        ? exa.search(`${specificName} funding news announcement`, {
-            numResults: 5,
-            includeText: true,
-            category: "news",
-          })
-        : Promise.resolve({ results: [] }),
-      runExecutive
-        ? exa.search(`${specificName} executive leadership team changes`, {
-            numResults: 5,
-            includeText: true,
-          })
-        : Promise.resolve({ results: [] }),
+      Promise.resolve({ results: [] }),
+      Promise.resolve({ results: [] }),
+      Promise.resolve({ results: [] }),
       runGoogleReviews
         ? (async () => {
             const { GooglePlacesService } =

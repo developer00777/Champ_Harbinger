@@ -94,8 +94,10 @@ function NewSignalDialog({
           name: name.trim(),
           description: description.trim(),
           category,
-          executionType: "exa_search",
-          config: description.trim() ? { query: description.trim() } : {},
+          executionType: "browser_script",
+          config: description.trim()
+            ? { instructions: description.trim() }
+            : {},
         }),
       });
       if (!res.ok) {
@@ -185,8 +187,8 @@ function NewSignalDialog({
               >
                 <span className="font-medium">Quick create</span>
                 <span className="text-muted-foreground text-xs font-normal">
-                  Define a simple exa_search signal with a name and search
-                  query.
+                  Define a browser-based signal that scrapes a company&apos;s
+                  website or online presence.
                 </span>
               </Button>
             </div>

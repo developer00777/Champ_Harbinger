@@ -1,14 +1,10 @@
 import { saveCampaign, getCampaign, listCampaigns } from "./campaign-tools";
 import {
-  searchCompanies,
-  discoverCompanies,
   getCompanies,
   getCompanyDetail,
   getCampaignSummary,
-  searchYCCompanies,
 } from "./search-tools";
 import {
-  searchPeople,
   enrichContact,
   extractWebContent,
   fetchSitemap,
@@ -79,20 +75,16 @@ import {
   deleteEmailSkill,
   toggleEmailSkill,
 } from "./email-skill-tools";
-import { discoverWithLakeB2B } from "./lakeb2b-tools";
+import { discoverWithLakeB2B, stageDiscoveryForChampIQ } from "./lakeb2b-tools";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 const rawTools = {
   saveCampaign,
   getCampaign,
   listCampaigns,
-  searchCompanies,
-  discoverCompanies,
   getCompanies,
   getCompanyDetail,
   getCampaignSummary,
-  searchYCCompanies,
-  searchPeople,
   enrichContact,
   extractWebContent,
   fetchSitemap,
@@ -149,6 +141,7 @@ const rawTools = {
   deleteEmailSkill,
   toggleEmailSkill,
   discoverWithLakeB2B,
+  stageDiscoveryForChampIQ,
 };
 
 type ToolCtx = { userId?: string; campaignId?: string | null };

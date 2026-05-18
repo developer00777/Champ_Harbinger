@@ -3,21 +3,15 @@ import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { eq } from "drizzle-orm";
-import { ExaService } from "@/lib/services/exa-service";
 import {
   findOrCreatePerson,
   linkPersonToCampaign,
 } from "@/lib/services/knowledge-base";
-import {
-  findPeopleOnDomain,
-  filterContactsByCompany,
-  type CandidateContact,
-} from "@/lib/services/contact-filter";
+import { findPeopleOnDomain } from "@/lib/services/contact-filter";
 import {
   recordVerifiedEmail,
   makeEmailPatternDb,
 } from "@/lib/services/email-pattern";
-import { parseLinkedInTitle } from "@/lib/utils";
 
 export const maxDuration = 120;
 
@@ -67,8 +61,6 @@ export async function POST(request: Request) {
 
   const icp = campaign.icp as Record<string, unknown> | null;
   const targetTitles = (icp?.targetTitles as string[] | undefined) || [];
-  // Bound to avoid per-user Exa spend blowouts.
-  const boundedTitles = targetTitles.slice(0, 5);
 
   // companyId is a campaign_organizations link ID -- resolve the organization
   const [link] = await adminDb
@@ -154,81 +146,6 @@ export async function POST(request: Request) {
         }
       } catch (err) {
         console.error("[find-contacts] Domain scrape failed:", err);
-      }
-    }
-
-    // ── Phase 2: LinkedIn search with LLM filtering ────────────────────
-    if (boundedTitles.length > 0) {
-      const exa = new ExaService();
-      const searchResults = await Promise.all(
-        boundedTitles.map(async (title: string) => {
-          const query = `"${org.name}" ${title} site:linkedin.com`;
-          try {
-            const result = await exa.search(query, {
-              numResults: 3,
-              category: "people" as const,
-              includeText: true,
-            });
-            return { title, results: result.results };
-          } catch {
-            return { title, results: [] };
-          }
-        }),
-      );
-
-      // Collect deduplicated candidates for LLM filtering
-      const seenUrls = new Set<string>();
-      const candidates: Array<
-        CandidateContact & { searchTitle: string; linkedinUrl: string | null }
-      > = [];
-
-      for (const search of searchResults) {
-        for (const result of search.results) {
-          if (seenUrls.has(result.url)) continue;
-          seenUrls.add(result.url);
-
-          const linkedinUrl = result.url.includes("linkedin.com")
-            ? result.url
-            : null;
-          if (linkedinUrl && existingUrls.has(linkedinUrl)) continue;
-
-          const parsed = parseLinkedInTitle(result.title);
-
-          candidates.push({
-            name: parsed.name,
-            title: parsed.title || search.title,
-            linkedinUrl,
-            rawHeadline: result.title,
-            searchTitle: search.title,
-          });
-        }
-      }
-
-      if (candidates.length > 0) {
-        const company = {
-          name: org.name,
-          domain: org.domain,
-          industry: org.industry,
-          location: org.location,
-          description: org.description,
-        };
-        const verified = await filterContactsByCompany(company, candidates);
-
-        for (const v of verified) {
-          const candidate = candidates[v.index];
-          if (!candidate) continue;
-
-          const person = await findOrCreatePerson({
-            name: v.name,
-            title: v.title,
-            linkedin_url: candidate.linkedinUrl,
-            organization_id: orgId,
-            source: "exa",
-          });
-
-          await linkPersonToCampaign(person.id, campaignId);
-          totalFound++;
-        }
       }
     }
 

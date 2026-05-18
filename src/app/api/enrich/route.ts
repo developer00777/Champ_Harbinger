@@ -3,7 +3,6 @@ import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { eq } from "drizzle-orm";
-import { ExaService } from "@/lib/services/exa-service";
 import { LinkedinService } from "@/lib/services/linkedin-service";
 import { XService } from "@/lib/services/x-service";
 import {
@@ -150,120 +149,6 @@ export async function POST(request: Request) {
             const msg = err instanceof Error ? err.message : "Unknown error";
             console.error(`[enrich API] Twitter enrich failed: ${msg}`);
             errors.push(`Twitter: ${msg}`);
-          }
-        })(),
-      );
-    }
-
-    // Exa web searches for the person
-    if (contactName !== "Unknown") {
-      const exa = new ExaService();
-
-      const contactTitle = personRow.title || null;
-      const queryParts = [`"${contactName}"`];
-      if (companyName) queryParts.push(`"${companyName}"`);
-      if (contactTitle) queryParts.push(contactTitle);
-      const specificQuery = queryParts.join(" ");
-
-      // Collect URLs already in the company's enrichment data so we don't
-      // show the same links on both the company and contact cards.
-      const companyUrls = new Set<string>();
-      if (companyName) {
-        const [orgRow] = await adminDb
-          .select({ enrichmentData: schema.organizations.enrichmentData })
-          .from(schema.organizations)
-          .where(eq(schema.organizations.name, companyName))
-          .limit(1);
-
-        const orgEnrichment = orgRow?.enrichmentData as Record<
-          string,
-          unknown
-        > | null;
-        if (orgEnrichment) {
-          const searches = orgEnrichment.searches as
-            | Array<{ results: Array<{ url: string }> }>
-            | undefined;
-          if (searches) {
-            for (const s of searches) {
-              for (const r of s.results) {
-                if (r.url) companyUrls.add(r.url);
-              }
-            }
-          }
-        }
-      }
-
-      const dedup = (
-        results: Array<{
-          title: string;
-          url: string;
-          publishedDate: string | null;
-          text: string | null;
-        }>,
-      ) => results.filter((r) => !companyUrls.has(r.url));
-
-      promises.push(
-        (async () => {
-          try {
-            const result = await exa.search(
-              `${specificQuery} news announcement`,
-              { numResults: 3, includeText: true, category: "news" },
-            );
-            enrichmentData.news = dedup(
-              result.results.map((r) => ({
-                title: r.title,
-                url: r.url,
-                publishedDate: r.publishedDate,
-                text: r.text || null,
-              })),
-            );
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Unknown error";
-            errors.push(`News: ${msg}`);
-          }
-        })(),
-      );
-
-      promises.push(
-        (async () => {
-          try {
-            const result = await exa.search(
-              `${specificQuery} article talk interview podcast`,
-              { numResults: 3, includeText: true },
-            );
-            enrichmentData.articles = dedup(
-              result.results.map((r) => ({
-                title: r.title,
-                url: r.url,
-                publishedDate: r.publishedDate,
-                text: r.text || null,
-              })),
-            );
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Unknown error";
-            errors.push(`Articles: ${msg}`);
-          }
-        })(),
-      );
-
-      promises.push(
-        (async () => {
-          try {
-            const result = await exa.search(
-              `${specificQuery} background bio profile`,
-              { numResults: 3, includeText: true },
-            );
-            enrichmentData.background = dedup(
-              result.results.map((r) => ({
-                title: r.title,
-                url: r.url,
-                publishedDate: r.publishedDate,
-                text: r.text || null,
-              })),
-            );
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Unknown error";
-            errors.push(`Background: ${msg}`);
           }
         })(),
       );

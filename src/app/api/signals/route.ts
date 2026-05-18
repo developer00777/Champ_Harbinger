@@ -83,7 +83,7 @@ export async function POST(request: Request) {
       slug,
       description: body.description ?? "",
       category: body.category ?? "custom",
-      executionType: body.executionType ?? "exa_search",
+      executionType: body.executionType ?? "browser_script",
       config: {
         ...(body.recipe ? { recipe: body.recipe } : {}),
         ...(body.config ?? {}),

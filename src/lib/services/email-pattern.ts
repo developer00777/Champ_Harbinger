@@ -31,7 +31,7 @@ export const SOURCE_WEIGHT: Record<EmailSource, number> = {
   user_entered: 1.0,
   send_confirmed: 0.95,
   team_page: 0.7,
-  exa_search: 0.3,
+  exa_search: 0,
   pattern_derived: 0,
 };
 
@@ -373,8 +373,10 @@ export function makeEmailPatternDb(db: EmailPatternDb): EmailPatternDbAdapter {
     async updatePerson(personId, updates) {
       const set: Record<string, unknown> = {};
       if ("work_email" in updates) set.workEmail = updates.work_email;
-      if ("work_email_source" in updates) set.workEmailSource = updates.work_email_source;
-      if ("work_email_confidence" in updates) set.workEmailConfidence = updates.work_email_confidence;
+      if ("work_email_source" in updates)
+        set.workEmailSource = updates.work_email_source;
+      if ("work_email_confidence" in updates)
+        set.workEmailConfidence = updates.work_email_confidence;
       if ("work_email_verified_at" in updates) {
         set.workEmailVerifiedAt = updates.work_email_verified_at
           ? new Date(updates.work_email_verified_at!)
@@ -394,8 +396,10 @@ export function makeEmailPatternDb(db: EmailPatternDb): EmailPatternDbAdapter {
           id: schema.organizations.id,
           email_pattern: schema.organizations.emailPattern,
           email_pattern_confidence: schema.organizations.emailPatternConfidence,
-          email_pattern_evidence_count: schema.organizations.emailPatternEvidenceCount,
-          email_pattern_bounce_count: schema.organizations.emailPatternBounceCount,
+          email_pattern_evidence_count:
+            schema.organizations.emailPatternEvidenceCount,
+          email_pattern_bounce_count:
+            schema.organizations.emailPatternBounceCount,
           email_pattern_updated_at: schema.organizations.emailPatternUpdatedAt,
         })
         .from(schema.organizations)
@@ -413,9 +417,12 @@ export function makeEmailPatternDb(db: EmailPatternDb): EmailPatternDbAdapter {
     async updateOrg(orgId, updates) {
       const set: Record<string, unknown> = {};
       if ("email_pattern" in updates) set.emailPattern = updates.email_pattern;
-      if ("email_pattern_confidence" in updates) set.emailPatternConfidence = updates.email_pattern_confidence;
-      if ("email_pattern_evidence_count" in updates) set.emailPatternEvidenceCount = updates.email_pattern_evidence_count;
-      if ("email_pattern_bounce_count" in updates) set.emailPatternBounceCount = updates.email_pattern_bounce_count;
+      if ("email_pattern_confidence" in updates)
+        set.emailPatternConfidence = updates.email_pattern_confidence;
+      if ("email_pattern_evidence_count" in updates)
+        set.emailPatternEvidenceCount = updates.email_pattern_evidence_count;
+      if ("email_pattern_bounce_count" in updates)
+        set.emailPatternBounceCount = updates.email_pattern_bounce_count;
       if ("email_pattern_updated_at" in updates) {
         set.emailPatternUpdatedAt = updates.email_pattern_updated_at
           ? new Date(updates.email_pattern_updated_at!)
@@ -609,7 +616,7 @@ export async function recordBounce(
 /**
  * Lookup the org's cached pattern + load its verified-email evidence count.
  * Used by findEmailForPerson to decide whether to derive vs. fall back to
- * Exa search.
+ * web search.
  */
 export async function getOrgPattern(
   db: EmailPatternDbAdapter,

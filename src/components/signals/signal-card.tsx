@@ -7,7 +7,7 @@ import type { Signal, SignalExecutionType } from "@/lib/types/signal";
 
 const serviceLabels: Record<SignalExecutionType, string> = {
   browser_script: "Browser",
-  exa_search: "Exa",
+  exa_search: "Web Search",
   tool_call: "Tool",
   agent_instructions: "Agent",
 };

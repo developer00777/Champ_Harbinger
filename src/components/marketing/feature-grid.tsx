@@ -5,7 +5,7 @@ const features = [
   },
   {
     title: "Contact enrichment",
-    body: "Pull company and contact data from Lake B2B, Exa, and the open web. Verified, accurate, and ready for outreach. 120M+ contacts in the Champions Group network.",
+    body: "Pull from the Champions Group database of 120M+ verified contacts and companies. AI-verified, deduplicated, and ready for outreach.",
   },
   {
     title: "Outreach drafting",

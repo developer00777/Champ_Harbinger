@@ -45,7 +45,6 @@ interface Pagination {
 interface RealSpend {
   claude: number | null;
   apify: number | null;
-  exa: number | null;
   browserbase: number | null;
 }
 
@@ -69,26 +68,20 @@ const PERIOD_LABELS: Record<Period, string> = {
 const REAL_SPEND_KEY: Record<string, keyof RealSpend> = {
   claude: "claude",
   apify: "apify",
-  exa: "exa",
   browserbase: "browserbase",
 };
 
-// Tooltip text shown when a provider's real-spend fetcher returns null.
-// Covers both "missing key" and "upstream API failed" — we surface the same
-// message because the outcome for the user is identical (fall back to est).
 const REAL_SPEND_FALLBACK_HINT: Record<keyof RealSpend, string> = {
   claude:
     "Real billed spend unavailable. Set ANTHROPIC_ADMIN_KEY in .env.local to enable.",
   apify:
     "Real billed spend unavailable. Set APIFY_API_TOKEN in .env.local to enable.",
-  exa: "Real billed spend unavailable. Set EXA_SERVICE_API_KEY and EXA_API_KEY_ID in .env.local to enable.",
   browserbase:
     "Real billed spend unavailable. Check BROWSERBASE_API_KEY and Browserbase API connectivity.",
 };
 
 const SERVICE_LABELS: Record<string, string> = {
   claude: "Claude AI",
-  exa: "Exa Search",
   apify: "Apify",
   browserbase: "Browserbase",
   google: "Google Places",

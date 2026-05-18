@@ -15,7 +15,7 @@ import type { Signal } from "@/lib/types/signal";
 
 const executionLabels: Record<string, string> = {
   browser_script: "Browser Script",
-  exa_search: "Exa Search",
+  exa_search: "Web Search",
   tool_call: "Tool Call",
   agent_instructions: "Agent Prompt",
 };
@@ -24,7 +24,7 @@ const executionDescriptions: Record<string, string> = {
   browser_script:
     "Headless browser via Stagehand/Browserbase. Navigates sites and extracts structured data automatically.",
   exa_search:
-    "Semantic search via the Exa API. Finds relevant news, articles, and web content matching a query template.",
+    "Web search. Finds relevant news, articles, and web content matching a query template.",
   tool_call:
     "Calls an existing enrichment tool to gather specific data about a company or contact.",
   agent_instructions:

@@ -3,6 +3,16 @@ import { and, desc, eq } from "drizzle-orm";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { getCurrentUser } from "@/lib/auth";
+import { deliverProspectToChampIQ } from "@/lib/services/champiq-delivery";
+
+async function getChampIQUrl(userId: string): Promise<string | null> {
+  const [settings] = await adminDb
+    .select({ champiqUrl: schema.userSettings.champiqUrl })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.clerkUserId, userId))
+    .limit(1);
+  return settings?.champiqUrl ?? null;
+}
 
 export async function GET() {
   const { userId } = await getCurrentUser();
@@ -48,21 +58,37 @@ export async function POST(request: Request) {
     );
   }
 
-  // Bulk-approve all pending items for this user
+  const champiqUrl = await getChampIQUrl(userId);
+
+  // Bulk-approve all pending items and deliver to ChampOracle
   if (body.action === "push_all") {
-    await adminDb
-      .update(schema.champiqQueue)
-      .set({
-        status: "pushed",
-        pushedAt: new Date(),
-        updatedAt: new Date(),
-      })
+    const pending = await adminDb
+      .select({ id: schema.champiqQueue.id })
+      .from(schema.champiqQueue)
       .where(
         and(
           eq(schema.champiqQueue.clerkUserId, userId),
           eq(schema.champiqQueue.status, "pending"),
         ),
       );
+
+    // First mark all as pushed
+    await adminDb
+      .update(schema.champiqQueue)
+      .set({ status: "pushed", pushedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.champiqQueue.clerkUserId, userId),
+          eq(schema.champiqQueue.status, "pending"),
+        ),
+      );
+
+    // Then deliver to ChampOracle if configured (fire-and-forget per item)
+    if (champiqUrl) {
+      await Promise.allSettled(
+        pending.map((p) => deliverProspectToChampIQ(p.id, champiqUrl)),
+      );
+    }
 
     return NextResponse.json({ ok: true, action: "push_all" });
   }
@@ -88,6 +114,11 @@ export async function POST(request: Request) {
         eq(schema.champiqQueue.clerkUserId, userId),
       ),
     );
+
+  // Deliver to ChampOracle if configured
+  if (body.action === "push" && champiqUrl) {
+    await deliverProspectToChampIQ(body.id, champiqUrl);
+  }
 
   return NextResponse.json({ ok: true });
 }

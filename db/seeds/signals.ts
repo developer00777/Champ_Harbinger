@@ -15,10 +15,10 @@ const BUILTIN_SIGNALS: Array<{
     description:
       "Company is actively hiring for roles that signal growth or a new initiative",
     category: "hiring",
-    executionType: "exa_search",
+    executionType: "browser_script",
     config: {
       recipe: {
-        query:
+        instructions:
           "{company} site:linkedin.com/jobs OR site:greenhouse.io OR site:lever.co hiring",
         threshold: 3,
       },
@@ -31,10 +31,10 @@ const BUILTIN_SIGNALS: Array<{
     slug: "recent-funding",
     description: "Company raised a funding round in the last 90 days",
     category: "funding",
-    executionType: "exa_search",
+    executionType: "browser_script",
     config: {
       recipe: {
-        query:
+        instructions:
           "{company} funding round raised Series million investment 2024 2025 2026",
         threshold: 1,
       },
@@ -46,10 +46,10 @@ const BUILTIN_SIGNALS: Array<{
     slug: "executive-hire",
     description: "Company hired a new C-level or VP executive",
     category: "hiring",
-    executionType: "exa_search",
+    executionType: "browser_script",
     config: {
       recipe: {
-        query:
+        instructions:
           '{company} "joins as" OR "appointed" OR "named" CEO CTO CFO CMO VP Director',
         threshold: 1,
       },
@@ -61,10 +61,10 @@ const BUILTIN_SIGNALS: Array<{
     slug: "product-launch",
     description: "Company launched a new product or major feature",
     category: "product",
-    executionType: "exa_search",
+    executionType: "browser_script",
     config: {
       recipe: {
-        query:
+        instructions:
           "{company} launches OR announces OR releases new product feature update 2024 2025 2026",
         threshold: 1,
       },
@@ -77,10 +77,10 @@ const BUILTIN_SIGNALS: Array<{
     description:
       "Company has a spike in negative G2 or Capterra reviews suggesting dissatisfaction",
     category: "sentiment",
-    executionType: "exa_search",
+    executionType: "browser_script",
     config: {
       recipe: {
-        query:
+        instructions:
           "{company} site:g2.com OR site:capterra.com review disappointed OR problems OR switching",
         threshold: 2,
       },
@@ -94,10 +94,10 @@ const BUILTIN_SIGNALS: Array<{
     description:
       "Company is hiring for specific technologies that signal openness to your solution",
     category: "hiring",
-    executionType: "exa_search",
+    executionType: "browser_script",
     config: {
       recipe: {
-        query: "{company} hiring {stack} engineer developer",
+        instructions: "{company} hiring {stack} engineer developer",
         threshold: 1,
       },
       lookbackDays: 30,
@@ -109,10 +109,10 @@ const BUILTIN_SIGNALS: Array<{
     slug: "competitor-mention",
     description: "Company is publicly discussing or comparing competitors",
     category: "competitive",
-    executionType: "exa_search",
+    executionType: "browser_script",
     config: {
       recipe: {
-        query:
+        instructions:
           "{company} vs OR compared to OR switching from OR replacing {competitor}",
         threshold: 1,
       },
@@ -125,10 +125,10 @@ const BUILTIN_SIGNALS: Array<{
     slug: "expansion-signal",
     description: "Company is expanding to new markets, regions, or verticals",
     category: "growth",
-    executionType: "exa_search",
+    executionType: "browser_script",
     config: {
       recipe: {
-        query:
+        instructions:
           "{company} expands OR enters OR launches in new market region country office",
         threshold: 1,
       },

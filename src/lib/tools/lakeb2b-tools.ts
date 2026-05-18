@@ -7,6 +7,9 @@ import {
   translatePeopleCriteria,
 } from "@/lib/lakeb2b/criteria";
 import { verifyCompanies, verifyPeople } from "@/lib/lakeb2b/verifier";
+import { adminDb } from "@/lib/db/admin";
+import { schema } from "@/db";
+import { getCurrentUser } from "@/lib/auth";
 
 export const discoverWithLakeB2B = tool({
   description:
@@ -113,5 +116,88 @@ export const discoverWithLakeB2B = tool({
           .map((p) => ({ name: p.full_name, reason: p.reason })),
       };
     }
+  },
+});
+
+export const stageDiscoveryForChampIQ = tool({
+  description:
+    "Stage verified LakeB2B discovery results into the ChampIQ review queue. " +
+    "Call this after discoverWithLakeB2B returns results to add verified companies to the Dashboard queue " +
+    "so they can be reviewed and pushed to ChampOracle (ChampIQ). " +
+    "Each staged company appears in the Dashboard queue with the LakeB2B discovery signal.",
+  inputSchema: z.object({
+    companies: z
+      .array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          domain: z.string().optional(),
+          industry: z.string().optional(),
+          employees: z.string().optional(),
+          location: z.string().optional(),
+          funding: z.string().optional(),
+          description: z.string().optional(),
+          verification_reason: z.string().optional(),
+        }),
+      )
+      .describe("Array of verified companies from discoverWithLakeB2B results"),
+    criteria: z.string().describe("The original search criteria used"),
+    signal_name: z
+      .string()
+      .optional()
+      .describe("Label for the signal (defaults to 'LakeB2B Discovery')"),
+  }),
+  execute: async ({ companies, criteria, signal_name }) => {
+    let userId: string;
+    try {
+      ({ userId } = await getCurrentUser());
+    } catch {
+      return { staged: 0, error: "Not authenticated" };
+    }
+
+    const label = signal_name ?? "LakeB2B Discovery";
+    let staged = 0;
+    const errors: string[] = [];
+
+    for (const company of companies) {
+      try {
+        await adminDb
+          .insert(schema.champiqQueue)
+          .values({
+            clerkUserId: userId,
+            companyName: company.name,
+            companyDomain: company.domain ?? "",
+            companyData: {
+              industry: company.industry,
+              employees: company.employees,
+              location: company.location,
+              funding: company.funding,
+              description: company.description,
+              lakeb2b_id: company.id,
+            },
+            contacts: [],
+            signalName: label,
+            signalReasoning:
+              company.verification_reason ??
+              `Matched criteria: ${criteria.slice(0, 200)}`,
+            signalData: { criteria, source: "lakeb2b_discovery" },
+            score: 0.7,
+            talkingPoints: [],
+            status: "pending",
+          })
+          .onConflictDoNothing();
+        staged++;
+      } catch (err) {
+        errors.push(
+          `${company.name}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return {
+      staged,
+      total: companies.length,
+      errors: errors.length > 0 ? errors : undefined,
+    };
   },
 });

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { validateApiKey } from "@/lib/api/validate-api-key";
-import { ExaService } from "@/lib/services/exa-service";
 import { normalizeDomain } from "@/lib/services/knowledge-base";
 import { getModelSync } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
@@ -22,72 +21,29 @@ export async function POST(request: Request) {
   }
 
   const domain = normalizeDomain(body.domain);
-  const exa = new ExaService();
 
-  type SearchResult = {
-    title: string;
-    url: string;
-    publishedDate: string | null;
-    author: string | null;
-    text: string | null;
-    summary: string | null;
-  };
-
-  const [productResult, fundingResult, teamResult, contactsResult] =
-    await Promise.allSettled([
-      exa.search(`site:${domain} product features OR pricing OR integrations`, {
-        numResults: 3,
-        searchType: "neural",
-        includeText: true,
-      }),
-      exa.search(`${domain} funding round OR investment OR Series`, {
-        numResults: 3,
-        searchType: "neural",
-        includeText: true,
-      }),
-      exa.search(`site:${domain} team OR about OR leadership`, {
-        numResults: 3,
-        searchType: "neural",
-        includeText: true,
-      }),
-      exa
-        .search(`${domain} executive OR CEO OR VP OR Director OR Head Of`, {
-          numResults: 5,
-          searchType: "neural",
-          category: "people",
-          includeText: true,
-        })
-        .catch(() => ({ results: [] as SearchResult[] })),
-    ]);
-
-  const snippets = [productResult, fundingResult, teamResult]
-    .flatMap((r) => (r.status === "fulfilled" ? r.value.results : []))
-    .map((r) => r.text?.slice(0, 400) ?? r.summary?.slice(0, 400) ?? "")
-    .filter(Boolean);
-
-  const combinedText = snippets.join(" ");
-
-  // Extract contacts from people search
-  const contactsRaw =
-    contactsResult.status === "fulfilled" ? contactsResult.value.results : [];
-
-  const contacts = contactsRaw
-    .flatMap((r) => {
-      const name = r.title?.split(" - ")[0]?.split(" | ")[0]?.trim() ?? null;
-      const emailMatch = r.text?.match(
-        /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
-      );
-      if (!name) return [];
-      return [
-        {
-          name,
-          title: r.title ?? null,
-          email: emailMatch?.[0] ?? null,
-          linkedin_url: r.url?.includes("linkedin") ? r.url : null,
-        },
-      ];
-    })
-    .slice(0, 5);
+  // Replace the Exa fetches with a simple homepage fetch
+  let combinedText = "";
+  try {
+    const res = await fetch(`https://${domain}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; ChampHarbinger/1.0)" },
+      signal: AbortSignal.timeout(8000),
+    });
+    combinedText = await res.text();
+    // Strip HTML tags for text content
+    combinedText = combinedText
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .slice(0, 2000);
+  } catch {
+    combinedText = `Company at ${domain}`;
+  }
+  const contacts: Array<{
+    name: string;
+    title: string | null;
+    email: string | null;
+    linkedin_url: string | null;
+  }> = [];
 
   // LLM-based score + talking points
   const { object } = await generateObject({
@@ -106,7 +62,7 @@ Generate:
   });
 
   return NextResponse.json({
-    company: { domain, description: snippets[0] ?? null },
+    company: { domain, description: combinedText.slice(0, 300) || null },
     contacts,
     score: object.score,
     talking_points: object.talking_points,

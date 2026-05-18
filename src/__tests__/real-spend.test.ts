@@ -109,9 +109,7 @@ describe("fetchRealSpend", () => {
     expect(result.apify).toBeCloseTo(20, 5);
   });
 
-  it("returns null for exa and browserbase when their env vars are unset", async () => {
-    delete process.env.EXA_SERVICE_API_KEY;
-    delete process.env.EXA_API_KEY_ID;
+  it("returns null for browserbase when env var is unset", async () => {
     delete process.env.BROWSERBASE_API_KEY;
     mockFetch.mockResolvedValue({
       ok: true,
@@ -121,70 +119,7 @@ describe("fetchRealSpend", () => {
     });
 
     const result = await fetchRealSpend(START, END);
-    expect(result.exa).toBeNull();
     expect(result.browserbase).toBeNull();
-  });
-
-  it("parses exa total_cost_usd and returns the billed total", async () => {
-    process.env.EXA_SERVICE_API_KEY = "exa-service-test";
-    process.env.EXA_API_KEY_ID = "11111111-2222-3333-4444-555555555555";
-
-    mockFetch.mockImplementation((url: string) => {
-      if (typeof url === "string" && url.includes("admin-api.exa.ai")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({ total_cost_usd: 4.87 }),
-          text: async () => "",
-        });
-      }
-      // Other providers -- shape them so they don't explode the test.
-      if (url.includes("anthropic.com")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [], has_more: false }),
-          text: async () => "",
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: async () => ({ data: { dailyServiceUsages: [] } }),
-        text: async () => "",
-      });
-    });
-
-    const result = await fetchRealSpend(START, END);
-    expect(result.exa).toBeCloseTo(4.87, 5);
-  });
-
-  it("returns null from exa when the response is missing total_cost_usd", async () => {
-    // Guards against silently displaying $0 when the API shape changes --
-    // a missing field should fall back to the local estimate, not overwrite
-    // it with zero.
-    process.env.EXA_SERVICE_API_KEY = "exa-service-test";
-    process.env.EXA_API_KEY_ID = "11111111-2222-3333-4444-555555555555";
-
-    mockFetch.mockImplementation((url: string) => {
-      if (typeof url === "string" && url.includes("admin-api.exa.ai")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({ some_other_field: 42 }),
-          text: async () => "",
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: async () => ({ data: [], has_more: false }),
-        text: async () => "",
-      });
-    });
-
-    const result = await fetchRealSpend(START, END);
-    expect(result.exa).toBeNull();
   });
 
   it("sums browserbase session durations inside the window and ignores older sessions", async () => {

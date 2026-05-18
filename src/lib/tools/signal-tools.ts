@@ -23,7 +23,7 @@ export const getSignalAuthoringGuide = tool({
 
 export const testSignalRecipe = tool({
   description:
-    "Test any signal -- built-in, custom, or recipe -- against a company. Returns the full SignalOutput (found, summary, evidence, data, diff, confidence). Works with hardcoded recipes (by slug), DB signals (by signalId or slug), and all execution types (exa_search, tool_call, browser_script). Does not write to signal_results.",
+    "Test any signal -- built-in, custom, or recipe -- against a company. Returns the full SignalOutput (found, summary, evidence, data, diff, confidence). Works with hardcoded recipes (by slug), DB signals (by signalId or slug), and all execution types (web search, tool_call, browser_script). Does not write to signal_results.",
   inputSchema: z.object({
     recipeSlug: z
       .string()
@@ -73,7 +73,12 @@ export const testSignalRecipe = tool({
 
     if (input.organizationId) {
       const [org] = await db
-        .select({ id: schema.organizations.id, name: schema.organizations.name, domain: schema.organizations.domain, url: schema.organizations.url })
+        .select({
+          id: schema.organizations.id,
+          name: schema.organizations.name,
+          domain: schema.organizations.domain,
+          url: schema.organizations.url,
+        })
         .from(schema.organizations)
         .where(eq(schema.organizations.id, input.organizationId))
         .limit(1);
@@ -193,7 +198,11 @@ export const getSignals = tool({
         isBuiltin: schema.signals.isBuiltin,
       })
       .from(schema.signals)
-      .where(input.category ? eq(schema.signals.category, input.category) : undefined)
+      .where(
+        input.category
+          ? eq(schema.signals.category, input.category)
+          : undefined,
+      )
       .orderBy(desc(schema.signals.isBuiltin), schema.signals.name);
 
     const signals = rows.map((s) => {
@@ -202,7 +211,10 @@ export const getSignals = tool({
         id: s.id,
         name: s.name,
         category: s.category,
-        description: descText && descText.length > 200 ? descText.slice(0, 200) + "…" : descText,
+        description:
+          descText && descText.length > 200
+            ? descText.slice(0, 200) + "…"
+            : descText,
         is_builtin: s.isBuiltin,
       };
     });
@@ -238,11 +250,20 @@ export const getCampaignSignals = tool({
   execute: async (input) => {
     const [allSignals, toggles] = await Promise.all([
       db
-        .select({ id: schema.signals.id, name: schema.signals.name, category: schema.signals.category, description: schema.signals.description, isBuiltin: schema.signals.isBuiltin })
+        .select({
+          id: schema.signals.id,
+          name: schema.signals.name,
+          category: schema.signals.category,
+          description: schema.signals.description,
+          isBuiltin: schema.signals.isBuiltin,
+        })
         .from(schema.signals)
         .orderBy(desc(schema.signals.isBuiltin), schema.signals.name),
       db
-        .select({ signalId: schema.campaignSignals.signalId, enabled: schema.campaignSignals.enabled })
+        .select({
+          signalId: schema.campaignSignals.signalId,
+          enabled: schema.campaignSignals.enabled,
+        })
         .from(schema.campaignSignals)
         .where(eq(schema.campaignSignals.campaignId, input.campaignId)),
     ]);
@@ -255,7 +276,10 @@ export const getCampaignSignals = tool({
         id: s.id,
         name: s.name,
         category: s.category,
-        description: descText && descText.length > 200 ? descText.slice(0, 200) + "…" : descText,
+        description:
+          descText && descText.length > 200
+            ? descText.slice(0, 200) + "…"
+            : descText,
         is_builtin: s.isBuiltin,
         enabled: toggleMap.get(s.id) ?? false,
       };
@@ -285,7 +309,10 @@ export const toggleCampaignSignal = tool({
         enabled: input.enabled,
       })
       .onConflictDoUpdate({
-        target: [schema.campaignSignals.campaignId, schema.campaignSignals.signalId],
+        target: [
+          schema.campaignSignals.campaignId,
+          schema.campaignSignals.signalId,
+        ],
         set: { enabled: input.enabled },
       })
       .returning();
@@ -406,10 +433,12 @@ export const updateSignal = tool({
     const patch: Partial<typeof schema.signals.$inferInsert> = {};
     if (input.name !== undefined) patch.name = input.name;
     if (input.description !== undefined) patch.description = input.description;
-    if (input.longDescription !== undefined) patch.longDescription = input.longDescription;
+    if (input.longDescription !== undefined)
+      patch.longDescription = input.longDescription;
     if (input.category !== undefined) patch.category = input.category;
     if (input.icon !== undefined) patch.icon = input.icon;
-    if (input.executionType !== undefined) patch.executionType = input.executionType;
+    if (input.executionType !== undefined)
+      patch.executionType = input.executionType;
     if (input.toolKey !== undefined) patch.toolKey = input.toolKey;
     if (input.config !== undefined) patch.config = input.config;
 
@@ -420,11 +449,18 @@ export const updateSignal = tool({
     const [data] = await db
       .update(schema.signals)
       .set(patch)
-      .where(and(eq(schema.signals.id, input.signalId), eq(schema.signals.isBuiltin, false)))
+      .where(
+        and(
+          eq(schema.signals.id, input.signalId),
+          eq(schema.signals.isBuiltin, false),
+        ),
+      )
       .returning();
 
     if (!data)
-      throw new Error("Signal not found or is built-in (built-in signals cannot be edited)");
+      throw new Error(
+        "Signal not found or is built-in (built-in signals cannot be edited)",
+      );
     return { signal: data, message: `Updated signal "${data.name}"` };
   },
 });
@@ -440,7 +476,12 @@ export const makeSignalPublic = tool({
     const [data] = await db
       .update(schema.signals)
       .set({ isPublic: input.isPublic })
-      .where(and(eq(schema.signals.id, input.signalId), eq(schema.signals.isBuiltin, false)))
+      .where(
+        and(
+          eq(schema.signals.id, input.signalId),
+          eq(schema.signals.isBuiltin, false),
+        ),
+      )
       .returning();
 
     return {
@@ -498,8 +539,12 @@ export const getSignalResults = tool({
           eq(schema.signalResults.signalId, input.signalId),
           eq(schema.signalResults.campaignId, input.campaignId!),
           gte(schema.signalResults.ranAt, cutoff),
-          input.organizationId ? eq(schema.signalResults.organizationId, input.organizationId) : undefined,
-          input.personId ? eq(schema.signalResults.personId, input.personId) : undefined,
+          input.organizationId
+            ? eq(schema.signalResults.organizationId, input.organizationId)
+            : undefined,
+          input.personId
+            ? eq(schema.signalResults.personId, input.personId)
+            : undefined,
         ),
       )
       .orderBy(desc(schema.signalResults.ranAt));

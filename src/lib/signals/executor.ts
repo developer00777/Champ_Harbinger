@@ -1,8 +1,3 @@
-import { eq, desc } from "drizzle-orm";
-import { adminDb } from "@/lib/db/admin";
-import { getScopedDb, schema } from "@/lib/db/scoped";
-import { ExaService } from "@/lib/services/exa-service";
-import { structuralDiff } from "./diff";
 import { runRecipe } from "./runner";
 import { getRecipe } from "./recipes";
 import type { Signal } from "@/lib/types/signal";
@@ -30,7 +25,7 @@ export async function executeSignal(
 ): Promise<SignalOutput> {
   switch (signal.execution_type) {
     case "exa_search":
-      return executeExaSearch(signal, ctx);
+      return executeExaSearch();
     case "tool_call":
       return executeToolCall(signal, ctx);
     case "browser_script":
@@ -57,69 +52,14 @@ export async function executeSignal(
 
 // ── Exa Search Handler ─────────────────────────────────────────────────────
 
-async function executeExaSearch(
-  signal: Signal,
-  ctx: ExecuteSignalContext,
-): Promise<SignalOutput> {
-  const config = signal.config ?? {};
-  const queryTemplate = (config.query as string) ?? signal.name;
-
-  // Render query with context -- supports both {company} and {{company}} syntax
-  const companyName = ctx.name ?? "";
-  const domain = ctx.domain ?? "";
-  const query = queryTemplate
-    .replace(/\{\{?company\}?\}/gi, companyName)
-    .replace(/\{\{?domain\}?\}/gi, domain)
-    .replace(/\{\{?name\}?\}/gi, companyName)
-    .replace(/\{\{?title\}?\}/gi, ""); // {title} used in exec-changes, strip if no context
-
-  // If template had no variables rendered, prepend company name
-  const finalQuery =
-    query === queryTemplate && companyName
-      ? `"${companyName}" ${domain} ${query}`
-      : query;
-
-  const exa = new ExaService();
-  const results = await exa.search(finalQuery, {
-    numResults: (config.numResults as number) ?? 5,
-    includeText: true,
-    category: (config.category as "news") ?? undefined,
-  });
-
-  // Build evidence from results
-  const evidence = results.results.slice(0, 5).map((r) => ({
-    url: r.url,
-    snippet: (r.text ?? r.title).slice(0, 280),
-  }));
-
-  // Diff against previous results
-  const diff = await diffAgainstPrevious(
-    signal.id,
-    ctx.organizationId,
-    results.results.map((r) => ({ title: r.title, url: r.url })),
-    ctx.useAdmin,
-  );
-
-  const found = results.resultCount > 0;
-
+async function executeExaSearch(): Promise<SignalOutput> {
   return {
-    found,
-    summary: found
-      ? `Found ${results.resultCount} results for "${finalQuery.slice(0, 80)}"`
-      : `No results found for "${finalQuery.slice(0, 80)}"`,
-    evidence,
-    data: {
-      query: finalQuery,
-      resultCount: results.resultCount,
-      results: results.results.map((r) => ({
-        title: r.title,
-        url: r.url,
-        publishedDate: r.publishedDate,
-        text: r.text?.slice(0, 500) ?? null,
-      })),
-    },
-    diff: diff ?? undefined,
-    confidence: found ? "medium" : "low",
+    found: false,
+    summary:
+      "Web search signals are not supported in this version. Convert this signal to browser_script type to use Browserbase-powered execution.",
+    evidence: [],
+    data: {},
+    confidence: "low",
   };
 }
 
@@ -357,40 +297,5 @@ async function executeHiringActivity(
       totalJobs: result.totalJobs,
     },
     confidence: found ? "high" : "medium",
-  };
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-async function diffAgainstPrevious(
-  signalId: string,
-  organizationId: string | undefined,
-  currentData: unknown,
-  useAdmin?: boolean,
-): Promise<SignalOutput["diff"] | null> {
-  if (!organizationId) return null;
-
-  const db = useAdmin ? adminDb : (await getScopedDb()).raw;
-
-  const [prev] = await db
-    .select({ output: schema.signalResults.output })
-    .from(schema.signalResults)
-    .where(
-      eq(schema.signalResults.signalId, signalId),
-    )
-    .orderBy(desc(schema.signalResults.ranAt))
-    .limit(1);
-
-  if (!prev) return null;
-
-  const previousData = (prev.output as Record<string, unknown>)?.data;
-  if (!previousData) return null;
-
-  const diff = structuralDiff(previousData, currentData);
-  return {
-    changed: diff.changed,
-    from: diff.from,
-    to: diff.to,
-    description: diff.description,
   };
 }

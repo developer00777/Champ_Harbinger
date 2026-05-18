@@ -3,9 +3,6 @@ import { z } from "zod";
 import { eq, inArray, and } from "drizzle-orm";
 import { adminDb as db } from "@/lib/db/admin";
 import { schema } from "@/db";
-import { parseLinkedInTitle } from "@/lib/utils";
-import { ExaService } from "@/lib/services/exa-service";
-import { filterRelevantResults } from "@/lib/services/relevance-filter";
 import { LinkedinService } from "@/lib/services/linkedin-service";
 import { XService } from "@/lib/services/x-service";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
@@ -15,153 +12,8 @@ import {
   linkPersonToCampaign,
   mergeEnrichmentData,
   isRecentlyEnriched,
-  normalizeLinkedInUrl,
 } from "@/lib/services/knowledge-base";
-import {
-  findPeopleOnDomain,
-  filterContactsByCompany,
-  type CandidateContact,
-} from "@/lib/services/contact-filter";
-
-export const searchPeople = tool({
-  description:
-    "Search for people at companies using Exa semantic search with LinkedIn-focused queries. Stores results in the shared knowledge base. When campaignId is provided, links results to the campaign and deduplicates against existing campaign contacts.",
-  inputSchema: z.object({
-    campaignId: z
-      .string()
-      .uuid()
-      .optional()
-      .describe("Campaign to associate results with. Omit for ad-hoc search."),
-    companyId: z
-      .string()
-      .uuid()
-      .optional()
-      .describe("Campaign-organization link ID to associate contacts with"),
-    query: z
-      .string()
-      .min(1)
-      .describe(
-        'Search query for finding people, e.g. "CTO at Acme Corp site:linkedin.com"',
-      ),
-    numResults: z
-      .number()
-      .int()
-      .min(1)
-      .max(20)
-      .default(5)
-      .describe("Number of results to return"),
-  }),
-  execute: async (input) => {
-    const exa = new ExaService();
-
-    const searchResponse = await exa.search(input.query, {
-      numResults: input.numResults,
-      category: "people",
-      includeText: true,
-    });
-
-    // Resolve organization_id if companyId (campaign_organizations link) is provided
-    let organizationId: string | null = null;
-    if (input.companyId) {
-      const [link] = await db
-        .select({ organizationId: schema.campaignOrganizations.organizationId })
-        .from(schema.campaignOrganizations)
-        .where(eq(schema.campaignOrganizations.id, input.companyId))
-        .limit(1);
-      organizationId = link?.organizationId || null;
-    }
-
-    // Fetch existing linkedin_urls already linked to this campaign for dedup
-    const existingUrls = new Set<string>();
-    if (input.campaignId) {
-      const existingLinks = await db
-        .select({ linkedinUrl: schema.people.linkedinUrl })
-        .from(schema.campaignPeople)
-        .innerJoin(
-          schema.people,
-          eq(schema.campaignPeople.personId, schema.people.id),
-        )
-        .where(eq(schema.campaignPeople.campaignId, input.campaignId));
-      for (const l of existingLinks) {
-        if (l.linkedinUrl) existingUrls.add(l.linkedinUrl);
-      }
-    }
-
-    const storedContacts: Array<{
-      id: string;
-      name: string;
-      title: string | null;
-      linkedin_url: string | null;
-    }> = [];
-    let duplicatesSkipped = 0;
-    const seenUrls = new Set<string>();
-
-    for (const result of searchResponse.results) {
-      const { name, title } = parseLinkedInTitle(result.title);
-      const rawLinkedinUrl = result.url.includes("linkedin.com")
-        ? result.url
-        : null;
-      const linkedinUrl = rawLinkedinUrl
-        ? normalizeLinkedInUrl(rawLinkedinUrl)
-        : null;
-
-      // Dedup
-      if (linkedinUrl) {
-        if (existingUrls.has(linkedinUrl) || seenUrls.has(linkedinUrl)) {
-          duplicatesSkipped++;
-          continue;
-        }
-        seenUrls.add(linkedinUrl);
-      }
-
-      const person = await findOrCreatePerson({
-        name,
-        title,
-        linkedin_url: linkedinUrl,
-        organization_id: organizationId,
-        source: "exa",
-      });
-
-      // Store initial search data if person is new (no enrichment yet)
-      if (person.enrichment_status === "pending") {
-        await db
-          .update(schema.people)
-          .set({
-            enrichmentData: {
-              searchQuery: input.query,
-              rawTitle: result.title,
-              text: result.text?.slice(0, 1000),
-            },
-          })
-          .where(eq(schema.people.id, person.id));
-      }
-
-      if (input.campaignId) {
-        await linkPersonToCampaign(person.id, input.campaignId);
-      }
-
-      storedContacts.push({
-        id: person.id,
-        name: person.name,
-        title: person.title,
-        linkedin_url: person.linkedin_url,
-      });
-    }
-
-    return {
-      contacts: storedContacts.map((c) => ({
-        id: c.id,
-        name: c.name,
-        title: c.title,
-        linkedinUrl: c.linkedin_url,
-      })),
-      totalFound: searchResponse.resultCount,
-      newContacts: storedContacts.length,
-      duplicatesSkipped,
-      query: input.query,
-    };
-  },
-});
+import { findPeopleOnDomain } from "@/lib/services/contact-filter";
 
 export function summarizeContactEnrichment(
   data: Record<string, unknown>,
@@ -217,18 +69,7 @@ async function enrichContactById(
     .where(eq(schema.people.id, personId))
     .limit(1);
 
-  let companyName: string | null = null;
-  if (personRow?.organizationId) {
-    const [org] = await db
-      .select({ name: schema.organizations.name })
-      .from(schema.organizations)
-      .where(eq(schema.organizations.id, personRow.organizationId))
-      .limit(1);
-    companyName = org?.name ?? null;
-  }
-
   const person = personRow;
-  const contactName = person?.name || "Unknown";
   const linkedinFinal = linkedinUrl || person?.linkedinUrl || undefined;
   const twitterFinal = twitterUrl || person?.twitterUrl || undefined;
 
@@ -279,113 +120,20 @@ async function enrichContactById(
     );
   }
 
-  if (contactName !== "Unknown") {
-    const exa = new ExaService();
-    const contactTitle = person?.title || null;
-    const queryParts = [`"${contactName}"`];
-    if (companyName) queryParts.push(`"${companyName}"`);
-    if (contactTitle) queryParts.push(contactTitle);
-    const specificQuery = queryParts.join(" ");
-
-    // Collect URLs already in the company's enrichment data so we don't
-    // show the same links on both the company and contact cards.
-    const companyUrls = new Set<string>();
-    if (companyName) {
-      const [orgRow] = await db
-        .select({ enrichmentData: schema.organizations.enrichmentData })
-        .from(schema.organizations)
-        .where(eq(schema.organizations.name, companyName))
-        .limit(1);
-
-      const orgEnrichment = orgRow?.enrichmentData as Record<
-        string,
-        unknown
-      > | null;
-      if (orgEnrichment) {
-        const searches = orgEnrichment.searches as
-          | Array<{ results: Array<{ url: string }> }>
-          | undefined;
-        if (searches) {
-          for (const s of searches) {
-            for (const r of s.results) {
-              if (r.url) companyUrls.add(r.url);
-            }
-          }
-        }
-      }
-    }
-
-    const dedup = (
-      results: Array<{
-        title: string;
-        url: string;
-        publishedDate: string | null;
-        text: string | null;
-      }>,
-    ) => results.filter((r) => !companyUrls.has(r.url));
-
+  if (linkedinFinal) {
     promises.push(
       (async () => {
         try {
-          const result = await exa.search(
-            `${specificQuery} news announcement`,
-            { numResults: 3, includeText: true, category: "news" },
+          if (!extractWebContent.execute)
+            throw new Error("extractWebContent.execute not available");
+          const result = await extractWebContent.execute(
+            { url: linkedinFinal, includeLinks: false },
+            { toolCallId: `enrich-contact-${personId}`, messages: [] },
           );
-          enrichmentData.news = dedup(
-            result.results.map((r) => ({
-              title: r.title,
-              url: r.url,
-              publishedDate: r.publishedDate,
-              text: r.text || null,
-            })),
-          );
+          enrichmentData.linkedin_profile = result;
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error";
-          errors.push(`News: ${msg}`);
-        }
-      })(),
-    );
-
-    promises.push(
-      (async () => {
-        try {
-          const result = await exa.search(
-            `${specificQuery} article talk interview podcast`,
-            { numResults: 3, includeText: true },
-          );
-          enrichmentData.articles = dedup(
-            result.results.map((r) => ({
-              title: r.title,
-              url: r.url,
-              publishedDate: r.publishedDate,
-              text: r.text || null,
-            })),
-          );
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Unknown error";
-          errors.push(`Articles: ${msg}`);
-        }
-      })(),
-    );
-
-    promises.push(
-      (async () => {
-        try {
-          const result = await exa.search(
-            `${specificQuery} background bio profile`,
-            { numResults: 3, includeText: true },
-          );
-          enrichmentData.background = dedup(
-            result.results.map((r) => ({
-              title: r.title,
-              url: r.url,
-              publishedDate: r.publishedDate,
-              text: r.text || null,
-            })),
-          );
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Unknown error";
-          errors.push(`Background: ${msg}`);
+          errors.push(`LinkedIn profile: ${msg}`);
         }
       })(),
     );
@@ -473,8 +221,6 @@ export const enrichContacts = tool({
     }> = [];
     const failed: Array<{ contactId: string; error: string }> = [];
 
-    // Process in chunks of 3 to stay under Exa's 10 QPS limit
-    // (each contact makes 3-4 Exa searches)
     const CHUNK_SIZE = 3;
     for (let i = 0; i < input.contactIds.length; i += CHUNK_SIZE) {
       const chunk = input.contactIds.slice(i, i + CHUNK_SIZE);
@@ -922,115 +668,55 @@ async function enrichCompanyById(
     icp = (campaign?.icp as Record<string, unknown>) || null;
   }
 
-  const exa = new ExaService();
   const extractor = new WebExtractionService();
   const errors: string[] = [];
 
   const companyUrl = org.url || (org.domain ? `https://${org.domain}` : null);
 
-  const contextParts: string[] = [];
-  if (org.industry) contextParts.push(org.industry as string);
-  if (org.location) contextParts.push(org.location as string);
-  const context = contextParts.length > 0 ? ` ${contextParts.join(" ")}` : "";
-  const domainHint = org.domain ? ` ${org.domain}` : "";
-  const specificName = `"${org.name}"${domainHint}${context}`;
-
-  const companyDomain =
-    org.domain || (companyUrl ? new URL(companyUrl).hostname : null);
-
-  const [websiteResult, productResult, fundingResult, teamResult] =
-    await Promise.allSettled([
-      companyUrl
-        ? extractor.extract(companyUrl, { includeLinks: false })
-        : Promise.resolve(null),
-      exa.search(
-        companyDomain
-          ? `${org.name} products services`
-          : `${specificName} product services offering`,
-        {
-          numResults: 5,
-          includeText: true,
-          ...(companyDomain ? { includeDomains: [companyDomain] } : {}),
-        },
-      ),
-      exa.search(`${specificName} funding news announcement`, {
-        numResults: 5,
-        includeText: true,
-        category: "news",
-      }),
-      exa.search(`${specificName} team employees company size`, {
-        numResults: 5,
-        includeText: true,
-      }),
-    ]);
-
   const enrichmentData: Record<string, unknown> = {
     enrichedAt: new Date().toISOString(),
   };
 
-  if (websiteResult.status === "fulfilled" && websiteResult.value?.success) {
-    const wd = websiteResult.value.data;
-    enrichmentData.website = {
-      title: wd.title,
-      description: wd.description,
-      content: wd.content.slice(0, 3000),
-      openGraph: wd.openGraph,
-      emails: wd.contactInfo?.emails,
-      phones: wd.contactInfo?.phones,
-      address: wd.contactInfo?.address,
-    };
-  } else if (websiteResult.status === "rejected") {
-    errors.push(`Website: ${websiteResult.reason?.message || "Failed"}`);
-  }
-
-  const searches: Array<{
-    category: string;
-    query: string;
-    results: Array<{
-      title: string;
-      url: string;
-      publishedDate: string | null;
-      text: string | null;
-    }>;
-  }> = [];
-
-  const searchEntries = [
-    ["product", productResult],
-    ["funding", fundingResult],
-    ["team", teamResult],
-  ] as const;
-
-  for (const [label, result] of searchEntries) {
-    if (result.status === "fulfilled") {
-      const mapped = result.value.results.map(
-        (r: {
-          title: string;
-          url: string;
-          publishedDate: string | null;
-          text: string | null;
-        }) => ({
-          title: r.title,
-          url: r.url,
-          publishedDate: r.publishedDate,
-          text: r.text?.slice(0, 2000) || null,
-        }),
+  // Fetch website content via extractWebContent if a URL is available
+  if (companyUrl) {
+    try {
+      if (!extractWebContent.execute)
+        throw new Error("extractWebContent.execute not available");
+      const websiteResult = await extractWebContent.execute(
+        { url: companyUrl, includeLinks: false },
+        { toolCallId: `enrich-company-${organizationId}`, messages: [] },
       );
-      const filtered = await filterRelevantResults(
-        org.name as string,
-        companyDomain,
-        mapped,
-      );
-      searches.push({
-        category: label,
-        query: `${org.name} ${label}`,
-        results: filtered.slice(0, 3),
-      });
-    } else {
-      errors.push(`Search (${label}): ${result.reason?.message || "Failed"}`);
+      enrichmentData.website_content = websiteResult;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      errors.push(`Website: ${msg}`);
     }
   }
 
-  enrichmentData.searches = searches;
+  // Also try the raw extractor for structured contact info
+  if (companyUrl) {
+    try {
+      const websiteRaw = await extractor.extract(companyUrl, {
+        includeLinks: false,
+      });
+      if (websiteRaw.success) {
+        const wd = websiteRaw.data;
+        enrichmentData.website = {
+          title: wd.title,
+          description: wd.description,
+          content: wd.content.slice(0, 3000),
+          openGraph: wd.openGraph,
+          emails: wd.contactInfo?.emails,
+          phones: wd.contactInfo?.phones,
+          address: wd.contactInfo?.address,
+        };
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      errors.push(`Website (structured): ${msg}`);
+    }
+  }
+
   if (errors.length > 0) enrichmentData.errors = errors;
 
   await mergeEnrichmentData("organizations", organizationId, enrichmentData);
@@ -1089,8 +775,6 @@ export const enrichCompanies = tool({
     }> = [];
     const failed: Array<{ companyId: string; error: string }> = [];
 
-    // Process in chunks of 3 to stay under Exa's 10 QPS limit
-    // (each company makes 3-4 Exa searches)
     const CHUNK_SIZE = 3;
     for (let i = 0; i < input.companyIds.length; i += CHUNK_SIZE) {
       const chunk = input.companyIds.slice(i, i + CHUNK_SIZE);
@@ -1173,8 +857,6 @@ export const findContacts = tool({
         "Either companyId (campaign-organization link ID) or organizationId (organization ID) is required.",
       );
     }
-
-    const exa = new ExaService();
 
     // Resolve target titles from campaign ICP or explicit input
     let targetTitles: string[] = input.titles || [];
@@ -1331,95 +1013,18 @@ export const findContacts = tool({
       }
     }
 
-    // ── Phase 2: LinkedIn search with LLM filtering ──────────────────
-    const searchResults = await Promise.all(
-      targetTitles.map(async (title: string) => {
-        const query = `"${org.name}" ${title} site:linkedin.com`;
-        try {
-          const result = await exa.search(query, {
-            numResults: input.numResults,
-            category: "people",
-            includeText: true,
-          });
-          return { title, query, results: result.results };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Unknown error";
-          console.error(`[findContacts] Search failed for "${query}": ${msg}`);
-          return { title, query, results: [], error: msg };
-        }
-      }),
-    );
+    // ── Phase 2: LinkedIn search (not available — web search removed) ──
+    const searchResults: Array<{
+      title: string;
+      query: string;
+      results: never[];
+    }> = targetTitles.map((title: string) => ({
+      title,
+      query: `"${org.name}" ${title} site:linkedin.com`,
+      results: [],
+    }));
 
-    const seenUrls = new Set<string>();
-    const candidates: Array<
-      CandidateContact & { searchTitle: string; linkedinUrl: string | null }
-    > = [];
-    let duplicatesSkipped = 0;
-
-    for (const search of searchResults) {
-      for (const result of search.results) {
-        if (seenUrls.has(result.url)) {
-          duplicatesSkipped++;
-          continue;
-        }
-        seenUrls.add(result.url);
-
-        const linkedinUrl = result.url.includes("linkedin.com")
-          ? result.url
-          : null;
-        if (linkedinUrl && existingUrls.has(linkedinUrl)) {
-          duplicatesSkipped++;
-          continue;
-        }
-
-        const parsed = parseLinkedInTitle(result.title);
-        candidates.push({
-          name: parsed.name,
-          title: parsed.title || search.title,
-          linkedinUrl,
-          rawHeadline: result.title,
-          searchTitle: search.title,
-        });
-      }
-    }
-
-    if (candidates.length > 0) {
-      const company = {
-        name: org.name,
-        domain: org.domain,
-        industry: org.industry,
-        location: org.location,
-        description: org.description,
-      };
-      const verified = await filterContactsByCompany(company, candidates);
-
-      for (const v of verified) {
-        const candidate = candidates[v.index];
-        if (!candidate) continue;
-
-        const person = await findOrCreatePerson({
-          name: v.name,
-          title: v.title,
-          linkedin_url: candidate.linkedinUrl,
-          organization_id: orgId,
-          source: "exa",
-        });
-
-        if (input.campaignId) {
-          await linkPersonToCampaign(person.id, input.campaignId);
-        }
-
-        storedContacts.push({
-          id: person.id,
-          name: person.name,
-          title: person.title,
-          work_email: person.work_email,
-          personal_email: person.personal_email,
-          linkedin_url: person.linkedin_url,
-          source: "exa",
-        });
-      }
-    }
+    const duplicatesSkipped = 0;
 
     return {
       companyId: input.companyId,

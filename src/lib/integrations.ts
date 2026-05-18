@@ -168,20 +168,6 @@ export const INTEGRATIONS: Integration[] = [
     keyName: "qstash_token",
   },
   {
-    id: "exa",
-    name: "Exa",
-    category: "enrichment",
-    severity: "optional",
-    feature: "Neural web search inside chat",
-    consequence:
-      "Chat web-search and Exa-backed signals (changelog monitor, etc.) will return 'not configured'.",
-    envVars: ["EXA_API_KEY"],
-    signupUrl: "https://exa.ai",
-    keysUrl: "https://dashboard.exa.ai/api-keys",
-    fixHint: "Add `EXA_API_KEY=...` to .env.local",
-    keyName: "exa_api_key",
-  },
-  {
     id: "google_places",
     name: "Google Places",
     category: "enrichment",
@@ -230,7 +216,7 @@ export const INTEGRATIONS: Integration[] = [
     feature:
       "Criteria-based company and contact discovery from 120M+ verified records",
     consequence:
-      "Discovery uses Exa web search instead of Lake B2B database. Results will be less accurate and comprehensive.",
+      "Discovery falls back to browser-based web research instead of the Lake B2B database. Results will be less accurate and comprehensive.",
     envVars: ["LAKEB2B_API_KEY"],
     keyName: "lakeb2b_api_key",
     fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",

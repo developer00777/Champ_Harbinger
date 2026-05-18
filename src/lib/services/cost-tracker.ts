@@ -6,7 +6,6 @@ import { schema } from "@/db";
 // ── Pricing constants (USD) ──────────────────────────────────────────────
 // Last verified 2026-03-29. Sources:
 //   Claude  -- https://docs.anthropic.com/en/docs/about-claude/pricing
-//   Exa     -- https://exa.ai/pricing (March 2026: contents bundled into search)
 //   Apify   -- https://apify.com/pricing (pay-per-result actors)
 //   BB      -- https://browserbase.com/pricing
 export const PRICING = {
@@ -20,8 +19,7 @@ export const PRICING = {
   claude_haiku_output: 5.0,
   claude_haiku_cache_read: 0.1,
   claude_haiku_cache_write: 1.25,
-  // Exa -- $7 per 1,000 searches (text + highlights for 10 results included)
-  exa_search: 0.007,
+  exa_search: 0,
   // Apify -- pay-per-result pricing (~20 posts per profile scrape)
   apify_linkedin: 0.05,
   // Apify tweet scraper -- $0.40/1k tweets, ~$0.04 for 100 tweets
@@ -181,7 +179,9 @@ export function trackUsage(entry: UsageEntry): void {
         campaignId: entry.campaign_id ?? null,
         clerkUserId: entry.user_id ?? "system",
         clerkOrgId: null,
-        actionId: ctx?.action_id ? ctx.action_id as unknown as undefined : undefined,
+        actionId: ctx?.action_id
+          ? (ctx.action_id as unknown as undefined)
+          : undefined,
         actionLabel: ctx?.action_label ?? null,
       });
     } catch (err) {

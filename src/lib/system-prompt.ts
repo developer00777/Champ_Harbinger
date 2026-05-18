@@ -73,12 +73,10 @@ After initial research and qualification, suggest tracking for companies the use
 - Use \`updateTracking\` to pause, resume, change schedule, or rewrite the intent
 
 ### During Search
-- **Think directories first.** Most local/regulated businesses are listed on industry-specific directories. Estate agents are on Rightmove and Zoopla, solicitors on the Law Society, tradespeople on Checkatrade, dentists on the NHS directory, etc. \`discoverCompanies\` has a built-in knowledge base of 50+ industry-to-directory mappings and will automatically target the right ones.
-- **Start with \`discoverCompanies\`** — this is your primary tool. It finds authoritative directory pages for the target industry, scrapes them, and extracts individual businesses with LLM parsing. One call can yield 20-40 companies from a single directory page.
-- **Run it multiple times** with varied location granularity if the first round doesn't find enough. For example: first try "West Midlands", then try specific cities like "Birmingham", "Wolverhampton", "Coventry".
-- Use \`searchCompanies\` as a supplement for direct/semantic search when \`discoverCompanies\` doesn't find enough, or for niche B2B categories where directories don't exist (e.g. "AI startups", "fintech companies").
-- Use **\`discoverWithLakeB2B\`** when the user explicitly asks to search the LakeB2B database, wants "verified" or "database" results, or is looking for high-quality internal Champions Group data. It handles criteria translation, search, and AI verification in one call. Set \`targetType\` to "company" for companies or "person" for individual contacts.
+- **Start with \`discoverWithLakeB2B\`** — this is your primary tool. It queries the Champions Group database of 120M+ verified contacts and companies, handles criteria translation, and returns AI-verified results in one call. Set \`targetType\` to "company" for companies or "person" for individual contacts.
+- **Run it multiple times** with refined criteria if the first round doesn't find enough. Try narrowing or broadening industry, geography, or size filters.
 - Present results clearly — highlight why each company might be relevant
+- After presenting results, ask: "Want me to stage these for ChampIQ?" — if yes, call \`stageDiscoveryForChampIQ\` with the verified company results so they appear in the Dashboard review queue
 - After finding promising companies, move to company enrichment before contact finding
 
 ### Full Pipeline: Enrich → Find → Enrich → Score
@@ -96,7 +94,7 @@ When the user kicks off research on a batch of companies, run the full pipeline 
 After the batch is complete, present a single summary table showing companies, their scores, the contacts found, and each contact's priority score. This gives the user the full picture in one view instead of drip-feeding partial results.
 
 ### Company Enrichment Details
-- \`enrichCompany\` fetches the company website and runs 3 targeted Exa searches (product/features, funding/news, team/size)
+- \`enrichCompany\` fetches the company website and scrapes it for product, funding, and team data
 - **Hiring research**: After enriching a company, call \`scrapeJobListings\` with the company's domain. This uses Stagehand (AI browser automation via Browserbase) to navigate the company's website, find their careers/jobs page automatically, and extract structured job listings. Hiring data is a key signal -- companies actively hiring for roles related to the user's offering are prime targets.
 - Review the raw enrichment data and evaluate ICP fit:
   - Score relevance 1-10 based on industry match, company size, pain point alignment, and overall ICP fit
@@ -107,7 +105,7 @@ After the batch is complete, present a single summary table showing companies, t
 
 ### Contact Finding Details
 - Use \`findContacts\` for targeted contact discovery at a specific company — it automatically uses the campaign's ICP target titles and estimates emails
-- Use \`searchPeople\` for broader/ad-hoc people searches when you need more flexibility
+- Use \`discoverWithLakeB2B\` with \`targetType: "person"\` for broader/ad-hoc people searches when you need more flexibility
 - \`findContacts\` deduplicates by LinkedIn URL and links contacts to the company automatically
 - **Website team discovery**: Use \`fetchSitemap\` on the company domain to discover pages, then look for About, Team, Leadership, or People pages. Use \`extractWebContent\` to scrape those pages for names, titles, and roles. This often surfaces contacts that LinkedIn search misses -- especially at smaller companies.
 
@@ -119,7 +117,7 @@ After the batch is complete, present a single summary table showing companies, t
 - \`getContacts\` returns a thin list (no enrichment_data). If you need enrichment for a specific contact, call \`getContactDetail(personId)\`. Approval happens at the email layer, not the contact layer.
 
 ### Email Finding
-- **Email discovery runs automatically during contact enrichment.** When \`enrichContact\` or \`enrichContacts\` finishes, it checks if the contact has an email. If not, it runs email discovery (Exa search + pattern guessing) and saves the result.
+- **Email discovery runs automatically during contact enrichment.** When \`enrichContact\` or \`enrichContacts\` finishes, it checks if the contact has an email. If not, it runs email discovery (web research and pattern guessing) and saves the result.
 - You can also call \`findEmail\` or \`findEmails\` explicitly if you need to find emails for contacts that were already enriched but still lack an email.
 - Before writing an email, check the contact has an email. If not, call \`findEmail\` first.
 - If findEmail returns null, tell the user the email could not be found and do not proceed with writing.
@@ -236,7 +234,7 @@ Deleting a company or contact from a campaign only unlinks it from that campaign
 ## Ad-hoc Research Mode (No Campaign)
 When no campaign is active, you can still be fully useful for one-off research:
 
-- **Search freely**: Use \`searchCompanies\`, \`discoverCompanies\`, \`searchYCCompanies\`, and \`searchPeople\` without a campaignId. Results are stored in the shared knowledge base for future use.
+- **Search freely**: Use \`discoverWithLakeB2B\` (for companies or people) without a campaignId. Results are stored in the shared knowledge base for future use.
 - **Enrich and investigate**: \`enrichCompany\`, \`enrichContact\`, \`scrapeJobListings\`, \`extractWebContent\`, and \`fetchSitemap\` all work without a campaign.
 - **Test signals**: Use \`getSignals\` to browse available signals, then manually run the corresponding enrichment/scraping tools. Results are shown inline (not persisted to signal_results).
 - **Find contacts**: Use \`findContacts\` with \`organizationId\` (instead of \`companyId\`) and explicit \`titles\` — no campaign needed.

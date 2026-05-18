@@ -8,9 +8,6 @@
  * Apify uses the monthly usage endpoint. Cycles are monthly, so periods that
  * cross cycle boundaries require multiple requests.
  *
- * Exa uses the team-management usage endpoint. Requires EXA_SERVICE_API_KEY
- * and EXA_API_KEY_ID (the UUID of the search key whose usage we want).
- *
  * Browserbase has no billed-spend endpoint that reliably reports non-zero,
  * so we sum completed session durations × our local per-hour rate.
  */
@@ -136,54 +133,6 @@ async function fetchApifySpend(startIso: string): Promise<number | null> {
   return total;
 }
 
-async function fetchExaSpend(
-  startIso: string,
-  endIso: string,
-): Promise<number | null> {
-  const key = process.env.EXA_SERVICE_API_KEY;
-  const keyId = process.env.EXA_API_KEY_ID;
-  if (!key || !keyId) return null;
-
-  // Exa caps lookback at 180 days. Clamp if the caller asked for more.
-  const earliest = new Date(Date.now() - 180 * 86400000);
-  const start = new Date(startIso);
-  const startClamped = (start < earliest ? earliest : start).toISOString();
-
-  try {
-    const url = new URL(
-      `https://admin-api.exa.ai/team-management/api-keys/${keyId}/usage`,
-    );
-    url.searchParams.set("start_date", startClamped);
-    url.searchParams.set("end_date", endIso);
-
-    const res = await fetchWithTimeout(
-      url.toString(),
-      { headers: { "x-api-key": key } },
-      30_000,
-    );
-    if (!res.ok) {
-      console.error(
-        `[real-spend] exa ${res.status}:`,
-        await res.text().catch(() => ""),
-      );
-      return null;
-    }
-    const json = (await res.json()) as { total_cost_usd?: number | string };
-    // Distinguish "missing field" (parser/API change -- show est) from
-    // "real value is 0" (genuinely no spend). A missing field returning $0
-    // would be displayed as authoritative zero spend, which is misleading.
-    if (json.total_cost_usd == null) {
-      console.error("[real-spend] exa response missing total_cost_usd:", json);
-      return null;
-    }
-    const total = Number(json.total_cost_usd);
-    return Number.isFinite(total) ? total : null;
-  } catch (err) {
-    console.error("[real-spend] exa error:", err);
-    return null;
-  }
-}
-
 async function fetchBrowserbaseSpend(
   startIso: string,
   endIso: string,
@@ -248,7 +197,6 @@ async function fetchBrowserbaseSpend(
 export interface RealSpend {
   claude: number | null;
   apify: number | null;
-  exa: number | null;
   browserbase: number | null;
 }
 
@@ -256,23 +204,16 @@ export async function fetchRealSpend(
   startIso: string,
   endIso: string,
 ): Promise<RealSpend> {
-  // Use allSettled so that an unexpected rejection in one fetcher does not
-  // blank the entire cost dashboard. Each fetcher is already contracted to
-  // return null on handled errors; this is a defence-in-depth against paths
-  // that escape their internal try/catch (e.g. malformed upstream data that
-  // throws outside the covered region).
-  const [claudeResult, apifyResult, exaResult, browserbaseResult] =
+  const [claudeResult, apifyResult, browserbaseResult] =
     await Promise.allSettled([
       fetchAnthropicSpend(startIso, endIso),
       fetchApifySpend(startIso),
-      fetchExaSpend(startIso, endIso),
       fetchBrowserbaseSpend(startIso, endIso),
     ]);
 
   const claude =
     claudeResult.status === "fulfilled" ? claudeResult.value : null;
   const apify = apifyResult.status === "fulfilled" ? apifyResult.value : null;
-  const exa = exaResult.status === "fulfilled" ? exaResult.value : null;
   const browserbase =
     browserbaseResult.status === "fulfilled" ? browserbaseResult.value : null;
 
@@ -282,9 +223,6 @@ export async function fetchRealSpend(
   if (apifyResult.status === "rejected") {
     console.error("[real-spend] apify rejected:", apifyResult.reason);
   }
-  if (exaResult.status === "rejected") {
-    console.error("[real-spend] exa rejected:", exaResult.reason);
-  }
   if (browserbaseResult.status === "rejected") {
     console.error(
       "[real-spend] browserbase rejected:",
@@ -292,5 +230,5 @@ export async function fetchRealSpend(
     );
   }
 
-  return { claude, apify, exa, browserbase };
+  return { claude, apify, browserbase };
 }
