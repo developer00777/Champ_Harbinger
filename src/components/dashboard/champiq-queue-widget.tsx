@@ -40,13 +40,32 @@ export function ChampIQQueueWidget() {
   async function act(id: string, action: "push" | "discard") {
     setActing((a) => ({ ...a, [id]: true }));
     try {
-      await fetch("/api/champiq/queue", {
+      const res = await fetch("/api/champiq/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, action }),
       });
-      setItems((prev) => prev.filter((i) => i.id !== id));
-      toast.success(action === "push" ? "Pushed to ChampIQ" : "Discarded");
+      const body = (await res.json().catch(() => ({}))) as {
+        delivered?: boolean;
+        error?: string;
+        reason?: string;
+      };
+
+      if (action === "discard") {
+        setItems((prev) => prev.filter((i) => i.id !== id));
+        toast.success("Discarded");
+        return;
+      }
+
+      // Push action: keep item in list if delivery failed
+      if (body.delivered === false) {
+        toast.error(
+          `Marked as pushed but delivery failed: ${body.error ?? body.reason ?? "unknown"}`,
+        );
+      } else {
+        setItems((prev) => prev.filter((i) => i.id !== id));
+        toast.success("Delivered to ChampIQ");
+      }
     } catch {
       toast.error("Action failed");
     } finally {
@@ -59,8 +78,44 @@ export function ChampIQQueueWidget() {
   }
 
   async function pushAll() {
-    for (const item of items) {
-      await act(item.id, "push");
+    setActing((a) => {
+      const next = { ...a };
+      for (const item of items) next[item.id] = true;
+      return next;
+    });
+    try {
+      const res = await fetch("/api/champiq/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "push_all" }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        total?: number;
+        delivered?: number;
+        failed?: number;
+        champiq_url_configured?: boolean;
+      };
+      const total = body.total ?? items.length;
+      const delivered = body.delivered ?? 0;
+      const failed = body.failed ?? 0;
+      if (!body.champiq_url_configured) {
+        toast.error(
+          `Marked ${total} as pushed, but ChampIQ URL is not configured — none were delivered`,
+        );
+        setItems([]);
+      } else if (failed > 0) {
+        toast.error(
+          `${delivered}/${total} delivered to ChampIQ — ${failed} failed`,
+        );
+        await load();
+      } else {
+        toast.success(`Delivered ${delivered}/${total} to ChampIQ`);
+        setItems([]);
+      }
+    } catch {
+      toast.error("Push all failed");
+    } finally {
+      setActing({});
     }
   }
 

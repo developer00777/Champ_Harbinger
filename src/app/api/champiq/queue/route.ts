@@ -72,7 +72,8 @@ export async function POST(request: Request) {
         ),
       );
 
-    // First mark all as pushed
+    // Mark all as pushed first; delivery may flip individual rows to
+    // "delivered" or leave them at "pushed" on failure.
     await adminDb
       .update(schema.champiqQueue)
       .set({ status: "pushed", pushedAt: new Date(), updatedAt: new Date() })
@@ -83,14 +84,25 @@ export async function POST(request: Request) {
         ),
       );
 
-    // Then deliver to ChampOracle if configured (fire-and-forget per item)
+    let delivered = 0;
+    let failed = 0;
     if (champiqUrl) {
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         pending.map((p) => deliverProspectToChampIQ(p.id, champiqUrl)),
       );
+      for (const r of results) {
+        if (r.status === "fulfilled" && r.value.ok) delivered++;
+        else failed++;
+      }
     }
-
-    return NextResponse.json({ ok: true, action: "push_all" });
+    return NextResponse.json({
+      ok: true,
+      action: "push_all",
+      total: pending.length,
+      delivered,
+      failed,
+      champiq_url_configured: !!champiqUrl,
+    });
   }
 
   // Single-item push or discard
@@ -115,10 +127,26 @@ export async function POST(request: Request) {
       ),
     );
 
-  // Deliver to ChampOracle if configured
-  if (body.action === "push" && champiqUrl) {
-    await deliverProspectToChampIQ(body.id, champiqUrl);
+  if (body.action === "discard") {
+    return NextResponse.json({ ok: true, action: "discard" });
   }
 
-  return NextResponse.json({ ok: true });
+  // Push action: try to deliver to ChampOracle if configured
+  if (!champiqUrl) {
+    return NextResponse.json({
+      ok: true,
+      action: "push",
+      delivered: false,
+      reason:
+        "ChampIQ URL not configured — item marked as pushed but not delivered",
+    });
+  }
+
+  const result = await deliverProspectToChampIQ(body.id, champiqUrl);
+  return NextResponse.json({
+    ok: true,
+    action: "push",
+    delivered: result.ok,
+    error: result.ok ? undefined : result.error,
+  });
 }
