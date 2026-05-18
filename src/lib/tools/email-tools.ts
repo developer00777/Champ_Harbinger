@@ -118,7 +118,7 @@ export async function findEmailForPerson(personId: string): Promise<{
   // ── 2) Discovery path — no external search available; fall through to pattern inference.
   const foundEmail: string | null = null;
 
-  // ── 3) On-the-fly inference: if Exa whiffed, try inferring the pattern from
+  // ── 3) On-the-fly inference: try inferring the pattern from
   //       any verified emails on the org RIGHT NOW.
   if (!foundEmail && domain && person.organizationId && first && last) {
     const orgPeople = await db
@@ -167,7 +167,7 @@ export async function findEmailForPerson(personId: string): Promise<{
             })
             .where(eq(schema.people.id, personId));
           // Refresh the org's cached pattern so subsequent lookups in a bulk
-          // run hit step 1 instead of re-doing this query + Exa search.
+          // run hit step 1 instead of re-doing this query.
           await recomputeOrgPattern(epDb, person.organizationId);
           return {
             email: derived,
@@ -206,24 +206,9 @@ export async function findEmailForPerson(personId: string): Promise<{
     }
   }
 
-  if (!foundEmail) {
-    return {
-      email: null,
-      reason: "Could not find an email address.",
-      personId,
-    };
-  }
-
-  // Exa hit — record as verified-source with the right weight.
-  await recordVerifiedEmail(epDb, {
-    personId,
-    email: foundEmail,
-    source: "exa_search",
-  });
   return {
-    email: foundEmail,
-    source: "exa_search",
-    confidence: SOURCE_WEIGHT.exa_search,
+    email: null,
+    reason: "Could not find an email address.",
     personId,
   };
 }
@@ -232,7 +217,7 @@ export async function findEmailForPerson(personId: string): Promise<{
 
 export const findEmail = tool({
   description:
-    "Discover the email address for a contact using Exa search and common email pattern guessing. Returns the email if already known. Use this before writeEmail if the contact has no email.",
+    "Discover the email address for a contact using email pattern inference and DNS MX checking. Returns the email if already known. Use this before writeEmail if the contact has no email.",
   inputSchema: z.object({
     personId: z.string().uuid().describe("Person ID to find email for."),
   }),

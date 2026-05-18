@@ -8,10 +8,7 @@ import { findEmailForPerson } from "@/lib/tools/email-tools";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-// Hard cap to bound Exa cost per click. Each call may fire one Exa search
-// (~$0.007) for the first contact at a brand-new org; the rest derive from
-// the now-cached pattern. 50 covers typical mid-sized companies and keeps a
-// runaway click bounded to ~$0.35.
+// Cap per request to prevent runaway bulk lookups for large orgs.
 const MAX_TARGETS_PER_REQUEST = 50;
 
 /**
@@ -21,7 +18,7 @@ const MAX_TARGETS_PER_REQUEST = 50;
  * subsequent ones at the same org derive for free.
  *
  * `organizationId` is required: this matches the per-company UI button (one
- * click = one company) and prevents accidental campaign-wide Exa fanout.
+ * click = one company).
  */
 export async function POST(req: Request) {
   let userId: string;

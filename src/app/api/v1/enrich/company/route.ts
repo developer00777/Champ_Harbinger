@@ -22,7 +22,7 @@ export async function POST(request: Request) {
 
   const domain = normalizeDomain(body.domain);
 
-  // Replace the Exa fetches with a simple homepage fetch
+  // Fetch the company homepage for enrichment data
   let combinedText = "";
   try {
     const res = await fetch(`https://${domain}`, {

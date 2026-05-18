@@ -295,7 +295,7 @@ async function enrichOrganization(
       (companyUrl ? new URL(companyUrl).hostname : null);
 
     // Website extraction always runs; search enrichment (product/funding/executive)
-    // uses empty fallbacks since Exa has been removed.
+    // uses empty arrays since web search enrichment requires Browserbase.
     const operations = await Promise.allSettled([
       companyUrl
         ? extractor.extract(companyUrl, { includeLinks: false })

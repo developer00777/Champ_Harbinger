@@ -69,7 +69,7 @@ export const getCompanies = tool({
 
 export const getCompanyDetail = tool({
   description:
-    "Fetch full enrichment detail for ONE company (website extract, Exa results, team data). Use when drafting email content that references the company specifically. Call per-draft, not in a loop.",
+    "Fetch full enrichment detail for ONE company (website content, team data, enrichment results). Use when drafting email content that references the company specifically. Call per-draft, not in a loop.",
   inputSchema: z.object({
     organizationId: z
       .string()
