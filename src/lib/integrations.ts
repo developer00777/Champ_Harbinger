@@ -221,6 +221,20 @@ export const INTEGRATIONS: Integration[] = [
     keyName: "lakeb2b_api_key",
     fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",
   },
+  {
+    id: "champoracle",
+    name: "ChampIQ (ChampOracle)",
+    category: "data",
+    severity: "optional",
+    feature:
+      "Push qualified prospects from ChampHarbinger into ChampIQ for review and outreach",
+    consequence:
+      "Approved prospects stay in the local queue but are not delivered to ChampIQ. Configure the ChampIQ URL and API key in Settings → ChampIQ.",
+    envVars: ["CHAMPORACLE_OUTBOUND_API_KEY"],
+    keyName: "champoracle_api_key",
+    fixHint:
+      "Set ChampIQ URL in Settings → ChampIQ and paste the ChampOracle API key in Settings → Keys",
+  },
 ];
 
 /**

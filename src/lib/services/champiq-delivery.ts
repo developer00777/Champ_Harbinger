@@ -2,6 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
+import { getUserApiKey } from "@/lib/db/user-keys";
 
 interface ChampIQProspect {
   champharb_queue_id: string;
@@ -15,6 +16,18 @@ interface ChampIQProspect {
   score: number | null;
   talking_points: string[];
   source: string;
+}
+
+/**
+ * Resolve the API key ChampHarbinger sends to ChampOracle.
+ * BYOK first (per-user), then env var fallback (CHAMPORACLE_OUTBOUND_API_KEY).
+ */
+async function getChampOracleApiKey(userId: string): Promise<string | null> {
+  return getUserApiKey(
+    "champoracle_api_key",
+    userId,
+    process.env.CHAMPORACLE_OUTBOUND_API_KEY,
+  );
 }
 
 export async function deliverProspectToChampIQ(
@@ -46,11 +59,19 @@ export async function deliverProspectToChampIQ(
   };
 
   const url = `${champiqUrl.replace(/\/$/, "")}/api/harbinger/prospects`;
+  const apiKey = await getChampOracleApiKey(item.clerkUserId);
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) {
+    headers["X-ChampOracle-API-Key"] = apiKey;
+  }
 
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ prospects: [prospect] }),
       signal: AbortSignal.timeout(15_000),
     });
@@ -63,7 +84,6 @@ export async function deliverProspectToChampIQ(
       };
     }
 
-    // Mark as delivered
     await adminDb
       .update(schema.champiqQueue)
       .set({ status: "delivered", pushedAt: new Date() })
@@ -73,5 +93,30 @@ export async function deliverProspectToChampIQ(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, error: message };
+  }
+}
+
+/**
+ * Ping ChampOracle's health endpoint. Used before push to verify connectivity.
+ * Returns true if reachable, false otherwise.
+ */
+export async function checkChampOracleHealth(
+  champiqUrl: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const url = `${champiqUrl.replace(/\/$/, "")}/api/harbinger/health`;
+    const res = await fetch(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) {
+      return { ok: false, error: `Health check returned ${res.status}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
