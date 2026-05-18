@@ -15,9 +15,7 @@ import {
   makeEmailPatternDb,
   mxCheck,
   recomputeOrgPattern,
-  recordVerifiedEmail,
   splitName,
-  SOURCE_WEIGHT,
   type VerifiedEmail,
 } from "@/lib/services/email-pattern";
 
