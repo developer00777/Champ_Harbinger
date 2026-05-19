@@ -1,7 +1,6 @@
 import "server-only";
 import { generateText } from "ai";
-import { getModelSync } from "@/lib/ai/provider";
-import { Models } from "@/lib/ai/models";
+import { getClassificationModelSync } from "@/lib/ai/provider";
 import type { Company, Person } from "./schemas";
 
 export interface VerifiedCompany extends Company {
@@ -68,7 +67,7 @@ export async function verifyCompanies(
     }));
 
     const { text } = await generateText({
-      model: getModelSync(Models.classification),
+      model: getClassificationModelSync(),
       system:
         "You are verifying whether B2B companies match a set of criteria. " +
         "For each company, determine if it clearly satisfies ALL stated criteria. " +
@@ -115,7 +114,7 @@ export async function verifyPeople(
     }));
 
     const { text } = await generateText({
-      model: getModelSync(Models.classification),
+      model: getClassificationModelSync(),
       system:
         "You are verifying whether B2B contacts match a set of criteria. " +
         "For each person, determine if it clearly satisfies ALL stated criteria. " +

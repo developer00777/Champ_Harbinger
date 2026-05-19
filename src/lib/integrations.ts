@@ -122,6 +122,20 @@ export const INTEGRATIONS: Integration[] = [
     keyName: "anthropic_admin_key",
   },
   {
+    id: "ollama",
+    name: "Ollama",
+    category: "ai",
+    severity: "optional",
+    feature:
+      "Self-hosted local LLM for high-volume classification (criteria translation, signal verification)",
+    consequence:
+      "Classification falls back to the OpenRouter classification model (anthropic/claude-haiku-4.5). The app still works — you just pay per call instead of running a free local model.",
+    envVars: ["OLLAMA_BASE_URL"],
+    signupUrl: "https://ollama.com",
+    fixHint:
+      "Run `docker compose up -d ollama && docker compose exec ollama ollama pull llama3.1:8b`, then set OLLAMA_BASE_URL=http://localhost:11434 in .env.local",
+  },
+  {
     id: "browserbase",
     name: "Browserbase",
     category: "scraping",

@@ -71,5 +71,32 @@ services:
       retries: 3
       start_period: 30s
 
+  # Ollama — optional self-hosted LLM for classification (criteria translation,
+  # signal verification). When configured, ChampHarbinger routes classification
+  # workloads here instead of OpenRouter, dropping per-call cost to zero.
+  #
+  # Apple Silicon users: this container runs Ollama on CPU. For native Metal
+  # acceleration, install Ollama natively (`brew install ollama`), run
+  # `ollama serve`, and set OLLAMA_BASE_URL=http://host.docker.internal:11434
+  # in .env.local instead of starting this service.
+  #
+  # Pull a model after the container is up:
+  #   docker compose exec ollama ollama pull llama3.1:8b
+  ollama:
+    image: ollama/ollama:latest
+    container_name: harbinger-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   harbinger-pg-data:
+  ollama-data:
