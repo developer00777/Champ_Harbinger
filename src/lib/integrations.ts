@@ -222,6 +222,19 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",
   },
   {
+    id: "crawl4ai",
+    name: "Crawl4AI",
+    category: "scraping",
+    severity: "optional",
+    feature:
+      "Self-hosted bulk web crawling (Apache 2.0). Bandwidth-only alternative to Browserbase for 1M+ company scrapes.",
+    consequence:
+      "Bulk crawl tools (bulkCrawlDomains, crawlPageWithLLM) fall back to a 'service unreachable' message. Per-company scraping still works via Browserbase if configured.",
+    envVars: ["CRAWL4AI_BASE_URL"],
+    fixHint:
+      "Start the service with `docker compose up -d crawl4ai` and set CRAWL4AI_BASE_URL=http://localhost:8000",
+  },
+  {
     id: "champoracle",
     name: "ChampIQ (ChampOracle)",
     category: "data",

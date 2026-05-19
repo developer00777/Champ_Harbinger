@@ -18,7 +18,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: harbinger-postgres
     restart: unless-stopped
     environment:
@@ -65,6 +65,31 @@ services:
           "node",
           "-e",
           "require('http').get('http://localhost:3000/api/metrics', (r) => process.exit(r.statusCode === 200 ? 0 : 1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Self-hosted Crawl4AI microservice — bulk page extraction without paying
+  # per-session for Browserbase. Optional: app boots fine without it; the
+  # bulk-crawl chat tools surface a 'not configured' error instead.
+  crawl4ai:
+    build:
+      context: ./services/crawl4ai
+      dockerfile: Dockerfile
+    image: champ-harbinger-crawl4ai:latest
+    container_name: harbinger-crawl4ai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)",
         ]
       interval: 30s
       timeout: 5s
