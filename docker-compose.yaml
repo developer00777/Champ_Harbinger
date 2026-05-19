@@ -35,6 +35,33 @@ services:
       timeout: 3s
       retries: 10
 
+  searxng:
+    # Self-hosted meta-search aggregator. Provides Google/Bing/DDG/Brave/etc.
+    # results through a unified JSON API at http://localhost:8888/search?
+    # format=json. ChampHarbinger consumes this via the searxng-client.
+    image: searxng/searxng:latest
+    container_name: harbinger-searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./services/searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: "http://localhost:8888/"
+      INSTANCE_NAME: "ChampHarbinger"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   app:
     build:
       context: .

@@ -222,6 +222,19 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",
   },
   {
+    id: "searxng",
+    name: "SearXNG",
+    category: "enrichment",
+    severity: "optional",
+    feature: "Self-hosted web + news meta-search (Google/Bing/DDG/Brave/Qwant)",
+    consequence:
+      "The web/news search tools (`searchWeb`, `searchNews`) return 'not configured' and the chat agent loses its general-purpose research capability. Run `docker compose up -d searxng` and set SEARXNG_BASE_URL to enable.",
+    envVars: ["SEARXNG_BASE_URL"],
+    signupUrl: "https://github.com/searxng/searxng",
+    fixHint:
+      "Run `docker compose up -d searxng`, then set `SEARXNG_BASE_URL=http://localhost:8888` in .env.local",
+  },
+  {
     id: "champoracle",
     name: "ChampIQ (ChampOracle)",
     category: "data",

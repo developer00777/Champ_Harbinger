@@ -1,0 +1,123 @@
+# ============================================================================
+# SearXNG settings for ChampHarbinger
+# ============================================================================
+# Self-hosted meta-search aggregator. Provides web/news/image search across
+# Google, Bing, DuckDuckGo, Brave, Qwant, Startpage etc. via a unified JSON
+# API. ChampHarbinger consumes this via src/lib/services/searxng-client.ts.
+#
+# Docs: https://docs.searxng.org/admin/settings/index.html
+# ============================================================================
+
+use_default_settings: true
+
+general:
+  instance_name: "ChampHarbinger"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+brand:
+  new_issue_url: https://github.com/searxng/searxng/issues/new
+  docs_url: https://docs.searxng.org/
+  public_instances: https://searx.space
+  wiki_url: https://github.com/searxng/searxng/wiki
+  issue_url: https://github.com/searxng/searxng/issues
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  # Generated with: openssl rand -hex 16. Replace this in production.
+  secret_key: "changeme-in-production-1234567890"
+  base_url: "http://localhost:8888/"
+  bind_address: "0.0.0.0"
+  port: 8888
+  limiter: false
+  image_proxy: false
+  http_protocol_version: "1.0"
+  method: "GET"
+
+ui:
+  static_use_hash: true
+  default_locale: "en"
+  query_in_title: false
+  infinite_scroll: false
+  center_alignment: false
+  default_theme: simple
+  theme_args:
+    simple_style: auto
+
+# Categories surfaced through the JSON API. ChampHarbinger uses the
+# `general` category for webSearch, `news` for newsSearch, `images`
+# for imageSearch.
+categories_as_tabs:
+  general:
+  images:
+  news:
+
+# Enable a focused mix of engines for B2B research. Keep noisy / region-
+# locked engines off — we want broad, English-language coverage.
+engines:
+  - name: google
+    engine: google
+    shortcut: go
+    disabled: false
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
+
+  - name: qwant
+    engine: qwant
+    shortcut: qw
+    disabled: false
+
+  - name: startpage
+    engine: startpage
+    shortcut: sp
+    disabled: false
+
+  - name: google news
+    engine: google_news
+    shortcut: gon
+    categories: [news]
+    disabled: false
+
+  - name: bing news
+    engine: bing_news
+    shortcut: bin
+    categories: [news]
+    disabled: false
+
+  - name: duckduckgo news
+    engine: duckduckgo_extra
+    categories: [news, web]
+    duckduckgo_category: news
+    shortcut: ddgn
+    disabled: false
+
+# Disable outgoing checks that aren't useful for a local container.
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  useragent_suffix: "ChampHarbinger"
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
