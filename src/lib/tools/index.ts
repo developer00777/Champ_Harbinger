@@ -76,6 +76,10 @@ import {
   toggleEmailSkill,
 } from "./email-skill-tools";
 import { discoverWithLakeB2B, stageDiscoveryForChampIQ } from "./lakeb2b-tools";
+import {
+  extractArticle,
+  extractArticleBatch,
+} from "./content-extraction-tools";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 const rawTools = {
@@ -142,6 +146,8 @@ const rawTools = {
   toggleEmailSkill,
   discoverWithLakeB2B,
   stageDiscoveryForChampIQ,
+  extractArticle,
+  extractArticleBatch,
 };
 
 type ToolCtx = { userId?: string; campaignId?: string | null };

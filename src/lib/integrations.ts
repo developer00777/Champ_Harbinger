@@ -222,6 +222,19 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",
   },
   {
+    id: "trafilatura",
+    name: "Trafilatura",
+    category: "scraping",
+    severity: "optional",
+    feature:
+      "Article / blog / news HTML-to-text extraction (microservice, self-hosted)",
+    consequence:
+      "Article/blog extraction falls back to regex HTML stripping (much lower quality).",
+    envVars: ["TRAFILATURA_BASE_URL"],
+    fixHint:
+      "Start the service with `docker compose up -d trafilatura`, then set TRAFILATURA_BASE_URL=http://localhost:8001 in .env.local",
+  },
+  {
     id: "champoracle",
     name: "ChampIQ (ChampOracle)",
     category: "data",
