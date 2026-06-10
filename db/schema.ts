@@ -672,6 +672,13 @@ export const sentEmails = pgTable(
     subject: text("subject").notNull(),
     status: text("status").notNull().default("sent"),
     sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+    // Delivery-event timestamps, set by the inbound provider webhook
+    // (/api/email/track). Nullable — populated as events arrive.
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+    clickedAt: timestamp("clicked_at", { withTimezone: true }),
+    bouncedAt: timestamp("bounced_at", { withTimezone: true }),
+    repliedAt: timestamp("replied_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
