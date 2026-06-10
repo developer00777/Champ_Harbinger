@@ -71,5 +71,23 @@ services:
       retries: 3
       start_period: 30s
 
+  # Background worker: pg-boss schedules + job handlers. Shares the DB with the
+  # app and reaches it over the compose network for job-triggered routes.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: champ-harbinger-worker:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.local
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://harbinger:harbinger@postgres:5432/champ_harbinger
+      WORKER_TARGET_URL: http://app:3000
+
 volumes:
   harbinger-pg-data:

@@ -149,25 +149,6 @@ export const INTEGRATIONS: Integration[] = [
     keyName: "champmail_api_key",
   },
   {
-    id: "qstash",
-    name: "QStash",
-    category: "scheduling",
-    severity: "optional",
-    feature: "Scheduled signal runs, background jobs",
-    consequence:
-      "Signals run only when triggered manually from the UI — no scheduled cadence.",
-    envVars: [
-      "QSTASH_TOKEN",
-      "QSTASH_CURRENT_SIGNING_KEY",
-      "QSTASH_NEXT_SIGNING_KEY",
-    ],
-    signupUrl: "https://upstash.com",
-    keysUrl: "https://console.upstash.com/qstash",
-    fixHint:
-      "Add QSTASH_TOKEN + QSTASH_CURRENT_SIGNING_KEY + QSTASH_NEXT_SIGNING_KEY",
-    keyName: "qstash_token",
-  },
-  {
     id: "google_places",
     name: "Google Places",
     category: "enrichment",

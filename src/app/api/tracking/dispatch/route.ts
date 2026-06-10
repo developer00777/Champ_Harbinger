@@ -1,77 +1,17 @@
-import { adminDb } from "@/lib/db/admin";
-import { schema } from "@/db";
-import { eq, lte, and } from "drizzle-orm";
-import {
-  verifyQStashSignature,
-  getQStashClient,
-  getBaseUrl,
-} from "@/lib/services/qstash";
-import { SCHEDULE_INTERVALS } from "@/lib/types/tracking";
-import type { Schedule } from "@/lib/types/tracking";
+import { dispatchDueTrackingConfigs } from "@/lib/jobs/handlers/dispatch-tracking";
+import { verifyWorkerSecret } from "@/lib/jobs/internal-auth";
 
 export const maxDuration = 120;
 
+/**
+ * Manual / debug trigger for the tracking dispatcher. The scheduled dispatch is
+ * now driven in-process by the worker (pg-boss cron); this route remains for
+ * ad-hoc kicks and is guarded by the shared worker secret.
+ */
 export async function POST(request: Request) {
-  // Verify QStash signature
-  try {
-    await verifyQStashSignature(request);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Invalid signature";
-    return Response.json({ error: msg }, { status: 401 });
+  if (!verifyWorkerSecret(request)) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  // Find all active tracking configs that are due
-  const configs = await adminDb
-    .select({
-      id: schema.trackingConfigs.id,
-      schedule: schema.trackingConfigs.schedule,
-    })
-    .from(schema.trackingConfigs)
-    .where(
-      and(
-        eq(schema.trackingConfigs.status, "active"),
-        lte(schema.trackingConfigs.nextRunAt, new Date()),
-      ),
-    );
-
-  if (configs.length === 0) {
-    return Response.json({ dispatched: 0 });
-  }
-
-  const qstash = getQStashClient();
-  const baseUrl = getBaseUrl();
-  let dispatched = 0;
-
-  // Process in parallel batches to stay within 120s timeout
-  const BATCH_SIZE = 20;
-  for (let i = 0; i < configs.length; i += BATCH_SIZE) {
-    const batch = configs.slice(i, i + BATCH_SIZE);
-    const results = await Promise.allSettled(
-      batch.map(async (config) => {
-        await qstash.publishJSON({
-          url: `${baseUrl}/api/tracking/run`,
-          body: { trackingConfigId: config.id },
-          retries: 2,
-        });
-
-        // Advance next_run_at
-        const interval =
-          SCHEDULE_INTERVALS[config.schedule as Schedule] ??
-          SCHEDULE_INTERVALS.weekly;
-        const nextRun = new Date(Date.now() + interval);
-
-        await adminDb
-          .update(schema.trackingConfigs)
-          .set({ nextRunAt: nextRun })
-          .where(eq(schema.trackingConfigs.id, config.id));
-      }),
-    );
-
-    for (const result of results) {
-      if (result.status === "fulfilled") dispatched++;
-      else console.error("[tracking/dispatch] Failed:", result.reason);
-    }
-  }
-
-  return Response.json({ dispatched, total: configs.length });
+  const result = await dispatchDueTrackingConfigs();
+  return Response.json(result);
 }
