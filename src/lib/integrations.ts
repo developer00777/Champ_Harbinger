@@ -129,9 +129,9 @@ export const INTEGRATIONS: Integration[] = [
     feature: "Outbound email + delivery tracking",
     consequence:
       "Outreach sequences can be drafted but not sent. Delivery / reply tracking is disabled.",
-    envVars: ["CHAMPMAIL_API_KEY"],
+    envVars: ["CHAMPMAIL_BASE_URL", "CHAMPMAIL_API_KEY"],
     fixHint:
-      "Add `CHAMPMAIL_API_KEY=...` to .env.local (ChampMail integration coming soon)",
+      "Set CHAMPMAIL_BASE_URL + CHAMPMAIL_API_KEY in .env.local (self-hosted ChampMail)",
     keyName: "champmail_api_key",
   },
   {
