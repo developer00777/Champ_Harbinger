@@ -9,6 +9,8 @@ type Period = "24h" | "7d" | "30d" | "all";
 interface ServiceBreakdown {
   service: string;
   cost: number;
+  /** Portion of `cost` that is a local estimate rather than OpenRouter-real. */
+  estimatedCost: number;
   calls: number;
   tokens_input: number;
   tokens_output: number;
@@ -42,10 +44,9 @@ interface Pagination {
   totalPages: number;
 }
 
-interface RealSpend {
-  claude: number | null;
-  apify: number | null;
-  browserbase: number | null;
+interface OpenRouterCredits {
+  usage: number;
+  remaining: number;
 }
 
 interface CostData {
@@ -55,7 +56,7 @@ interface CostData {
   byOperation: OperationBreakdown[];
   recent: RecentEntry[];
   recentPagination: Pagination;
-  realSpend: RealSpend;
+  credits: OpenRouterCredits | null;
 }
 
 const PERIOD_LABELS: Record<Period, string> = {
@@ -65,20 +66,8 @@ const PERIOD_LABELS: Record<Period, string> = {
   all: "All time",
 };
 
-const REAL_SPEND_KEY: Record<string, keyof RealSpend> = {
-  claude: "claude",
-  apify: "apify",
-  browserbase: "browserbase",
-};
-
-const REAL_SPEND_FALLBACK_HINT: Record<keyof RealSpend, string> = {
-  claude:
-    "Real billed spend unavailable. Set ANTHROPIC_ADMIN_KEY in .env.local to enable.",
-  apify:
-    "Real billed spend unavailable. Set APIFY_API_TOKEN in .env.local to enable.",
-  browserbase:
-    "Real billed spend unavailable. Check BROWSERBASE_API_KEY and Browserbase API connectivity.",
-};
+const ESTIMATE_HINT =
+  "Includes locally-estimated cost (no OpenRouter usage accounting on these rows).";
 
 const SERVICE_LABELS: Record<string, string> = {
   claude: "Claude AI",
@@ -215,37 +204,44 @@ export function CostCenter() {
         </p>
       ) : (
         <div className="space-y-4">
-          {/* Total spend */}
+          {/* Total spend + OpenRouter credits. Stored cost is OpenRouter-real
+              for LLM rows (usage accounting), so the total is authoritative;
+              the badge only flags any locally-estimated remainder. */}
           {(() => {
-            // For each service that has a real value, substitute it for the
-            // estimated value in the aggregate total. Services without a real
-            // value (null — missing key or upstream error) keep their estimate.
-            let adjustedTotal = data.totalCost;
-            for (const s of data.byService) {
-              const realKey = REAL_SPEND_KEY[s.service];
-              if (!realKey) continue;
-              const realVal = data.realSpend?.[realKey];
-              if (realVal == null) continue;
-              adjustedTotal = adjustedTotal - s.cost + realVal;
-            }
-            const anyEstimate = data.byService.some((s) => {
-              const realKey = REAL_SPEND_KEY[s.service];
-              if (!realKey) return s.cost > 0;
-              return data.realSpend?.[realKey] == null;
-            });
+            const anyEstimate = data.byService.some((s) => s.estimatedCost > 0);
             return (
-              <div className="border-border rounded-lg border px-4 py-3">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-semibold tabular-nums">
-                    {formatCost(adjustedTotal)}
-                  </span>
-                  <span className="text-muted-foreground text-sm">
-                    total spend ({PERIOD_LABELS[period]})
-                  </span>
-                  {anyEstimate && (
-                    <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                      partly est
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="border-border rounded-lg border px-4 py-3">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-semibold tabular-nums">
+                      {formatCost(data.totalCost)}
                     </span>
+                    <span className="text-muted-foreground text-sm">
+                      total spend ({PERIOD_LABELS[period]})
+                    </span>
+                    {anyEstimate && (
+                      <span
+                        title={ESTIMATE_HINT}
+                        className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                      >
+                        partly est
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="border-border rounded-lg border px-4 py-3">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-semibold tabular-nums">
+                      {data.credits ? formatCost(data.credits.remaining) : "—"}
+                    </span>
+                    <span className="text-muted-foreground text-sm">
+                      OpenRouter credits left
+                    </span>
+                  </div>
+                  {data.credits && (
+                    <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">
+                      {formatCost(data.credits.usage)} used lifetime
+                    </p>
                   )}
                 </div>
               </div>
@@ -275,12 +271,8 @@ export function CostCenter() {
                 </thead>
                 <tbody>
                   {data.byService.map((s) => {
-                    const realKey = REAL_SPEND_KEY[s.service];
-                    const realValue = realKey
-                      ? data.realSpend?.[realKey]
-                      : null;
-                    const isReal = realValue != null;
-                    const displayCost = isReal ? realValue : s.cost;
+                    const isReal = s.estimatedCost === 0;
+                    const displayCost = s.cost;
                     return (
                       <tr
                         key={s.service}
@@ -303,11 +295,7 @@ export function CostCenter() {
                             {formatCost(displayCost)}
                             {!isReal && (
                               <span
-                                title={
-                                  realKey
-                                    ? REAL_SPEND_FALLBACK_HINT[realKey]
-                                    : "Estimated from local tracking -- no billing API integration for this provider."
-                                }
+                                title={ESTIMATE_HINT}
                                 className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400"
                               >
                                 est

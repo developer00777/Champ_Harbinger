@@ -1,25 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock fetchWithTimeout so we can control the behaviour of each underlying
-// provider call (Anthropic admin + Apify monthly usage).
+// Mock fetchWithTimeout so we can control the OpenRouter credits response.
 vi.mock("@/lib/fetch-with-timeout", () => ({
   fetchWithTimeout: vi.fn(),
 }));
 
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
-import { fetchRealSpend } from "@/lib/services/real-spend";
+import { fetchOpenRouterCredits } from "@/lib/services/real-spend";
 
 const mockFetch = fetchWithTimeout as unknown as ReturnType<typeof vi.fn>;
 
-const START = "2026-04-01T00:00:00.000Z";
-const END = "2026-04-19T00:00:00.000Z";
-
-describe("fetchRealSpend", () => {
+describe("fetchOpenRouterCredits", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    process.env.ANTHROPIC_ADMIN_KEY = "sk-ant-admin-test";
-    process.env.APIFY_API_TOKEN = "apify-test-token";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-test";
     mockFetch.mockReset();
   });
 
@@ -27,150 +22,33 @@ describe("fetchRealSpend", () => {
     process.env = { ...originalEnv };
   });
 
-  it("still returns the anthropic value when the apify fetcher rejects unexpectedly", async () => {
-    // Simulate an unexpected rejection from the apify fetcher by returning a
-    // malformed usageCycle.startAt that makes a downstream Date invalid. The
-    // next loop iteration calls cursor.toISOString() OUTSIDE the inner
-    // try/catch, which throws RangeError and causes fetchApifySpend to
-    // reject. Meanwhile anthropic succeeds and must still surface through
-    // fetchRealSpend.
-    mockFetch.mockImplementation((url: string) => {
-      if (typeof url === "string" && url.includes("anthropic.com")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({
-            data: [{ results: [{ amount: "500" }, { amount: "250" }] }],
-            has_more: false,
-          }),
-          text: async () => "",
-        });
-      }
-      // Apify: hand back a usageCycle whose startAt is invalid. The service
-      // code does `new Date(cycleStartIso)` then `cycleStart.getTime() - 1`
-      // which yields NaN, and on the next iteration cursor.toISOString()
-      // (outside the try/catch) throws RangeError.
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            usageCycle: {
-              startAt: "not-a-real-date",
-              endAt: "2026-04-30T00:00:00.000Z",
-            },
-            dailyServiceUsages: [],
-          },
-        }),
-        text: async () => "",
-      });
-    });
-
-    const result = await fetchRealSpend(START, END);
-
-    // 500 + 250 cents = $7.50. Anthropic must still surface even though
-    // apify rejected.
-    expect(result.claude).toBeCloseTo(7.5, 5);
-    expect(result.apify).toBeNull();
-  });
-
-  it("returns the apify value even if the anthropic fetcher rejects unexpectedly", async () => {
-    // The anthropic fetcher's try/catch covers fetchWithTimeout rejections,
-    // so this path exercises the normal "null on error" contract rather
-    // than a raw rejection. It's still a valuable regression check: when
-    // one provider errors cleanly and the other succeeds, the dashboard
-    // should see the surviving value.
-    mockFetch.mockImplementation((url: string) => {
-      if (typeof url === "string" && url.includes("anthropic.com")) {
-        return Promise.reject(new Error("boom: anthropic network down"));
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            usageCycle: {
-              startAt: "2026-04-01T00:00:00.000Z",
-              endAt: "2026-04-30T00:00:00.000Z",
-            },
-            dailyServiceUsages: [
-              { date: "2026-04-05", totalUsageCreditsUsd: 12.34 },
-              { date: "2026-04-10", totalUsageCreditsUsd: 7.66 },
-            ],
-          },
-        }),
-        text: async () => "",
-      });
-    });
-
-    const result = await fetchRealSpend(START, END);
-
-    expect(result.claude).toBeNull();
-    expect(result.apify).toBeCloseTo(20, 5);
-  });
-
-  it("returns null for browserbase when env var is unset", async () => {
-    delete process.env.BROWSERBASE_API_KEY;
+  it("returns usage + remaining from total_credits − total_usage", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      status: 200,
-      json: async () => ({ data: [] }),
-      text: async () => "",
+      json: async () => ({ data: { total_credits: 100, total_usage: 42.5 } }),
     });
 
-    const result = await fetchRealSpend(START, END);
-    expect(result.browserbase).toBeNull();
+    const result = await fetchOpenRouterCredits();
+    expect(result).toEqual({ usage: 42.5, remaining: 57.5 });
   });
 
-  it("sums browserbase session durations inside the window and ignores older sessions", async () => {
-    process.env.BROWSERBASE_API_KEY = "bb-test";
+  it("returns null when the API key is unset", async () => {
+    delete process.env.OPENROUTER_API_KEY;
+    expect(await fetchOpenRouterCredits()).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 
-    // Window is START..END (2026-04-01 .. 2026-04-19). Sessions below span
-    // one inside (1h), one outside (older), and one malformed entry to
-    // confirm the filter logic + early-exit ordering.
-    mockFetch.mockImplementation((url: string) => {
-      if (typeof url === "string" && url.includes("browserbase.com")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => [
-            // Inside window: 2026-04-10 10:00 -> 11:00 = 1h exactly
-            {
-              startedAt: "2026-04-10T10:00:00.000Z",
-              endedAt: "2026-04-10T11:00:00.000Z",
-            },
-            // Inside window: 2026-04-05 12:00 -> 12:30 = 0.5h
-            {
-              startedAt: "2026-04-05T12:00:00.000Z",
-              endedAt: "2026-04-05T12:30:00.000Z",
-            },
-            // Outside window (before start): must be skipped, and because
-            // we saw in-window sessions above, this triggers the early-exit.
-            {
-              startedAt: "2026-03-15T09:00:00.000Z",
-              endedAt: "2026-03-15T09:30:00.000Z",
-            },
-            // Would be inside window but unreachable due to early-exit; we
-            // assert this is NOT counted to verify the ordering contract.
-            {
-              startedAt: "2026-04-02T09:00:00.000Z",
-              endedAt: "2026-04-02T09:15:00.000Z",
-            },
-          ],
-          text: async () => "",
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: async () => ({ data: [], has_more: false }),
-        text: async () => "",
-      });
+  it("returns null on a non-ok response", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => "unauthorized",
     });
+    expect(await fetchOpenRouterCredits()).toBeNull();
+  });
 
-    const result = await fetchRealSpend(START, END);
-    // (1h + 0.5h) * $0.10/hr = $0.15. The post-exit 15-min session must
-    // NOT be summed because the newest-first bail-out kicked in.
-    expect(result.browserbase).toBeCloseTo(0.15, 5);
+  it("returns null when the request throws", async () => {
+    mockFetch.mockRejectedValue(new Error("network"));
+    expect(await fetchOpenRouterCredits()).toBeNull();
   });
 });

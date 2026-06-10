@@ -108,20 +108,6 @@ export const INTEGRATIONS: Integration[] = [
 
   // ─── OPTIONAL ────────────────────────────────────────────────────────────
   {
-    id: "anthropic_admin",
-    name: "Anthropic Admin",
-    category: "ai",
-    severity: "optional",
-    feature: "Cost tracking dashboard",
-    consequence:
-      "Cost reports fall back to local estimates instead of billed totals.",
-    envVars: ["ANTHROPIC_ADMIN_KEY"],
-    signupUrl: "https://console.anthropic.com",
-    keysUrl: "https://console.anthropic.com/settings/admin-keys",
-    fixHint: "Add `ANTHROPIC_ADMIN_KEY=sk-ant-admin...` to .env.local",
-    keyName: "anthropic_admin_key",
-  },
-  {
     id: "browserbase",
     name: "Browserbase",
     category: "scraping",

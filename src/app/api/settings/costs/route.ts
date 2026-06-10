@@ -1,4 +1,4 @@
-import { fetchRealSpend } from "@/lib/services/real-spend";
+import { fetchOpenRouterCredits } from "@/lib/services/real-spend";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
@@ -30,10 +30,6 @@ export async function GET(request: Request) {
     since = new Date(Date.now() - 30 * 86400000);
   }
 
-  const nowIso = new Date().toISOString();
-  const realSpendStart =
-    since?.toISOString() ?? new Date(Date.now() - 365 * 86400000).toISOString();
-
   // Build the base where condition
   const baseWhere = since
     ? and(
@@ -48,7 +44,7 @@ export async function GET(request: Request) {
     byOperationRows,
     dailyRows,
     recentResult,
-    realSpend,
+    credits,
   ] = await Promise.all([
     // Total cost
     adminDb
@@ -56,11 +52,13 @@ export async function GET(request: Request) {
       .from(schema.apiUsage)
       .where(baseWhere),
 
-    // By service
+    // By service (metadata.costSource tells us whether the cost is OpenRouter-real
+    // or a local estimate, so the UI can badge partially-estimated services)
     adminDb
       .select({
         service: schema.apiUsage.service,
         cost: schema.apiUsage.estimatedCostUsd,
+        metadata: schema.apiUsage.metadata,
       })
       .from(schema.apiUsage)
       .where(baseWhere),
@@ -100,7 +98,7 @@ export async function GET(request: Request) {
       adminDb.select({ total: count() }).from(schema.apiUsage).where(baseWhere),
     ]),
 
-    fetchRealSpend(realSpendStart, nowIso),
+    fetchOpenRouterCredits(),
   ]);
 
   const [recentRows, [{ total: recentTotal }]] = recentResult;
@@ -108,19 +106,35 @@ export async function GET(request: Request) {
   // Aggregate total cost
   const totalCost = totalRows.reduce((sum, r) => sum + Number(r.cost), 0);
 
-  // Aggregate by service
+  // Aggregate by service. `estimatedCost` is the portion of a service's spend
+  // that came from local token estimates rather than OpenRouter's real billed
+  // cost (metadata.costSource), so the UI can badge partially-estimated rows.
   const serviceMap = new Map<
     string,
-    { cost: number; calls: number; tokens_input: number; tokens_output: number }
+    {
+      cost: number;
+      estimatedCost: number;
+      calls: number;
+      tokens_input: number;
+      tokens_output: number;
+    }
   >();
   for (const row of byServiceRows) {
     const prev = serviceMap.get(row.service) ?? {
       cost: 0,
+      estimatedCost: 0,
       calls: 0,
       tokens_input: 0,
       tokens_output: 0,
     };
-    prev.cost += Number(row.cost);
+    const cost = Number(row.cost);
+    prev.cost += cost;
+    if (
+      (row.metadata as Record<string, unknown> | null)?.costSource !==
+      "openrouter"
+    ) {
+      prev.estimatedCost += cost;
+    }
     prev.calls++;
     serviceMap.set(row.service, prev);
   }
@@ -186,7 +200,7 @@ export async function GET(request: Request) {
     byService,
     byOperation,
     daily,
-    realSpend,
+    credits,
     recent: recentRows,
     recentPagination: {
       page,
