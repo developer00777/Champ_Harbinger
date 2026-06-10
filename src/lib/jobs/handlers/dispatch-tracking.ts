@@ -1,8 +1,7 @@
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { eq, lte, and } from "drizzle-orm";
-import { SCHEDULE_INTERVALS } from "@/lib/types/tracking";
-import type { Schedule } from "@/lib/types/tracking";
+import { getScheduleIntervalMs } from "@/lib/types/tracking";
 import { enqueueTrackingRun } from "@/lib/jobs/boss";
 
 /**
@@ -21,6 +20,7 @@ export async function dispatchDueTrackingConfigs(): Promise<{
     .select({
       id: schema.trackingConfigs.id,
       schedule: schema.trackingConfigs.schedule,
+      customIntervalMinutes: schema.trackingConfigs.customIntervalMinutes,
     })
     .from(schema.trackingConfigs)
     .where(
@@ -35,9 +35,10 @@ export async function dispatchDueTrackingConfigs(): Promise<{
   let dispatched = 0;
   for (const config of configs) {
     try {
-      const interval =
-        SCHEDULE_INTERVALS[config.schedule as Schedule] ??
-        SCHEDULE_INTERVALS.weekly;
+      const interval = getScheduleIntervalMs(
+        config.schedule,
+        config.customIntervalMinutes,
+      );
       await adminDb
         .update(schema.trackingConfigs)
         .set({ nextRunAt: new Date(Date.now() + interval) })

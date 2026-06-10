@@ -2,8 +2,18 @@ import { tool } from "ai";
 import { z } from "zod";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { getScopedDb, schema } from "@/lib/db/scoped";
-import { SCHEDULE_INTERVALS } from "@/lib/types/tracking";
-import type { Schedule } from "@/lib/types/tracking";
+import { getScheduleIntervalMs } from "@/lib/types/tracking";
+
+const SCHEDULE_ENUM = [
+  "every_15_min",
+  "hourly",
+  "every_6_hours",
+  "daily",
+  "weekly",
+  "biweekly",
+  "monthly",
+  "custom",
+] as const;
 import { enqueueTrackingRun } from "@/lib/jobs/boss";
 
 /**
@@ -35,9 +45,19 @@ export const createTracking = tool({
       .describe("Person ID to track (provide this OR organizationId)"),
     signalId: z.string().uuid().describe("Signal ID to run on schedule"),
     schedule: z
-      .enum(["daily", "weekly", "biweekly", "monthly"])
-      .default("weekly")
-      .describe("How often to re-run the signal"),
+      .enum(SCHEDULE_ENUM)
+      .default("daily")
+      .describe(
+        "How often to re-run the signal. Use 'custom' with customIntervalMinutes for an arbitrary cadence.",
+      ),
+    customIntervalMinutes: z
+      .number()
+      .int()
+      .min(5)
+      .optional()
+      .describe(
+        "Interval in minutes when schedule='custom' (minimum 5). Ignored otherwise.",
+      ),
     intent: z
       .string()
       .describe(
@@ -50,9 +70,10 @@ export const createTracking = tool({
     }
 
     const sdb = await getScopedDb();
-    const interval =
-      SCHEDULE_INTERVALS[input.schedule as Schedule] ??
-      SCHEDULE_INTERVALS.weekly;
+    const interval = getScheduleIntervalMs(
+      input.schedule,
+      input.customIntervalMinutes,
+    );
 
     const [config] = await sdb.raw
       .insert(schema.trackingConfigs)
@@ -62,6 +83,7 @@ export const createTracking = tool({
         personId: input.personId ?? null,
         signalId: input.signalId,
         schedule: input.schedule,
+        customIntervalMinutes: input.customIntervalMinutes ?? null,
         intent: input.intent,
         status: "active",
         nextRunAt: new Date(Date.now() + interval),
@@ -113,8 +135,17 @@ export const bulkCreateTracking = tool({
     campaignId: z.string().uuid().describe("Campaign ID"),
     signalId: z.string().uuid().describe("Signal ID to track"),
     schedule: z
-      .enum(["daily", "weekly", "biweekly", "monthly"])
-      .default("weekly"),
+      .enum(SCHEDULE_ENUM)
+      .default("daily")
+      .describe(
+        "How often to re-run. Use 'custom' with customIntervalMinutes for an arbitrary cadence.",
+      ),
+    customIntervalMinutes: z
+      .number()
+      .int()
+      .min(5)
+      .optional()
+      .describe("Interval in minutes when schedule='custom' (minimum 5)."),
     intent: z
       .string()
       .describe(
@@ -166,9 +197,10 @@ export const bulkCreateTracking = tool({
 
     const existingOrgIds = new Set(existing.map((e) => e.organizationId));
 
-    const interval =
-      SCHEDULE_INTERVALS[input.schedule as Schedule] ??
-      SCHEDULE_INTERVALS.weekly;
+    const interval = getScheduleIntervalMs(
+      input.schedule,
+      input.customIntervalMinutes,
+    );
     const nextRun = new Date(Date.now() + interval);
 
     const toCreate = orgs
@@ -176,6 +208,7 @@ export const bulkCreateTracking = tool({
       .map((o) => ({
         campaignId: input.campaignId,
         organizationId: o.organizationId,
+        customIntervalMinutes: input.customIntervalMinutes ?? null,
         personId: null,
         signalId: input.signalId,
         schedule: input.schedule,
@@ -338,10 +371,13 @@ export const updateTracking = tool({
     "Update a tracking config: change schedule, rewrite the intent, or pause/resume tracking.",
   inputSchema: z.object({
     trackingConfigId: z.string().uuid().describe("Tracking config ID"),
-    schedule: z
-      .enum(["daily", "weekly", "biweekly", "monthly"])
+    schedule: z.enum(SCHEDULE_ENUM).optional().describe("New schedule"),
+    customIntervalMinutes: z
+      .number()
+      .int()
+      .min(5)
       .optional()
-      .describe("New schedule"),
+      .describe("Interval in minutes when schedule='custom' (minimum 5)."),
     intent: z.string().optional().describe("New plain-English intent"),
     status: z
       .enum(["active", "paused", "completed"])
@@ -354,10 +390,11 @@ export const updateTracking = tool({
     const updates: Partial<typeof schema.trackingConfigs.$inferInsert> = {};
     if (input.schedule) {
       updates.schedule = input.schedule;
-      const interval =
-        SCHEDULE_INTERVALS[input.schedule as Schedule] ??
-        SCHEDULE_INTERVALS.weekly;
-      updates.nextRunAt = new Date(Date.now() + interval);
+      updates.customIntervalMinutes = input.customIntervalMinutes ?? null;
+      updates.nextRunAt = new Date(
+        Date.now() +
+          getScheduleIntervalMs(input.schedule, input.customIntervalMinutes),
+      );
     }
     if (input.intent !== undefined) updates.intent = input.intent;
     if (input.status) updates.status = input.status;

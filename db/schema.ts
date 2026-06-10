@@ -491,6 +491,8 @@ export const trackingConfigs = pgTable(
       .notNull()
       .references(() => signals.id, { onDelete: "cascade" }),
     schedule: text("schedule").notNull().default("weekly"),
+    // Interval in minutes when schedule = "custom" (else null).
+    customIntervalMinutes: integer("custom_interval_minutes"),
     intent: text("intent").notNull().default(""),
     status: text("status").notNull().default("active"),
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),

@@ -1,0 +1,1 @@
+ALTER TABLE "tracking_configs" ADD COLUMN "custom_interval_minutes" integer;

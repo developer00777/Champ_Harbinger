@@ -5,7 +5,12 @@ import { ChevronDown, ChevronRight, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { ReadinessBadge } from "./readiness-badge";
 import { TrackingTimeline } from "./tracking-timeline";
-import type { TrackingChange, ReadinessTag } from "@/lib/types/tracking";
+import type {
+  TrackingChange,
+  ReadinessTag,
+  Schedule,
+} from "@/lib/types/tracking";
+import { SCHEDULE_LABELS } from "@/lib/types/tracking";
 
 export type ViewMode = "by-signal" | "by-company";
 
@@ -102,8 +107,8 @@ function ExpandableSignalRow({ row }: { row: TrackingRow }) {
           {row.organizationName}
         </td>
         <td className="px-3 py-2.5 text-sm">{row.signalName}</td>
-        <td className="text-muted-foreground px-3 py-2.5 text-sm capitalize">
-          {row.schedule}
+        <td className="text-muted-foreground px-3 py-2.5 text-sm">
+          {SCHEDULE_LABELS[row.schedule as Schedule] ?? row.schedule}
           {localStatus === "paused" ? " (paused)" : ""}
         </td>
         <td className="text-muted-foreground px-3 py-2.5 text-sm">
