@@ -108,18 +108,43 @@ export const INTEGRATIONS: Integration[] = [
 
   // ─── OPTIONAL ────────────────────────────────────────────────────────────
   {
-    id: "browserbase",
-    name: "Browserbase",
+    id: "obscura",
+    name: "Obscura",
     category: "scraping",
     severity: "optional",
-    feature: "Web scraping, YC scraper, hiring signals",
+    feature:
+      "Self-hosted headless browser (JS rendering, YC + hiring scrapers)",
     consequence:
-      "Any signal that needs browser automation will fail with 'not configured'.",
-    envVars: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
-    signupUrl: "https://www.browserbase.com",
-    keysUrl: "https://www.browserbase.com/settings",
-    fixHint: "Add BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID to .env.local",
-    keyName: "browserbase_api_key",
+      "JS-rendered extraction and browser-based scrapers fall back to static fetch only.",
+    envVars: ["OBSCURA_SERVE_URL"],
+    signupUrl: "https://github.com/h4ckf0r0day/obscura",
+    fixHint:
+      "Run the obscura service (docker compose) and set OBSCURA_SERVE_URL=http://obscura:9222",
+  },
+  {
+    id: "trafilatura",
+    name: "Trafilatura",
+    category: "scraping",
+    severity: "optional",
+    feature: "Self-hosted article extraction (static tier)",
+    consequence:
+      "Web extraction skips the clean-article tier and relies on direct fetch + Obscura only.",
+    envVars: ["TRAFILATURA_BASE_URL"],
+    fixHint:
+      "Run the trafilatura service (docker compose) and set TRAFILATURA_BASE_URL=http://trafilatura:8001",
+  },
+  {
+    id: "searxng",
+    name: "SearXNG",
+    category: "enrichment",
+    severity: "optional",
+    feature: "Self-hosted metasearch for public-web prospect discovery",
+    consequence:
+      "Public-web discovery returns no candidates; discovery relies on LakeB2B (when configured).",
+    envVars: ["SEARXNG_URL"],
+    signupUrl: "https://github.com/searxng/searxng",
+    fixHint:
+      "Run the searxng service (docker compose) and set SEARXNG_URL=http://searxng:8080",
   },
   {
     id: "champmail",
@@ -147,19 +172,6 @@ export const INTEGRATIONS: Integration[] = [
     keysUrl: "https://console.cloud.google.com/apis/credentials",
     fixHint: "Add `GOOGLE_API_KEY=...` to .env.local",
     keyName: "google_api_key",
-  },
-  {
-    id: "apify",
-    name: "Apify",
-    category: "enrichment",
-    severity: "optional",
-    feature: "LinkedIn + X profile enrichment",
-    consequence: "Contact enrichment skips LinkedIn / X data.",
-    envVars: ["APIFY_API_TOKEN"],
-    signupUrl: "https://apify.com",
-    keysUrl: "https://console.apify.com/account/integrations",
-    fixHint: "Add `APIFY_API_TOKEN=apify_api_...` to .env.local",
-    keyName: "apify_api_token",
   },
   {
     id: "github",

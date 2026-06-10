@@ -3,14 +3,16 @@ import { Models } from "@/lib/ai/models";
 import { generateObject, jsonSchema } from "ai";
 import { eq, desc, gte, and } from "drizzle-orm";
 import { getScopedDb, schema } from "@/lib/db/scoped";
-import { withTimeout } from "@/lib/utils/timeout";
+import { recordAiUsage } from "@/lib/ai/usage";
+import {
+  withObscuraPage,
+  isObscuraConfigured,
+} from "@/lib/services/browser-pool";
 import { structuralDiff } from "./diff";
-import { jsonSchemaToZod } from "./json-schema-to-zod";
 import { resolveArgs, resolvePath, renderTemplate } from "./paths";
 import { getRecipeTool } from "./tool-registry";
 import type { Db } from "@/db";
 
-const STAGEHAND_INIT_TIMEOUT_MS = 60_000;
 import type {
   RecipeContext,
   RecipeStep,
@@ -87,62 +89,49 @@ async function executeStep(
     }
     case "stagehand": {
       const url = resolveArgs({ url: step.url }, scope).url as string;
-      const apiKey = process.env.BROWSERBASE_API_KEY;
-      const projectId = process.env.BROWSERBASE_PROJECT_ID;
-      const anthropicKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey || !projectId || !anthropicKey) {
-        const missing = [
-          !apiKey && "BROWSERBASE_API_KEY",
-          !projectId && "BROWSERBASE_PROJECT_ID",
-          !anthropicKey && "ANTHROPIC_API_KEY",
-        ]
-          .filter(Boolean)
-          .join(", ");
-        throw new Error(`Stagehand step missing required env vars: ${missing}`);
+      // "stagehand" is a legacy step name; it now runs on the self-hosted
+      // Obscura browser + an OpenRouter LLM for extraction (no Browserbase).
+      if (!isObscuraConfigured()) {
+        return { url, extracted: null };
       }
-      const { Stagehand } = await import("@browserbasehq/stagehand");
-      const stagehand = new Stagehand({
-        env: "BROWSERBASE",
-        apiKey,
-        projectId,
-        model: {
-          modelName: step.model ?? "anthropic/claude-sonnet-4-6",
-          apiKey: anthropicKey,
-        },
-        disablePino: true,
-      });
-      try {
-        await withTimeout(
-          stagehand.init(),
-          STAGEHAND_INIT_TIMEOUT_MS,
-          "stagehand.init (signals-runner)",
-        );
-        const page = stagehand.context.pages()[0];
+      return withObscuraPage(async (page) => {
         await page.goto(url, {
           waitUntil: "domcontentloaded",
-          timeoutMs: 30000,
+          timeout: 30000,
         });
         for (const action of step.actions ?? []) {
           if (action.op === "act") {
+            // Best-effort: if the rendered instruction is a usable CSS
+            // selector, click it; otherwise skip the LLM-driven act.
             const instruction = renderTemplate(action.instruction, scope);
-            await stagehand.act(instruction);
+            const selector = instruction.trim();
+            if (isLikelySelector(selector)) {
+              try {
+                await page.click(selector, { timeout: 5000 });
+              } catch {
+                // selector not present -- skip gracefully
+              }
+            }
           } else if (action.op === "waitMs") {
             await page.waitForTimeout(action.ms);
           }
         }
-        const zodSchema = jsonSchemaToZod(step.extract.schema);
-        const extracted = await stagehand.extract(
-          renderTemplate(step.extract.instruction, scope),
-          zodSchema,
-        );
-        return { url: page.url(), extracted };
-      } finally {
-        try {
-          await stagehand.close();
-        } catch {
-          // ignore
-        }
-      }
+        const html = await page.content();
+        const startedAt = Date.now();
+        const result = await generateObject({
+          model: getModel(step.model ?? Models.classification),
+          schema: jsonSchema(step.extract.schema),
+          prompt: `${renderTemplate(step.extract.instruction, scope)}\n\n---\n\n${html.slice(0, 30_000)}`,
+        });
+        recordAiUsage(result, {
+          operation: "signal-stagehand-extract",
+          costModel: "haiku",
+          modelLabel: step.model ?? Models.classification,
+          startedAt,
+          metadata: { signalId: env.signalId, url: page.url() },
+        });
+        return { url: page.url(), extracted: result.object };
+      });
     }
     case "history": {
       if (!isUuid(env.signalId) || !isUuid(env.organizationId)) {
@@ -194,6 +183,19 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value: string): boolean {
   return UUID_RE.test(value);
+}
+
+/**
+ * Heuristic: treat the act instruction as a CSS selector only when it looks
+ * like one (no whitespace-y prose) so we can click it directly. Otherwise the
+ * act is a natural-language instruction we can't honor without an LLM agent and
+ * is skipped gracefully.
+ */
+function isLikelySelector(value: string): boolean {
+  if (!value || value.length > 200 || /\s{2,}/.test(value)) return false;
+  // Reject sentence-like instructions (multiple words separated by spaces).
+  if (value.split(/\s+/).length > 1 && !value.startsWith("#")) return false;
+  return /^[#.\[]|^[a-z][a-z0-9-]*[#.\[:>~+]|^[a-z][a-z0-9-]*$/i.test(value);
 }
 
 function buildOutput(

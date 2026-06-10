@@ -58,6 +58,10 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://harbinger:harbinger@postgres:5432/champ_harbinger
+      # Self-hosted scraping + discovery (free).
+      OBSCURA_SERVE_URL: http://obscura:9222
+      TRAFILATURA_BASE_URL: http://trafilatura:8001
+      SEARXNG_URL: http://searxng:8080
     healthcheck:
       test:
         [
@@ -88,6 +92,54 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://harbinger:harbinger@postgres:5432/champ_harbinger
       WORKER_TARGET_URL: http://app:3000
+      OBSCURA_SERVE_URL: http://obscura:9222
+      TRAFILATURA_BASE_URL: http://trafilatura:8001
+      SEARXNG_URL: http://searxng:8080
+
+  # Obscura — self-hosted Rust headless browser (CDP) replacing Browserbase.
+  # JS-rendering tier for web extraction + the YC/hiring scrapers.
+  obscura:
+    image: ghcr.io/h4ckf0r0day/obscura:latest
+    container_name: harbinger-obscura
+    restart: unless-stopped
+    command: ["serve", "--host", "0.0.0.0", "--port", "9222"]
+    ports:
+      - "9222:9222"
+
+  # Trafilatura — self-hosted article extraction microservice (static tier).
+  trafilatura:
+    build:
+      context: ./services/trafilatura
+      dockerfile: Dockerfile
+    image: champ-harbinger-trafilatura:latest
+    container_name: harbinger-trafilatura
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health', timeout=3).status==200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # SearXNG — self-hosted metasearch backend for public-web discovery (WS3).
+  # Needs services/searxng/settings.yml enabling the JSON output format.
+  searxng:
+    image: searxng/searxng:latest
+    container_name: harbinger-searxng
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8088/
+    volumes:
+      - ./services/searxng:/etc/searxng:rw
 
   # Self-hosted metrics store. Scrapes the app's /api/metrics and serves as a
   # Grafana data source. See prometheus/prometheus.yml.

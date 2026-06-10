@@ -1,7 +1,7 @@
-import { chromium } from "playwright-core";
-import Browserbase from "@browserbasehq/sdk";
-import { trackUsage, PRICING } from "@/lib/services/cost-tracker";
-import { withTimeout } from "@/lib/utils/timeout";
+import {
+  connectObscura,
+  isObscuraConfigured,
+} from "@/lib/services/browser-pool";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -76,20 +76,12 @@ export function buildYCDirectoryUrl(filters: YCFilters): string {
 async function scrapeDirectoryListing(filters: YCFilters): Promise<{
   cards: YCCompanyRaw[];
   directoryUrl: string;
-  sessionDurationSec: number;
 }> {
-  const { bb, projectId } = getBrowserbase();
-  const session = await withTimeout(
-    bb.sessions.create({ projectId }),
-    60_000,
-    "bb.sessions.create (yc-scraper-listing)",
-  );
-  const sessionStart = Date.now();
-  const browser = await chromium.connectOverCDP(session.connectUrl);
+  const browser = await connectObscura();
 
   try {
-    const context = browser.contexts()[0];
-    const page = context.pages()[0];
+    const context = browser.contexts()[0] ?? (await browser.newContext());
+    const page = context.pages()[0] ?? (await context.newPage());
     const directoryUrl = buildYCDirectoryUrl(filters);
 
     await page.goto(directoryUrl, {
@@ -219,8 +211,7 @@ async function scrapeDirectoryListing(filters: YCFilters): Promise<{
       return results;
     });
 
-    const sessionDurationSec = (Date.now() - sessionStart) / 1000;
-    return { cards, directoryUrl, sessionDurationSec };
+    return { cards, directoryUrl };
   } finally {
     await browser.close();
   }
@@ -235,21 +226,14 @@ async function scrapeDirectoryListing(filters: YCFilters): Promise<{
 async function scrapeCompanyDetails(
   cards: YCCompanyRaw[],
   maxDetails: number = 50,
-): Promise<{ details: YCCompanyDetail[]; sessionDurationSec: number }> {
-  const { bb, projectId } = getBrowserbase();
-  const session = await withTimeout(
-    bb.sessions.create({ projectId }),
-    60_000,
-    "bb.sessions.create (yc-scraper-details)",
-  );
-  const sessionStart = Date.now();
-  const browser = await chromium.connectOverCDP(session.connectUrl);
+): Promise<{ details: YCCompanyDetail[] }> {
+  const browser = await connectObscura();
 
   const details: YCCompanyDetail[] = [];
 
   try {
-    const context = browser.contexts()[0];
-    const page = context.pages()[0];
+    const context = browser.contexts()[0] ?? (await browser.newContext());
+    const page = context.pages()[0] ?? (await context.newPage());
     const toVisit = cards.slice(0, maxDetails);
 
     for (const card of toVisit) {
@@ -405,8 +389,7 @@ async function scrapeCompanyDetails(
       }
     }
 
-    const sessionDurationSec = (Date.now() - sessionStart) / 1000;
-    return { details, sessionDurationSec };
+    return { details };
   } finally {
     await browser.close();
   }
@@ -420,22 +403,22 @@ async function scrapeCompanyDetails(
  * Phase 1: Directory listing -- scroll to load all cards, extract from DOM.
  * Phase 2: Detail pages -- visit each company's YC profile for website, founders, etc.
  *
- * Uses two Browserbase sessions (one per phase).
+ * Uses two Obscura connections (one per phase).
  */
 export async function scrapeYCCompanies(
   filters: YCFilters,
   maxCompanies: number = 50,
 ): Promise<YCScrapeResult> {
+  if (!isObscuraConfigured()) {
+    return {
+      companies: [],
+      totalCards: 0,
+      directoryUrl: buildYCDirectoryUrl(filters),
+    };
+  }
+
   // Phase 1: Directory listing
   const listing = await scrapeDirectoryListing(filters);
-
-  trackUsage({
-    service: "browserbase",
-    operation: "yc_directory_listing",
-    estimated_cost_usd:
-      (listing.sessionDurationSec / 3600) * PRICING.browserbase_session_per_hr,
-    metadata: { url: listing.directoryUrl, cards: listing.cards.length },
-  });
 
   const cardsToDetail = listing.cards.slice(0, maxCompanies);
 
@@ -450,33 +433,9 @@ export async function scrapeYCCompanies(
   // Phase 2: Company detail pages
   const detailResult = await scrapeCompanyDetails(cardsToDetail, maxCompanies);
 
-  trackUsage({
-    service: "browserbase",
-    operation: "yc_company_details",
-    estimated_cost_usd:
-      (detailResult.sessionDurationSec / 3600) *
-      PRICING.browserbase_session_per_hr,
-    metadata: { companiesVisited: detailResult.details.length },
-  });
-
   return {
     companies: detailResult.details,
     totalCards: listing.cards.length,
     directoryUrl: listing.directoryUrl,
   };
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────
-
-function getBrowserbase() {
-  const apiKey = process.env.BROWSERBASE_API_KEY;
-  const projectId = process.env.BROWSERBASE_PROJECT_ID;
-
-  if (!apiKey || !projectId) {
-    throw new Error(
-      "BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID are required for YC scraping.",
-    );
-  }
-
-  return { bb: new Browserbase({ apiKey }), projectId };
 }

@@ -1,0 +1,17 @@
+# SearXNG settings for ChampHarbinger public-web discovery.
+# The JSON output format is REQUIRED (SearXNG disables it by default) so the
+# app's searxng-client can request format=json.
+use_default_settings: true
+
+server:
+  # Override in production via the SEARXNG_SECRET env var / secret manager.
+  secret_key: "champharbinger-change-me"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json
+  safe_search: 0
+  autocomplete: ""

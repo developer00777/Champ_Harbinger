@@ -1,13 +1,14 @@
 import * as cheerio from "cheerio";
-import { chromium } from "playwright-core";
-import Browserbase from "@browserbasehq/sdk";
-import { PRICING, trackUsage } from "@/lib/services/cost-tracker";
-import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+import {
+  withObscuraPage,
+  isObscuraConfigured,
+} from "@/lib/services/browser-pool";
+import { extractFromUrl } from "@/lib/services/trafilatura-client";
 
 export interface WebExtractionResult {
   success: boolean;
   url: string;
-  source: "fetch" | "browserbase-fetch" | "browserbase-browser";
+  source: "fetch" | "trafilatura" | "obscura";
   data: {
     title: string;
     description: string;
@@ -39,7 +40,6 @@ export class WebExtractionService {
       includeMetadata = true,
       includeLinks = false,
       timeout = 15000,
-      onLiveView,
     } = options;
 
     const startTime = Date.now();
@@ -110,96 +110,54 @@ export class WebExtractionService {
         fetchError instanceof Error ? fetchError.message : "Unknown error";
       console.log(`[WebExtract] Fetch failed: ${fetchMsg}`);
 
-      const bbApiKey = process.env.BROWSERBASE_API_KEY;
-      const bbProjectId = process.env.BROWSERBASE_PROJECT_ID;
-
-      if (!bbApiKey || !bbProjectId) {
-        return {
-          success: false,
-          url,
-          source: "fetch",
-          data: { title: "", description: "", content: "" },
-          extractionTime: Date.now() - startTime,
-          error: fetchMsg,
-        };
-      }
-
-      // 2. Try Browserbase Fetch with proxies (no JS rendering, but bypasses blocks)
+      // 2. Trafilatura microservice — clean article extraction (static, free,
+      //    self-hosted). It fetches the URL itself, so it bypasses some thin/JS
+      //    pages without a browser. No-ops gracefully when not configured.
       try {
-        console.log(`[WebExtract] Trying Browserbase Fetch: ${url}`);
-        const bbFetchResult = await this.extractViaBrowserbaseFetch(
-          url,
-          bbApiKey,
-          { includeMetadata, includeLinks },
-        );
-
-        if (bbFetchResult.content.length > 100) {
-          trackUsage({
-            service: "browserbase",
-            operation: "fetch",
-            estimated_cost_usd: PRICING.browserbase_fetch,
-            metadata: { url },
-          });
+        const tf = await extractFromUrl(url, { format: "text" });
+        if (tf.success && (tf.text?.length ?? 0) > 100) {
+          console.log(`[WebExtract] Trafilatura succeeded: ${url}`);
           return {
             success: true,
             url,
-            source: "browserbase-fetch",
-            data: bbFetchResult,
+            source: "trafilatura",
+            data: {
+              title: tf.title ?? "",
+              description:
+                (tf.metadata?.description as string | undefined) ?? "",
+              content: tf.text ?? "",
+            },
             extractionTime: Date.now() - startTime,
           };
         }
-
+      } catch (tfError) {
         console.log(
-          `[WebExtract] Browserbase Fetch also thin (${bbFetchResult.content.length} chars), trying browser session`,
+          `[WebExtract] Trafilatura failed: ${
+            tfError instanceof Error ? tfError.message : "unknown"
+          }`,
         );
-      } catch (bbFetchError) {
-        const bbFetchMsg =
-          bbFetchError instanceof Error
-            ? bbFetchError.message
-            : "Unknown error";
-        console.log(`[WebExtract] Browserbase Fetch failed: ${bbFetchMsg}`);
-
-        // If rate-limited, don't cascade to an expensive browser session
-        if (bbFetchMsg.includes("429")) {
-          return {
-            success: false,
-            url,
-            source: "browserbase-fetch" as const,
-            data: { title: "", description: "", content: "" },
-            extractionTime: Date.now() - startTime,
-            error: bbFetchMsg,
-          };
-        }
       }
 
-      // 3. Try Browserbase browser session (full JS rendering via Playwright)
-      if (bbProjectId) {
+      // 3. Obscura — self-hosted headless browser over CDP for full JS rendering.
+      if (isObscuraConfigured()) {
         try {
-          console.log(
-            `[WebExtract] Trying Browserbase browser session: ${url}`,
-          );
-          const { parsed, durationSec, sessionId } =
-            await this.extractViaBrowserbaseSession(url, bbApiKey, {
-              includeMetadata,
-              includeLinks,
-              onLiveView,
+          console.log(`[WebExtract] Trying Obscura: ${url}`);
+          const html = await withObscuraPage(async (page) => {
+            await page.goto(url, {
+              waitUntil: "domcontentloaded",
+              timeout,
             });
-
-          // Browserbase bills $0.10/hr for browser sessions
-          const sessionCost =
-            (durationSec / 3600) * PRICING.browserbase_session_per_hr;
-
-          trackUsage({
-            service: "browserbase",
-            operation: "browser-session",
-            estimated_cost_usd: sessionCost,
-            metadata: { url, sessionId, durationSec: Math.round(durationSec) },
+            await page.waitForTimeout(2000);
+            return page.content();
           });
-
+          const parsed = this.parseHtml(html, url, {
+            includeMetadata,
+            includeLinks,
+          });
           return {
             success: true,
             url,
-            source: "browserbase-browser",
+            source: "obscura",
             data: parsed,
             extractionTime: Date.now() - startTime,
           };
@@ -208,17 +166,14 @@ export class WebExtractionService {
             browserError instanceof Error
               ? browserError.message
               : "Unknown error";
-          console.error(
-            `[WebExtract] Browserbase browser session failed: ${browserMsg}`,
-          );
-
+          console.error(`[WebExtract] Obscura failed: ${browserMsg}`);
           return {
             success: false,
             url,
-            source: "browserbase-browser",
+            source: "obscura",
             data: { title: "", description: "", content: "" },
             extractionTime: Date.now() - startTime,
-            error: `All methods failed. Fetch: ${fetchMsg}. Browser: ${browserMsg}`,
+            error: `All methods failed. Fetch: ${fetchMsg}. Obscura: ${browserMsg}`,
           };
         }
       }
@@ -450,86 +405,5 @@ export class WebExtractionService {
       phones: dedupedPhones.slice(0, 5),
       address,
     };
-  }
-
-  /**
-   * Browserbase Fetch API -- raw HTTP with proxies, no JS rendering.
-   */
-  private async extractViaBrowserbaseFetch(
-    url: string,
-    apiKey: string,
-    options: { includeMetadata?: boolean; includeLinks?: boolean },
-  ) {
-    const response = await fetchWithTimeout(
-      "https://api.browserbase.com/v1/fetch",
-      {
-        method: "POST",
-        headers: {
-          "X-BB-API-Key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url, proxies: true }),
-      },
-      60_000,
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Browserbase Fetch HTTP ${response.status}: ${response.statusText}`,
-      );
-    }
-
-    const result = await response.json();
-    return this.parseHtml(result.content || "", url, options);
-  }
-
-  /**
-   * Full Browserbase browser session via Playwright CDP -- renders JavaScript.
-   * Returns parsed HTML and session duration in seconds for cost tracking.
-   */
-  private async extractViaBrowserbaseSession(
-    url: string,
-    apiKey: string,
-    options: {
-      includeMetadata?: boolean;
-      includeLinks?: boolean;
-      onLiveView?: (liveViewUrl: string) => void;
-    },
-  ) {
-    const bb = new Browserbase({ apiKey });
-    const session = await bb.sessions.create({
-      projectId: process.env.BROWSERBASE_PROJECT_ID!,
-    });
-
-    console.log(`[WebExtract] Browser session created: ${session.id}`);
-
-    if (options.onLiveView) {
-      bb.sessions
-        .debug(session.id)
-        .then((live) => options.onLiveView?.(live.debuggerFullscreenUrl))
-        .catch((err) =>
-          console.warn(`[WebExtract] debug URL fetch failed: ${err}`),
-        );
-    }
-
-    const sessionStart = Date.now();
-    const browser = await chromium.connectOverCDP(session.connectUrl);
-
-    try {
-      const context = browser.contexts()[0];
-      const page = context.pages()[0];
-
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-
-      // Wait a bit for JS to render content
-      await page.waitForTimeout(2000);
-
-      const html = await page.content();
-      const parsed = this.parseHtml(html, url, options);
-      const durationSec = (Date.now() - sessionStart) / 1000;
-      return { parsed, durationSec, sessionId: session.id };
-    } finally {
-      await browser.close();
-    }
   }
 }
