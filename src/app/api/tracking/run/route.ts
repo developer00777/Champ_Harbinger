@@ -3,6 +3,7 @@ import { schema } from "@/db";
 import { eq, desc } from "drizzle-orm";
 import { verifyQStashSignature, getBaseUrl } from "@/lib/services/qstash";
 import { withAction } from "@/lib/services/cost-tracker";
+import { signalsRunTotal } from "@/lib/monitoring/metrics";
 import { executeSignal } from "@/lib/signals/executor";
 import type { Signal } from "@/lib/types/signal";
 import {
@@ -208,6 +209,7 @@ export async function POST(request: Request) {
       snapshotData: snapshot as unknown as Record<string, unknown>,
       snapshotHash: hash,
     });
+    signalsRunTotal.labels("ok").inc();
 
     // ── Store signal_result with tracking_config_id ────────────────────
     await adminDb.insert(schema.signalResults).values({

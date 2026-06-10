@@ -3,6 +3,7 @@ import {
   collectDefaultMetrics,
   Counter,
   Histogram,
+  Gauge,
 } from "prom-client";
 
 declare global {
@@ -45,6 +46,18 @@ function getOrCreateHistogram(
   );
 }
 
+function getOrCreateGauge(
+  r: Registry,
+  name: string,
+  help: string,
+  labelNames: string[],
+): Gauge {
+  return (
+    (r.getSingleMetric(name) as Gauge | undefined) ??
+    new Gauge({ name, help, labelNames, registers: [r] })
+  );
+}
+
 const r = getRegistry();
 
 export const httpRequestsTotal = getOrCreateCounter(
@@ -75,6 +88,29 @@ export const aiCallDuration = getOrCreateHistogram(
   "AI call duration in seconds",
   ["model"],
   [0.1, 0.5, 1, 2.5, 5, 10, 30, 60],
+);
+
+// ── Business metrics ────────────────────────────────────────────────────────
+
+export const signalsRunTotal = getOrCreateCounter(
+  r,
+  "harbinger_signals_run_total",
+  "Total signal/tracking runs executed",
+  ["status"],
+);
+
+export const emailsSentTotal = getOrCreateCounter(
+  r,
+  "harbinger_emails_sent_total",
+  "Total outbound emails dispatched",
+  ["status"],
+);
+
+export const spendUsdGauge = getOrCreateGauge(
+  r,
+  "harbinger_spend_usd",
+  "Estimated/real API spend in USD over the trailing 24h, by service",
+  ["service"],
 );
 
 export function getRegistryForExport() {

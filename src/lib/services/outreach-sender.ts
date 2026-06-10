@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { getEmailProvider } from "@/lib/email/provider";
 import { trackUsage } from "@/lib/services/cost-tracker";
+import { emailsSentTotal } from "@/lib/monitoring/metrics";
 
 export interface EnrollmentForSend {
   id: string;
@@ -92,6 +93,7 @@ export async function sendApprovedDraft(
     });
 
     if (result.status === "failed") {
+      emailsSentTotal.labels("failed").inc();
       return {
         ok: false,
         reason: result.error ?? "Email provider returned failed status",
@@ -177,6 +179,7 @@ export async function sendApprovedDraft(
       },
     });
 
+    emailsSentTotal.labels("sent").inc();
     return { ok: true, messageId, draftId: draft.id };
   } catch (err) {
     const reason = err instanceof Error ? err.message : "Send failed";

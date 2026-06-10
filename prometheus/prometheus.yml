@@ -1,0 +1,17 @@
+# Prometheus scrape config for ChampHarbinger.
+# The app exposes Prometheus metrics at /api/metrics (public route). Add this
+# Prometheus instance as a data source in Grafana (http://<host>:9090).
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: harbinger
+    metrics_path: /api/metrics
+    static_configs:
+      # Compose service DNS. If Prometheus runs on a different host than the
+      # app (e.g. co-located with a remote Grafana), point this at the app's
+      # publicly reachable host:port instead.
+      - targets: ["app:3000"]
+        labels:
+          service: champharbinger

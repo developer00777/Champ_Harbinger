@@ -6,6 +6,7 @@ import { getPostHogClient } from "@/lib/posthog-server";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
+import { withHttpMetrics } from "@/lib/monitoring/with-metrics";
 
 export const maxDuration = 60;
 
@@ -13,7 +14,7 @@ interface Body {
   draftId?: string;
 }
 
-export async function POST(request: Request) {
+export const POST = withHttpMetrics("outreach/send-now", async (request) => {
   let userId: string;
   try {
     ({ userId } = await getCurrentUser());
@@ -141,4 +142,4 @@ export async function POST(request: Request) {
     messageId: result.messageId,
     sentAt: new Date().toISOString(),
   });
-}
+});
