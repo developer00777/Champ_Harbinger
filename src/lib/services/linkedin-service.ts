@@ -1,5 +1,6 @@
+import * as cheerio from "cheerio";
 import {
-  withObscuraPage,
+  obscuraFetchHtml,
   isObscuraConfigured,
 } from "@/lib/services/browser-pool";
 
@@ -57,44 +58,37 @@ export class LinkedinService {
     console.log(`[LinkedIn] Attempting public fetch: ${profileUrl}`);
 
     try {
-      return await withObscuraPage(async (page) => {
-        const response = await page.goto(profileUrl, {
-          waitUntil: "domcontentloaded",
-          timeout: 20000,
-        });
+      const html = await obscuraFetchHtml(profileUrl);
 
-        // Auth wall / blocked => return empty gracefully.
-        if (!response || !response.ok()) {
-          return { profile: null, posts: [] };
-        }
+      // Empty render / blocked => return empty gracefully.
+      if (!html) {
+        return { profile: null, posts: [] };
+      }
 
-        const data = await page.evaluate(() => {
-          const name = document.querySelector("h1")?.textContent?.trim() || "";
-          const headline =
-            document
-              .querySelector(
-                '[class*="headline"], [data-test*="headline"], .top-card-layout__headline',
-              )
-              ?.textContent?.trim() || "";
-          return { name, headline };
-        });
+      const $ = cheerio.load(html);
+      const name = $("h1").first().text().trim();
+      const headline = $(
+        '[class*="headline"], [data-test*="headline"], .top-card-layout__headline',
+      )
+        .first()
+        .text()
+        .trim();
 
-        // LinkedIn auth walls render generic titles with no real name; treat
-        // those as "blocked" and return an empty result.
-        if (!data.name || /sign in|join linkedin|log in/i.test(data.name)) {
-          return { profile: null, posts: [] };
-        }
+      // LinkedIn auth walls render generic titles with no real name; treat
+      // those as "blocked" and return an empty result.
+      if (!name || /sign in|join linkedin|log in/i.test(name)) {
+        return { profile: null, posts: [] };
+      }
 
-        const profile: LinkedInProfile = {
-          username,
-          name: data.name,
-          headline: data.headline,
-        };
+      const profile: LinkedInProfile = {
+        username,
+        name,
+        headline,
+      };
 
-        // Unauthenticated profile pages don't expose post feeds; return profile
-        // only with an empty posts array.
-        return { profile, posts: [] };
-      });
+      // Unauthenticated profile pages don't expose post feeds; return profile
+      // only with an empty posts array.
+      return { profile, posts: [] };
     } catch (err) {
       console.warn(
         `[LinkedIn] Public fetch failed (expected when blocked): ${

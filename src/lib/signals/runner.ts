@@ -5,7 +5,7 @@ import { eq, desc, gte, and } from "drizzle-orm";
 import { getScopedDb, schema } from "@/lib/db/scoped";
 import { recordAiUsage } from "@/lib/ai/usage";
 import {
-  withObscuraPage,
+  obscuraFetchHtml,
   isObscuraConfigured,
 } from "@/lib/services/browser-pool";
 import { structuralDiff } from "./diff";
@@ -94,44 +94,23 @@ async function executeStep(
       if (!isObscuraConfigured()) {
         return { url, extracted: null };
       }
-      return withObscuraPage(async (page) => {
-        await page.goto(url, {
-          waitUntil: "domcontentloaded",
-          timeout: 30000,
-        });
-        for (const action of step.actions ?? []) {
-          if (action.op === "act") {
-            // Best-effort: if the rendered instruction is a usable CSS
-            // selector, click it; otherwise skip the LLM-driven act.
-            const instruction = renderTemplate(action.instruction, scope);
-            const selector = instruction.trim();
-            if (isLikelySelector(selector)) {
-              try {
-                await page.click(selector, { timeout: 5000 });
-              } catch {
-                // selector not present -- skip gracefully
-              }
-            }
-          } else if (action.op === "waitMs") {
-            await page.waitForTimeout(action.ms);
-          }
-        }
-        const html = await page.content();
-        const startedAt = Date.now();
-        const result = await generateObject({
-          model: getModel(step.model ?? Models.classification),
-          schema: jsonSchema(step.extract.schema),
-          prompt: `${renderTemplate(step.extract.instruction, scope)}\n\n---\n\n${html.slice(0, 30_000)}`,
-        });
-        recordAiUsage(result, {
-          operation: "signal-stagehand-extract",
-          costModel: "haiku",
-          modelLabel: step.model ?? Models.classification,
-          startedAt,
-          metadata: { signalId: env.signalId, url: page.url() },
-        });
-        return { url: page.url(), extracted: result.object };
+      // Obscura returns one-shot rendered HTML and cannot click — prose `act`
+      // steps (and waitMs) are no longer honored and are silently skipped.
+      const html = await obscuraFetchHtml(url);
+      const startedAt = Date.now();
+      const result = await generateObject({
+        model: getModel(step.model ?? Models.classification),
+        schema: jsonSchema(step.extract.schema),
+        prompt: `${renderTemplate(step.extract.instruction, scope)}\n\n---\n\n${html.slice(0, 30_000)}`,
       });
+      recordAiUsage(result, {
+        operation: "signal-stagehand-extract",
+        costModel: "haiku",
+        modelLabel: step.model ?? Models.classification,
+        startedAt,
+        metadata: { signalId: env.signalId, url },
+      });
+      return { url, extracted: result.object };
     }
     case "history": {
       if (!isUuid(env.signalId) || !isUuid(env.organizationId)) {
@@ -183,19 +162,6 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value: string): boolean {
   return UUID_RE.test(value);
-}
-
-/**
- * Heuristic: treat the act instruction as a CSS selector only when it looks
- * like one (no whitespace-y prose) so we can click it directly. Otherwise the
- * act is a natural-language instruction we can't honor without an LLM agent and
- * is skipped gracefully.
- */
-function isLikelySelector(value: string): boolean {
-  if (!value || value.length > 200 || /\s{2,}/.test(value)) return false;
-  // Reject sentence-like instructions (multiple words separated by spaces).
-  if (value.split(/\s+/).length > 1 && !value.startsWith("#")) return false;
-  return /^[#.\[]|^[a-z][a-z0-9-]*[#.\[:>~+]|^[a-z][a-z0-9-]*$/i.test(value);
 }
 
 function buildOutput(

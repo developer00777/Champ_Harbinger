@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import {
-  withObscuraPage,
+  obscuraFetchHtml,
   isObscuraConfigured,
 } from "@/lib/services/browser-pool";
 import { extractFromUrl } from "@/lib/services/trafilatura-client";
@@ -142,13 +142,8 @@ export class WebExtractionService {
       if (isObscuraConfigured()) {
         try {
           console.log(`[WebExtract] Trying Obscura: ${url}`);
-          const html = await withObscuraPage(async (page) => {
-            await page.goto(url, {
-              waitUntil: "domcontentloaded",
-              timeout,
-            });
-            await page.waitForTimeout(2000);
-            return page.content();
+          const html = await obscuraFetchHtml(url, {
+            timeoutSec: Math.ceil(timeout / 1000),
           });
           const parsed = this.parseHtml(html, url, {
             includeMetadata,

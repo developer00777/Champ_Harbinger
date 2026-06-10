@@ -1,5 +1,6 @@
+import * as cheerio from "cheerio";
 import {
-  withObscuraPage,
+  obscuraFetchHtml,
   isObscuraConfigured,
 } from "@/lib/services/browser-pool";
 
@@ -68,33 +69,22 @@ export class XService {
     console.log(`[X] Attempting public fetch: ${profileUrl}`);
 
     try {
-      const meta = await withObscuraPage(async (page) => {
-        const response = await page.goto(profileUrl, {
-          waitUntil: "domcontentloaded",
-          timeout: 20000,
-        });
-        if (!response || !response.ok()) {
-          return null;
-        }
-        await page.waitForTimeout(2000);
-        // X requires auth for the timeline; we can only read public profile
-        // meta tags when available. Tweets are not accessible unauthenticated.
-        return page.evaluate(() => {
-          const ogTitle =
-            document
-              .querySelector('meta[property="og:title"]')
-              ?.getAttribute("content") || "";
-          const ogDesc =
-            document
-              .querySelector('meta[property="og:description"]')
-              ?.getAttribute("content") || "";
-          const ogImage =
-            document
-              .querySelector('meta[property="og:image"]')
-              ?.getAttribute("content") || "";
-          return { ogTitle, ogDesc, ogImage };
-        });
-      });
+      const html = await obscuraFetchHtml(profileUrl);
+
+      // X requires auth for the timeline; we can only read public profile
+      // meta tags when available. Tweets are not accessible unauthenticated.
+      const meta = html
+        ? (() => {
+            const $ = cheerio.load(html);
+            const ogTitle =
+              $('meta[property="og:title"]').attr("content") || "";
+            const ogDesc =
+              $('meta[property="og:description"]').attr("content") || "";
+            const ogImage =
+              $('meta[property="og:image"]').attr("content") || "";
+            return { ogTitle, ogDesc, ogImage };
+          })()
+        : null;
 
       // We can surface basic profile meta via rawResults, but no tweets are
       // available without authentication.

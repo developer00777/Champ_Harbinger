@@ -1,9 +1,10 @@
 import { generateObject, jsonSchema } from "ai";
+import * as cheerio from "cheerio";
 import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { recordAiUsage } from "@/lib/ai/usage";
 import {
-  withObscuraPage,
+  obscuraFetchHtml,
   isObscuraConfigured,
 } from "@/lib/services/browser-pool";
 import { mergeEnrichmentData } from "@/lib/services/knowledge-base";
@@ -82,120 +83,113 @@ export async function scrapeHiringData(
 
   const cleanDomain = domain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 
-  return withObscuraPage(async (page) => {
-    // Step 1: Navigate to the company's website
-    try {
-      await page.goto(`https://${cleanDomain}`, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
-      await page.waitForTimeout(2000);
-    } catch {
-      // homepage unreachable -- still try common paths below
-    }
+  // Step 1: Fetch the company's homepage via Obscura (rendered HTML).
+  let homeHtml = "";
+  try {
+    homeHtml = await obscuraFetchHtml(`https://${cleanDomain}`);
+  } catch {
+    // homepage unreachable -- still try common paths below
+  }
 
-    // Step 2: Find the careers page WITHOUT an LLM.
-    let careersUrl: string | null = null;
+  // Step 2: Find the careers page WITHOUT an LLM.
+  let careersUrl: string | null = null;
 
-    // 2a. Scan anchors on the homepage for a careers-like link.
-    try {
-      const candidate = await page.$$eval(
-        "a[href]",
-        (anchors, reSource) => {
-          const re = new RegExp(reSource, "i");
-          for (const a of anchors as HTMLAnchorElement[]) {
-            const href = a.getAttribute("href") || "";
-            const text = (a.textContent || "").trim();
-            if (re.test(href) || re.test(text)) {
-              return a.href || href;
-            }
-          }
-          return null;
-        },
-        CAREERS_RE.source,
-      );
-      if (candidate) {
-        try {
-          const resolved = new URL(
-            candidate,
-            `https://${cleanDomain}`,
-          ).toString();
-          const response = await page.goto(resolved, {
-            waitUntil: "domcontentloaded",
-            timeout: 15000,
-          });
-          if (response && response.ok()) {
-            careersUrl = page.url();
-            await page.waitForTimeout(1500);
-          }
-        } catch {
-          // fall through to common-path probe
-        }
+  // 2a. Scan anchors on the homepage for a careers-like link.
+  if (homeHtml) {
+    const $ = cheerio.load(homeHtml);
+    let candidate: string | null = null;
+    $("a[href]").each((_, el) => {
+      if (candidate) return;
+      const href = $(el).attr("href") || "";
+      const text = $(el).text().trim();
+      if (CAREERS_RE.test(href) || CAREERS_RE.test(text)) {
+        candidate = href;
       }
-    } catch {
-      // anchor scan failed -- fall through to common-path probe
-    }
-
-    // 2b. Probe common careers paths if anchor scan didn't land one.
-    if (!careersUrl) {
-      for (const path of COMMON_CAREERS_PATHS) {
-        try {
-          const response = await page.goto(`https://${cleanDomain}${path}`, {
-            waitUntil: "domcontentloaded",
-            timeout: 10000,
-          });
-          if (response && response.ok()) {
-            careersUrl = page.url();
-            await page.waitForTimeout(1500);
-            break;
-          }
-        } catch {
-          continue;
+    });
+    if (candidate) {
+      try {
+        const resolved = new URL(
+          candidate,
+          `https://${cleanDomain}`,
+        ).toString();
+        const html = await obscuraFetchHtml(resolved);
+        if (html) {
+          careersUrl = resolved;
         }
+      } catch {
+        // fall through to common-path probe
       }
     }
+  }
 
-    if (!careersUrl) {
-      await mergeEnrichmentData("organizations", organizationId, {
-        hiring: {
-          careersUrl: null,
-          jobs: [],
-          scrapedAt: new Date().toISOString(),
-        },
-      });
-      return { careersUrl: null, jobs: [], totalJobs: 0 };
+  // 2b. Probe common careers paths if anchor scan didn't land one.
+  if (!careersUrl) {
+    for (const path of COMMON_CAREERS_PATHS) {
+      const url = `https://${cleanDomain}${path}`;
+      try {
+        const html = await obscuraFetchHtml(url);
+        if (html) {
+          careersUrl = url;
+          break;
+        }
+      } catch {
+        continue;
+      }
     }
+  }
 
-    // Step 3: Extract job listings with ONE LLM pass over the page HTML.
-    const html = await page.content();
-
-    const startedAt = Date.now();
-    const result = await generateObject({
-      model: getModel(Models.classification),
-      schema: jobsSchema,
-      prompt: `Extract up to ${maxJobs} job listings from this careers/jobs page. For each job, capture: the title; the department or category (optional); the location (optional); and the direct URL to the job posting if present (optional). Ignore navigation, marketing copy, and benefits sections.\n\n---\n\n${html.slice(0, 30_000)}`,
-    });
-
-    recordAiUsage(result, {
-      operation: "scrape-hiring-jobs",
-      costModel: "haiku",
-      modelLabel: Models.classification,
-      startedAt,
-      metadata: { careersUrl },
-    });
-
-    const allJobs = result.object.jobs ?? [];
-    const trimmed = allJobs.slice(0, maxJobs);
-
-    // Step 4: Save hiring data to the organization
+  if (!careersUrl) {
     await mergeEnrichmentData("organizations", organizationId, {
       hiring: {
-        careersUrl,
-        jobs: trimmed,
+        careersUrl: null,
+        jobs: [],
         scrapedAt: new Date().toISOString(),
       },
     });
+    return { careersUrl: null, jobs: [], totalJobs: 0 };
+  }
 
-    return { careersUrl, jobs: trimmed, totalJobs: allJobs.length };
+  // Step 3: Fetch the careers page HTML and extract job listings with ONE LLM pass.
+  let careersHtml: string;
+  try {
+    careersHtml = await obscuraFetchHtml(careersUrl);
+  } catch {
+    await mergeEnrichmentData("organizations", organizationId, {
+      hiring: {
+        careersUrl,
+        jobs: [],
+        scrapedAt: new Date().toISOString(),
+      },
+    });
+    return { careersUrl, jobs: [], totalJobs: 0 };
+  }
+
+  const startedAt = Date.now();
+  const result = await generateObject({
+    model: getModel(Models.classification),
+    schema: jobsSchema,
+    prompt: `Extract up to ${maxJobs} job listings from this careers/jobs page. For each job, capture: the title; the department or category (optional); the location (optional); and the direct URL to the job posting if present (optional). Ignore navigation, marketing copy, and benefits sections.\n\n---\n\n${careersHtml.slice(0, 30_000)}`,
   });
+
+  recordAiUsage(result, {
+    operation: "scrape-hiring-jobs",
+    costModel: "haiku",
+    modelLabel: Models.classification,
+    startedAt,
+    metadata: { careersUrl },
+  });
+
+  const allJobs = result.object.jobs ?? [];
+  const trimmed = allJobs.slice(0, maxJobs);
+
+  // Step 4: Save hiring data to the organization
+  await mergeEnrichmentData("organizations", organizationId, {
+    hiring: {
+      careersUrl,
+      jobs: trimmed,
+      scrapedAt: new Date().toISOString(),
+    },
+  });
+
+  return { careersUrl, jobs: trimmed, totalJobs: allJobs.length };
 }

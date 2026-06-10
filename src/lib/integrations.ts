@@ -116,10 +116,10 @@ export const INTEGRATIONS: Integration[] = [
       "Self-hosted headless browser (JS rendering, YC + hiring scrapers)",
     consequence:
       "JS-rendered extraction and browser-based scrapers fall back to static fetch only.",
-    envVars: ["OBSCURA_SERVE_URL"],
+    envVars: ["OBSCURA_GATEWAY_URL"],
     signupUrl: "https://github.com/h4ckf0r0day/obscura",
     fixHint:
-      "Run the obscura service (docker compose) and set OBSCURA_SERVE_URL=http://obscura:9222",
+      "Run the obscura service (docker compose) and set OBSCURA_GATEWAY_URL=http://obscura:9223",
   },
   {
     id: "trafilatura",

@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Upload } from "lucide-react";
+import readXlsxFile from "read-excel-file/web-worker";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -186,36 +187,62 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
     setImporting(false);
   };
 
-  const handleFile = useCallback((file: File) => {
-    reset();
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const { headers: h, rows } = parseCSV(text);
-      if (rows.length === 0) {
-        setError("No data rows found in CSV");
-        return;
-      }
-      setHeaders(h);
-      const mapped = mapColumns(h, rows);
-      const valid = mapped.filter((c) => c.name);
-      if (valid.length === 0) {
-        setError(
-          "No valid companies found. Make sure the CSV has a name/company column.",
-        );
-        return;
-      }
-      setCompanies(valid);
-    };
-    reader.readAsText(file);
-    setOpen(true);
+  const finalize = useCallback((h: string[], rows: string[][]) => {
+    if (rows.length === 0) {
+      setError("No data rows found in the file");
+      return;
+    }
+    setHeaders(h);
+    const valid = mapColumns(h, rows).filter((c) => c.name);
+    if (valid.length === 0) {
+      setError(
+        "No valid companies found. Make sure the file has a name/company column.",
+      );
+      return;
+    }
+    setCompanies(valid);
   }, []);
+
+  const handleFile = useCallback(
+    (file: File) => {
+      reset();
+      setOpen(true);
+      const isExcel = /\.xlsx?$/i.test(file.name);
+      if (isExcel) {
+        readXlsxFile(file)
+          .then((sheet) => {
+            // Default call resolves to rows-of-cells; normalize every cell to a
+            // trimmed string and reuse the same column mapping as CSV.
+            const grid = sheet as unknown as unknown[][];
+            const matrix: string[][] = grid.map((row) =>
+              row.map((cell) => (cell == null ? "" : String(cell).trim())),
+            );
+            const [h = [], ...rows] = matrix;
+            finalize(
+              h,
+              rows.filter((r) => r.some((c) => c)),
+            );
+          })
+          .catch(() =>
+            setError("Could not read the Excel file. Is it a valid .xlsx?"),
+          );
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const { headers: h, rows } = parseCSV(e.target?.result as string);
+        finalize(h, rows);
+      };
+      reader.readAsText(file);
+    },
+    [finalize],
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
-      if (file && (file.name.endsWith(".csv") || file.type === "text/csv")) {
+      if (file && /\.(csv|xlsx?)$/i.test(file.name)) {
         handleFile(file);
       }
     },
@@ -260,7 +287,7 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
       <input
         ref={fileRef}
         type="file"
-        accept=".csv,text/csv"
+        accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -276,7 +303,7 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
         onDrop={handleDrop}
       >
         <Upload className="mr-1.5 h-4 w-4" />
-        Import CSV
+        Import CSV / Excel
       </Button>
 
       <Dialog
@@ -288,7 +315,7 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
       >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Import Companies from CSV</DialogTitle>
+            <DialogTitle>Import Companies from CSV or Excel</DialogTitle>
           </DialogHeader>
 
           {error && (
@@ -414,7 +441,7 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
             </div>
           ) : !error ? (
             <div className="text-muted-foreground py-8 text-center text-sm">
-              Parsing CSV...
+              Parsing file...
             </div>
           ) : null}
         </DialogContent>
