@@ -25,6 +25,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed.ts",
+    "worker": "tsx scripts/run-worker.ts",
+    "worker:dev": "tsx watch scripts/run-worker.ts",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -45,7 +47,6 @@
     "@clerk/ui": "^1.6.7",
     "@openrouter/ai-sdk-provider": "6.0.0-alpha.1",
     "@sentry/nextjs": "^8.0.0",
-    "@upstash/qstash": "^2.10.1",
     "@x402/fetch": "^2.10.0",
     "ai": "^6.0.116",
     "cheerio": "^1.2.0",
@@ -57,6 +58,7 @@
     "lucide-react": "^0.577.0",
     "next": "16.1.6",
     "next-themes": "^0.4.6",
+    "pg-boss": "^12.18.3",
     "playwright-core": "^1.58.2",
     "postgres": "^3.4.0",
     "posthog-js": "^1.372.3",

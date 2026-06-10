@@ -2,22 +2,19 @@ import { tool } from "ai";
 import { z } from "zod";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { getScopedDb, schema } from "@/lib/db/scoped";
-import { getQStashClient, getBaseUrl } from "@/lib/services/qstash";
 import { SCHEDULE_INTERVALS } from "@/lib/types/tracking";
 import type { Schedule } from "@/lib/types/tracking";
+import { enqueueTrackingRun } from "@/lib/jobs/boss";
 
-/** Publish a QStash message to run a tracking config immediately (baseline). */
+/**
+ * Enqueue an immediate baseline run for a tracking config. Falls back to no-op
+ * logging if the queue is unreachable so tool calls never fail on enqueue.
+ */
 async function dispatchImmediateRun(trackingConfigId: string): Promise<void> {
   try {
-    const qstash = getQStashClient();
-    const baseUrl = getBaseUrl();
-    await qstash.publishJSON({
-      url: `${baseUrl}/api/tracking/run`,
-      body: { trackingConfigId },
-      retries: 2,
-    });
+    await enqueueTrackingRun(trackingConfigId);
   } catch (err) {
-    console.error("[tracking] Failed to dispatch baseline run:", err);
+    console.error("[tracking] Failed to enqueue baseline run:", err);
   }
 }
 
@@ -81,7 +78,10 @@ export const createTracking = tool({
         .where(
           and(
             eq(schema.campaignOrganizations.campaignId, input.campaignId),
-            eq(schema.campaignOrganizations.organizationId, input.organizationId),
+            eq(
+              schema.campaignOrganizations.organizationId,
+              input.organizationId,
+            ),
           ),
         );
     } else if (input.personId) {
@@ -96,7 +96,7 @@ export const createTracking = tool({
         );
     }
 
-    // Dispatch immediate baseline run via QStash
+    // Enqueue immediate baseline run on the pg-boss queue.
     await dispatchImmediateRun(config.id);
 
     return {
@@ -134,17 +134,20 @@ export const bulkCreateTracking = tool({
       .from(schema.campaignOrganizations)
       .where(eq(schema.campaignOrganizations.campaignId, input.campaignId));
 
-    const orgs = input.status !== "all"
-      ? await sdb.raw
-          .select({ organizationId: schema.campaignOrganizations.organizationId })
-          .from(schema.campaignOrganizations)
-          .where(
-            and(
-              eq(schema.campaignOrganizations.campaignId, input.campaignId),
-              eq(schema.campaignOrganizations.status, input.status),
-            ),
-          )
-      : await orgsQuery;
+    const orgs =
+      input.status !== "all"
+        ? await sdb.raw
+            .select({
+              organizationId: schema.campaignOrganizations.organizationId,
+            })
+            .from(schema.campaignOrganizations)
+            .where(
+              and(
+                eq(schema.campaignOrganizations.campaignId, input.campaignId),
+                eq(schema.campaignOrganizations.status, input.status),
+              ),
+            )
+        : await orgsQuery;
 
     if (orgs.length === 0) {
       return { created: 0, message: "No matching organizations found" };
@@ -185,17 +188,23 @@ export const bulkCreateTracking = tool({
       return {
         created: 0,
         skipped: orgs.length,
-        message: "All organizations already have tracking configs for this signal",
+        message:
+          "All organizations already have tracking configs for this signal",
       };
     }
 
     const created = await sdb.raw
       .insert(schema.trackingConfigs)
       .values(toCreate)
-      .returning({ id: schema.trackingConfigs.id, organizationId: schema.trackingConfigs.organizationId });
+      .returning({
+        id: schema.trackingConfigs.id,
+        organizationId: schema.trackingConfigs.organizationId,
+      });
 
     // Set readiness_tag to 'monitoring' for all tracked orgs
-    const orgIds = toCreate.map((c) => c.organizationId!).filter(Boolean) as string[];
+    const orgIds = toCreate
+      .map((c) => c.organizationId!)
+      .filter(Boolean) as string[];
     if (orgIds.length > 0) {
       await sdb.raw
         .update(schema.campaignOrganizations)
@@ -252,18 +261,19 @@ export const getTrackingConfigs = tool({
 
     const configIds = configs.map((c) => c.id);
 
-    const latestChanges = configIds.length > 0
-      ? await sdb.raw
-          .select({
-            trackingConfigId: schema.trackingChanges.trackingConfigId,
-            description: schema.trackingChanges.description,
-            changeType: schema.trackingChanges.changeType,
-            detectedAt: schema.trackingChanges.detectedAt,
-          })
-          .from(schema.trackingChanges)
-          .where(inArray(schema.trackingChanges.trackingConfigId, configIds))
-          .orderBy(desc(schema.trackingChanges.detectedAt))
-      : [];
+    const latestChanges =
+      configIds.length > 0
+        ? await sdb.raw
+            .select({
+              trackingConfigId: schema.trackingChanges.trackingConfigId,
+              description: schema.trackingChanges.description,
+              changeType: schema.trackingChanges.changeType,
+              detectedAt: schema.trackingChanges.detectedAt,
+            })
+            .from(schema.trackingChanges)
+            .where(inArray(schema.trackingChanges.trackingConfigId, configIds))
+            .orderBy(desc(schema.trackingChanges.detectedAt))
+        : [];
 
     const changeMap = new Map<string, (typeof latestChanges)[0]>();
     for (const change of latestChanges) {
@@ -301,7 +311,9 @@ export const getTrackingHistory = tool({
       sdb.raw
         .select()
         .from(schema.trackingChanges)
-        .where(eq(schema.trackingChanges.trackingConfigId, input.trackingConfigId))
+        .where(
+          eq(schema.trackingChanges.trackingConfigId, input.trackingConfigId),
+        )
         .orderBy(desc(schema.trackingChanges.detectedAt))
         .limit(input.limit),
       sdb.raw
@@ -310,7 +322,9 @@ export const getTrackingHistory = tool({
           capturedAt: schema.trackingSnapshots.capturedAt,
         })
         .from(schema.trackingSnapshots)
-        .where(eq(schema.trackingSnapshots.trackingConfigId, input.trackingConfigId))
+        .where(
+          eq(schema.trackingSnapshots.trackingConfigId, input.trackingConfigId),
+        )
         .orderBy(desc(schema.trackingSnapshots.capturedAt))
         .limit(input.limit),
     ]);

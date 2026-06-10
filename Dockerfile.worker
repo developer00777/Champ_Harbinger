@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+# ChampHarbinger background worker — runs the pg-boss schedules + job handlers
+# (scripts/run-worker.ts) via tsx. Unlike the Next.js standalone image, this
+# keeps the full node_modules + source so tsx can execute the TypeScript entry.
+
+ARG NODE_VERSION=20-alpine
+
+FROM node:${NODE_VERSION} AS deps
+WORKDIR /app
+RUN apk add --no-cache libc6-compat
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+FROM node:${NODE_VERSION} AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+RUN corepack enable
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+CMD ["pnpm", "worker"]

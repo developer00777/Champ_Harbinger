@@ -1,7 +1,11 @@
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { eq, desc } from "drizzle-orm";
-import { verifyQStashSignature, getBaseUrl } from "@/lib/services/qstash";
+import {
+  verifyWorkerSecret,
+  getAppBaseUrl,
+  workerHeaders,
+} from "@/lib/jobs/internal-auth";
 import { withAction } from "@/lib/services/cost-tracker";
 import { signalsRunTotal } from "@/lib/monitoring/metrics";
 import { executeSignal } from "@/lib/signals/executor";
@@ -28,16 +32,24 @@ interface RunPayload {
 }
 
 export async function POST(request: Request) {
-  // Verify QStash signature
+  if (!verifyWorkerSecret(request)) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   let payload: RunPayload;
   try {
-    payload = await verifyQStashSignature<RunPayload>(request);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Invalid signature";
-    return Response.json({ error: msg }, { status: 401 });
+    payload = (await request.json()) as RunPayload;
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const { trackingConfigId } = payload;
+  if (!trackingConfigId) {
+    return Response.json(
+      { error: "trackingConfigId is required" },
+      { status: 400 },
+    );
+  }
 
   // Load tracking config with joins
   const [configRow] = await adminDb
@@ -369,10 +381,10 @@ export async function POST(request: Request) {
           .where(eq(schema.campaignPeople.campaignId, configRow.campaignId));
       }
 
-      const outreachBaseUrl = getBaseUrl();
+      const outreachBaseUrl = getAppBaseUrl();
       void fetch(`${outreachBaseUrl}/api/outreach/process`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...workerHeaders() },
         body: JSON.stringify({
           type: "signal",
           signalId: configRow.signalId,
