@@ -1,21 +1,16 @@
 import "server-only";
 import { tool } from "ai";
 import { z } from "zod";
-import { getLakeB2BClient } from "@/lib/lakeb2b/client";
-import {
-  translateCompanyCriteria,
-  translatePeopleCriteria,
-} from "@/lib/lakeb2b/criteria";
-import { verifyCompanies, verifyPeople } from "@/lib/lakeb2b/verifier";
+import { getDiscoveryProvider } from "@/lib/discovery";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { getCurrentUser } from "@/lib/auth";
 
 export const discoverWithLakeB2B = tool({
   description:
-    "Discover companies or people from the LakeB2B database (120M+ verified contacts and companies) using natural language criteria. " +
-    "Translates your criteria to a structured query, searches the database, and AI-verifies each result against your original criteria. " +
-    "Use this when the user wants high-quality, verified prospect data — especially for targeted ICP matching. " +
+    "Discover companies or people from natural language criteria. Uses the LakeB2B database (120M+ verified contacts) when configured, otherwise searches publicly-available web data. " +
+    "Translates your criteria to a query, searches, and AI-verifies each result against your original criteria. " +
+    "Use this when the user wants verified prospect data for targeted ICP matching. " +
     "Returns a filtered, AI-verified list with reasons, ready for enrichment or outreach.",
   inputSchema: z.object({
     criteria: z
@@ -40,26 +35,23 @@ export const discoverWithLakeB2B = tool({
       ),
   }),
   execute: async ({ criteria, targetType, maxResults = 20 }) => {
-    const client = await getLakeB2BClient();
-    const isMock =
-      process.env.LAKEB2B_MOCK === "true" || !process.env.LAKEB2B_API_URL;
+    let userId: string | undefined;
+    try {
+      ({ userId } = await getCurrentUser());
+    } catch {
+      userId = undefined;
+    }
+    const provider = await getDiscoveryProvider(userId);
 
     if (targetType === "company") {
-      const params = await translateCompanyCriteria(criteria);
-      params.per_page = Math.min(maxResults, 50);
-
-      const result = await client.searchCompanies(params);
-      const verified = await verifyCompanies(result.results, criteria);
+      const verified = await provider.discoverCompanies(criteria, maxResults);
       const passing = verified.filter((c) => c.passes);
 
       return {
         criteria,
         targetType: "company" as const,
-        queryParams: params,
-        totalFound: result.total,
-        fetched: result.results.length,
         verified: passing.length,
-        mode: isMock ? "mock" : "live",
+        mode: provider.name,
         results: passing.map((c) => ({
           id: c.id,
           name: c.name,
@@ -84,21 +76,14 @@ export const discoverWithLakeB2B = tool({
           .map((c) => ({ name: c.name, reason: c.reason })),
       };
     } else {
-      const params = await translatePeopleCriteria(criteria);
-      params.per_page = Math.min(maxResults, 50);
-
-      const result = await client.searchPeople(params);
-      const verified = await verifyPeople(result.results, criteria);
+      const verified = await provider.discoverPeople(criteria, maxResults);
       const passing = verified.filter((p) => p.passes);
 
       return {
         criteria,
         targetType: "person" as const,
-        queryParams: params,
-        totalFound: result.total,
-        fetched: result.results.length,
         verified: passing.length,
-        mode: isMock ? "mock" : "live",
+        mode: provider.name,
         results: passing.map((p) => ({
           id: p.id,
           name: p.full_name,

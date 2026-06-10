@@ -594,3 +594,20 @@ export async function getLakeB2BClient(
 
   return createLakeB2BClient(apiKey ?? "");
 }
+
+/**
+ * True only when LakeB2B is configured for REAL use (a live API URL + a resolved
+ * key, and mock mode off). Used by discovery to prefer LakeB2B over public web.
+ */
+export async function hasLakeB2BKey(clerkUserId?: string): Promise<boolean> {
+  if (process.env.LAKEB2B_MOCK === "true") return false;
+  if (!process.env.LAKEB2B_API_URL) return false;
+  const apiKey = clerkUserId
+    ? await getUserApiKey(
+        "lakeb2b_api_key",
+        clerkUserId,
+        process.env.LAKEB2B_API_KEY,
+      )
+    : (process.env.LAKEB2B_API_KEY ?? null);
+  return Boolean(apiKey);
+}

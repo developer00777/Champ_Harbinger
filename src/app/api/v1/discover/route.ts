@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/api/validate-api-key";
-import { getLakeB2BClient } from "@/lib/lakeb2b/client";
-import { translateCompanyCriteria } from "@/lib/lakeb2b/criteria";
+import { getDiscoveryProvider } from "@/lib/discovery";
 import { db, schema } from "@/db";
 
 export const maxDuration = 60;
@@ -34,19 +33,21 @@ export async function POST(request: Request) {
   ].filter(Boolean);
   const criteria = criteriaParts.join(", ");
 
-  const client = await getLakeB2BClient(ctx.userId);
-  const params = await translateCompanyCriteria(criteria);
-  params.per_page = 20;
-  const response = await client.searchCompanies(params);
+  const provider = await getDiscoveryProvider(ctx.userId);
+  const verified = await provider.discoverCompanies(criteria, 20);
 
-  const companies = response.results.map((co) => ({
-    name: co.name,
-    domain: co.domain ?? null,
-    url: co.website ?? null,
-    description: co.description ?? null,
-    score: co.funding_stage ? 7 : 5,
-    score_reason: `${co.industry ?? "Company"} in ${co.location?.country ?? "unknown location"}`,
-  }));
+  const companies = verified
+    .filter((co) => co.passes)
+    .map((co) => ({
+      name: co.name,
+      domain: co.domain ?? null,
+      url: co.website ?? null,
+      description: co.description ?? null,
+      score: co.funding_stage ? 7 : 5,
+      score_reason:
+        co.reason ??
+        `${co.industry ?? "Company"} in ${co.location?.country ?? "unknown location"}`,
+    }));
 
   // Persist discovered companies
   await Promise.allSettled(
