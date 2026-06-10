@@ -2,10 +2,7 @@ import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { generateText } from "ai";
 
-import {
-  estimateClaudeCostFromUsage,
-  trackUsage,
-} from "@/lib/services/cost-tracker";
+import { recordAiUsage } from "@/lib/ai/usage";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
@@ -62,21 +59,22 @@ export async function POST(request: Request) {
     charCount += text.length;
   }
 
-  const { text: title, usage } = await generateText({
+  const startedAt = Date.now();
+  const result = await generateText({
     model: getModel(Models.classification),
     system:
       "Summarize this conversation in 6-10 words as a short title. No quotes, no punctuation at the end. Be specific about the topic, not generic.",
     prompt: lines.join("\n"),
   });
+  const { text: title } = result;
 
-  trackUsage({
-    service: "claude",
+  recordAiUsage(result, {
     operation: "chat-summarize",
-    tokens_input: usage.inputTokens ?? 0,
-    tokens_output: usage.outputTokens ?? 0,
-    estimated_cost_usd: estimateClaudeCostFromUsage("haiku", usage),
+    costModel: "haiku",
+    modelLabel: Models.classification,
+    startedAt,
     metadata: { model: "claude-haiku-4.5", chatId },
-    user_id: userId,
+    userId,
   });
 
   // Update the title

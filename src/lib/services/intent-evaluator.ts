@@ -2,10 +2,7 @@ import { generateObject } from "ai";
 import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { z } from "zod";
-import {
-  estimateClaudeCostFromUsage,
-  trackUsage,
-} from "@/lib/services/cost-tracker";
+import { recordAiUsage } from "@/lib/ai/usage";
 import {
   UNTRUSTED_NOTICE,
   stringify,
@@ -51,7 +48,8 @@ export async function evaluateIntent(
     };
   }
 
-  const { object, usage } = await generateObject({
+  const startedAt = Date.now();
+  const result = await generateObject({
     model: getModel(Models.classification),
     schema: verdictSchema,
     prompt: `You decide whether the observed change on a company warrants flagging them as "ready to contact" for outreach. You have the buyer's tracking intent (their own words) and a summary of what changed since the last snapshot.
@@ -76,12 +74,13 @@ Return a JSON object with:
 - confidence: "high" when the match is unambiguous, "medium" when it plausibly matches, "low" when you're unsure.`,
   });
 
-  trackUsage({
-    service: "claude",
+  const { object } = result;
+
+  recordAiUsage(result, {
     operation: "evaluate-intent",
-    tokens_input: usage.inputTokens ?? 0,
-    tokens_output: usage.outputTokens ?? 0,
-    estimated_cost_usd: estimateClaudeCostFromUsage("haiku", usage),
+    costModel: "haiku",
+    modelLabel: Models.classification,
+    startedAt,
     metadata: {
       signalCategory: input.signalCategory,
       fire: object.fire,

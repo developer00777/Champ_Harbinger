@@ -3,10 +3,7 @@ import { z } from "zod";
 import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 
-import {
-  estimateClaudeCostFromUsage,
-  trackUsage,
-} from "@/lib/services/cost-tracker";
+import { recordAiUsage } from "@/lib/ai/usage";
 import {
   UNTRUSTED_NOTICE,
   stringify,
@@ -40,7 +37,8 @@ export async function summarizeWebsite(input: {
   if (!bodyText.trim()) return null;
 
   try {
-    const { object, usage } = await generateObject({
+    const startedAt = Date.now();
+    const result = await generateObject({
       model: getModel(Models.classification),
       schema: z.object({
         summary: z
@@ -58,13 +56,13 @@ Company name: ${stringify(input.companyName)}
 Raw scraped website text:
 ${wrapUntrusted(bodyText)}`,
     });
+    const { object } = result;
 
-    trackUsage({
-      service: "claude",
+    recordAiUsage(result, {
       operation: "summarize-website",
-      tokens_input: usage.inputTokens ?? 0,
-      tokens_output: usage.outputTokens ?? 0,
-      estimated_cost_usd: estimateClaudeCostFromUsage(MODEL_LABEL, usage),
+      costModel: MODEL_LABEL,
+      modelLabel: Models.classification,
+      startedAt,
       metadata: { model: MODEL_LABEL, companyName: input.companyName },
     });
 
@@ -94,7 +92,8 @@ export async function summarizeSearchResults<T extends SearchResultLike>(
     .join("\n\n---\n\n");
 
   try {
-    const { object, usage } = await generateObject({
+    const startedAt = Date.now();
+    const result = await generateObject({
       model: getModel(Models.classification),
       schema: z.object({
         summaries: z.array(
@@ -116,13 +115,13 @@ Category: ${stringify(category)}
 Scraped search results:
 ${wrapUntrusted(payload)}`,
     });
+    const { object } = result;
 
-    trackUsage({
-      service: "claude",
+    recordAiUsage(result, {
       operation: "summarize-search-results",
-      tokens_input: usage.inputTokens ?? 0,
-      tokens_output: usage.outputTokens ?? 0,
-      estimated_cost_usd: estimateClaudeCostFromUsage(MODEL_LABEL, usage),
+      costModel: MODEL_LABEL,
+      modelLabel: Models.classification,
+      startedAt,
       metadata: {
         model: MODEL_LABEL,
         companyName,

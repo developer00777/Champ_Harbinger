@@ -75,6 +75,14 @@ interface UsageEntry {
   tokens_input?: number;
   tokens_output?: number;
   estimated_cost_usd: number;
+  /**
+   * Real billed cost in USD reported by the provider (e.g. OpenRouter usage
+   * accounting). When present it overrides `estimated_cost_usd` for the stored
+   * row and tags the row as `costSource: "openrouter"`.
+   */
+  real_cost_usd?: number;
+  /** Provider generation id (OpenRouter), stored in metadata for reconciliation. */
+  generation_id?: string;
   metadata?: Record<string, unknown>;
   campaign_id?: string;
   user_id?: string;
@@ -167,6 +175,18 @@ export function estimateClaudeCostFromUsage(
 export function trackUsage(entry: UsageEntry): void {
   const ctx = actionStore.getStore();
 
+  const hasRealCost = typeof entry.real_cost_usd === "number";
+  const costUsd = hasRealCost
+    ? (entry.real_cost_usd as number)
+    : entry.estimated_cost_usd;
+  const metadata: Record<string, unknown> = {
+    ...(entry.metadata ?? {}),
+    costSource: hasRealCost ? "openrouter" : "estimate",
+    ...(entry.generation_id
+      ? { openrouterGenerationId: entry.generation_id }
+      : {}),
+  };
+
   void (async () => {
     try {
       await adminDb.insert(schema.apiUsage).values({
@@ -174,8 +194,8 @@ export function trackUsage(entry: UsageEntry): void {
         operation: entry.operation,
         tokensInput: entry.tokens_input ?? null,
         tokensOutput: entry.tokens_output ?? null,
-        estimatedCostUsd: String(entry.estimated_cost_usd),
-        metadata: entry.metadata ?? {},
+        estimatedCostUsd: String(costUsd),
+        metadata,
         campaignId: entry.campaign_id ?? null,
         clerkUserId: entry.user_id ?? "system",
         clerkOrgId: null,

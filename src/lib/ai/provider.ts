@@ -26,9 +26,11 @@ export async function getModel(
   const openrouter = createOpenRouter({
     apiKey: apiKey ?? aiEnv.OPENROUTER_API_KEY,
   });
-  return openrouter(
-    modelId ?? aiEnv.HARBINGER_DEFAULT_MODEL,
-  ) as unknown as LanguageModel;
+  return openrouter(modelId ?? aiEnv.HARBINGER_DEFAULT_MODEL, {
+    // Return real billed cost in providerMetadata.openrouter.usage so spend
+    // tracking mirrors OpenRouter instead of relying on local token estimates.
+    usage: { include: true },
+  }) as unknown as LanguageModel;
 }
 
 /**
@@ -37,7 +39,7 @@ export async function getModel(
  */
 export function getModelSync(modelId?: string): LanguageModel {
   const openrouter = createOpenRouter({ apiKey: aiEnv.OPENROUTER_API_KEY });
-  return openrouter(
-    modelId ?? aiEnv.HARBINGER_DEFAULT_MODEL,
-  ) as unknown as LanguageModel;
+  return openrouter(modelId ?? aiEnv.HARBINGER_DEFAULT_MODEL, {
+    usage: { include: true },
+  }) as unknown as LanguageModel;
 }

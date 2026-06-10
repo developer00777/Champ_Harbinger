@@ -26,7 +26,7 @@ services:
       POSTGRES_PASSWORD: harbinger
       POSTGRES_DB: champ_harbinger
     ports:
-      - "5432:5432"
+      - "5436:5432"
     volumes:
       - harbinger-pg-data:/var/lib/postgresql/data
     healthcheck:

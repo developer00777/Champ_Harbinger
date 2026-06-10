@@ -3,10 +3,7 @@ import { Models } from "@/lib/ai/models";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
-import {
-  estimateClaudeCostFromUsage,
-  trackUsage,
-} from "@/lib/services/cost-tracker";
+import { recordAiUsage } from "@/lib/ai/usage";
 import {
   UNTRUSTED_NOTICE,
   stringify,
@@ -159,7 +156,8 @@ export async function findPeopleOnDomain(
     .join("\n\n");
 
   try {
-    const { object, usage } = await generateObject({
+    const startedAt = Date.now();
+    const aiResult = await generateObject({
       model: getModel(Models.classification),
       schema: z.object({
         people: z.array(
@@ -199,13 +197,13 @@ Rules:
 Scraped page content:
 ${wrapUntrusted(combinedContent.slice(0, 12000))}`,
     });
+    const { object } = aiResult;
 
-    trackUsage({
-      service: "claude",
+    recordAiUsage(aiResult, {
       operation: "domain-people-extract",
-      tokens_input: usage.inputTokens ?? 0,
-      tokens_output: usage.outputTokens ?? 0,
-      estimated_cost_usd: estimateClaudeCostFromUsage("haiku", usage),
+      costModel: "haiku",
+      modelLabel: Models.classification,
+      startedAt,
       metadata: {
         model: "claude-haiku-4-5",
         domain,
@@ -289,7 +287,8 @@ export async function filterContactsByCompany(
     .join("\n");
 
   try {
-    const { object, usage } = await generateObject({
+    const startedAt = Date.now();
+    const result = await generateObject({
       model: getModel(Models.classification),
       schema: z.object({
         verified: z.array(
@@ -327,13 +326,13 @@ Rules:
 - Clean up names: remove LinkedIn suffixes, emoji, excessive credentials
 - Clean up titles: extract just the role (e.g., "Branch Manager" not "Branch Manager at Dixons")`,
     });
+    const { object } = result;
 
-    trackUsage({
-      service: "claude",
+    recordAiUsage(result, {
       operation: "contact-filter",
-      tokens_input: usage.inputTokens ?? 0,
-      tokens_output: usage.outputTokens ?? 0,
-      estimated_cost_usd: estimateClaudeCostFromUsage("haiku", usage),
+      costModel: "haiku",
+      modelLabel: Models.classification,
+      startedAt,
       metadata: {
         model: "claude-haiku-4-5",
         companyName: company.name,

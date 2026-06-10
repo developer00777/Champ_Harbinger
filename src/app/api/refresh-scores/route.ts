@@ -3,11 +3,8 @@ import { generateObject } from "ai";
 import { z } from "zod";
 
 import { getProfileForPrompt } from "@/lib/profile";
-import {
-  estimateClaudeCostFromUsage,
-  trackUsage,
-  withAction,
-} from "@/lib/services/cost-tracker";
+import { withAction } from "@/lib/services/cost-tracker";
+import { recordAiUsage } from "@/lib/ai/usage";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
@@ -153,6 +150,7 @@ export async function POST(request: Request) {
       ? `User Profile:\n- Name: ${profile.name || "N/A"}\n- Role: ${profile.role_title || "N/A"}\n- Company: ${profile.company_name || "N/A"}\n- Offering: ${profile.offering_summary || "N/A"}\n- Notes: ${profile.notes || "N/A"}`
       : "No user profile available.";
 
+    const startedAt = Date.now();
     const result = await generateObject({
       model: getModel(),
       schema: z.object({
@@ -201,20 +199,18 @@ Contacts to score (enrichment data scraped from LinkedIn, Twitter, news):
 ${wrapUntrusted(JSON.stringify(contactSummaries, null, 2))}`,
     });
 
-    trackUsage({
-      service: "claude",
+    recordAiUsage(result, {
       operation: "score-contacts",
-      tokens_input: result.usage.inputTokens ?? 0,
-      tokens_output: result.usage.outputTokens ?? 0,
-      estimated_cost_usd: estimateClaudeCostFromUsage("sonnet", result.usage),
+      costModel: "sonnet",
+      startedAt,
       metadata: {
         model: "claude-sonnet-4",
         contactsScored: result.object.scores.length,
         cache_creation_tokens: result.usage.inputTokenDetails?.cacheWriteTokens,
         cache_read_tokens: result.usage.inputTokenDetails?.cacheReadTokens,
       },
-      campaign_id: campaignId,
-      user_id: userId,
+      campaignId,
+      userId,
     });
 
     // Batch update scores on campaign_people junction table

@@ -3,10 +3,7 @@ import { generateObject } from "ai";
 import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { z } from "zod";
-import {
-  estimateClaudeCostFromUsage,
-  trackUsage,
-} from "@/lib/services/cost-tracker";
+import { recordAiUsage } from "@/lib/ai/usage";
 import {
   UNTRUSTED_NOTICE,
   stringify,
@@ -127,7 +124,8 @@ export async function classifyNewRoles(
 ): Promise<Array<{ title: string; category: string }>> {
   if (jobs.length === 0) return [];
 
-  const { object, usage } = await generateObject({
+  const startedAt = Date.now();
+  const result = await generateObject({
     model: getModel(Models.classification),
     schema: z.object({
       classifications: z.array(
@@ -156,13 +154,13 @@ ${wrapUntrusted(
 
 Assign each title exactly one category from: engineering, sales, marketing, operations, leadership, product, design, support, finance, hr, other.`,
   });
+  const { object } = result;
 
-  trackUsage({
-    service: "claude",
+  recordAiUsage(result, {
     operation: "classify-roles",
-    tokens_input: usage.inputTokens ?? 0,
-    tokens_output: usage.outputTokens ?? 0,
-    estimated_cost_usd: estimateClaudeCostFromUsage("haiku", usage),
+    costModel: "haiku",
+    modelLabel: Models.classification,
+    startedAt,
     metadata: { jobCount: jobs.length },
   });
 

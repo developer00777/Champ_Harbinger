@@ -11,10 +11,8 @@ import {
 
 import { getProfileForPrompt } from "@/lib/profile";
 import { getActiveSignals } from "@/lib/signals";
-import {
-  estimateClaudeCostFromUsage,
-  trackUsage,
-} from "@/lib/services/cost-tracker";
+import { estimateClaudeCostFromUsage } from "@/lib/services/cost-tracker";
+import { recordAiUsage } from "@/lib/ai/usage";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { allTools } from "@/lib/tools";
@@ -119,6 +117,7 @@ export async function POST(request: Request) {
 
   const model = await getModel(undefined, userId);
 
+  const startedAt = Date.now();
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       const result = streamText({
@@ -140,20 +139,20 @@ export async function POST(request: Request) {
           userId: user.id,
           campaignId: campaignId ?? null,
         },
-        onFinish({ usage }) {
-          trackUsage({
-            service: "claude",
+        onFinish(event) {
+          const { usage } = event;
+          recordAiUsage(event, {
             operation: "chat",
-            tokens_input: usage.inputTokens ?? 0,
-            tokens_output: usage.outputTokens ?? 0,
-            estimated_cost_usd: estimateClaudeCostFromUsage("sonnet", usage),
+            costModel: "sonnet",
+            modelLabel: "anthropic/claude-sonnet-4.6",
+            startedAt,
             metadata: {
               model: "claude-sonnet-4-6",
               cache_creation_tokens: usage.inputTokenDetails?.cacheWriteTokens,
               cache_read_tokens: usage.inputTokenDetails?.cacheReadTokens,
             },
-            campaign_id: campaignId,
-            user_id: user.id,
+            campaignId,
+            userId: user.id,
           });
           const posthog = getPostHogClient();
           posthog.capture({

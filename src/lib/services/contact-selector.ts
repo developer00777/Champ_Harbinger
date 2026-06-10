@@ -2,10 +2,7 @@ import { generateObject } from "ai";
 import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { z } from "zod";
-import {
-  estimateClaudeCostFromUsage,
-  trackUsage,
-} from "@/lib/services/cost-tracker";
+import { recordAiUsage } from "@/lib/ai/usage";
 import {
   UNTRUSTED_NOTICE,
   stringify,
@@ -87,7 +84,8 @@ export async function selectContactsForSignal(
     })
     .join("\n\n");
 
-  const { object, usage } = await generateObject({
+  const startedAt = Date.now();
+  const result = await generateObject({
     model: getModel(Models.classification),
     schema: verdictSchema,
     prompt: `You are picking the best contact(s) to email at a company after a buying-signal fired. You have the reason the signal fired (in the buyer's own words, via an upstream LLM) and a list of known contacts at the company.
@@ -111,6 +109,7 @@ Pick up to ${maxPicks} contact(s). Rules:
 - rationale: one sentence citing the specific fit between the contact and the signal reason.
 - priority: 1 = send first (best fit), 2 = send if top picks fail, 3 = fallback only.`,
   });
+  const { object } = result;
 
   const validPicks: Pick[] = [];
   for (const p of object.picks) {
@@ -119,12 +118,11 @@ Pick up to ${maxPicks} contact(s). Rules:
     }
   }
 
-  trackUsage({
-    service: "claude",
+  recordAiUsage(result, {
     operation: "select-contacts",
-    tokens_input: usage.inputTokens ?? 0,
-    tokens_output: usage.outputTokens ?? 0,
-    estimated_cost_usd: estimateClaudeCostFromUsage("haiku", usage),
+    costModel: "haiku",
+    modelLabel: Models.classification,
+    startedAt,
     metadata: {
       candidateCount: input.candidates.length,
       picksRequested: maxPicks,
