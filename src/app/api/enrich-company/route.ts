@@ -288,11 +288,11 @@ async function enrichOrganization(
     const runProduct = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_PRODUCT);
     const runFunding = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_FUNDING);
     const runExecutive = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_EXECUTIVE);
-    // Google Reviews is an optional, key-gated integration: only run it when a
-    // GOOGLE_API_KEY is configured, so it never fails/warns on the default path.
-    const runGoogleReviews =
-      !!process.env.GOOGLE_API_KEY &&
-      (!activeSlugs || activeSlugs.has(SIGNAL_SLUG_GOOGLE_REVIEWS));
+    // Reviews enricher: self-hosted web reviews by default (no key), or Google
+    // Places when GOOGLE_API_KEY is set. Runs when the signal is active (or no
+    // signals are configured).
+    const runReviews =
+      !activeSlugs || activeSlugs.has(SIGNAL_SLUG_GOOGLE_REVIEWS);
 
     const extractor = new WebExtractionService();
     const errors: string[] = [];
@@ -313,16 +313,25 @@ async function enrichOrganization(
       Promise.resolve({ results: [] }),
       Promise.resolve({ results: [] }),
       Promise.resolve({ results: [] }),
-      runGoogleReviews
+      runReviews
         ? (async () => {
-            const { GooglePlacesService } =
-              await import("@/lib/services/google-places-service");
-            const service = new GooglePlacesService();
-            return service.getPlaceReviews(
-              org.name as string,
-              (org.location as string) || undefined,
-              (org.domain as string) || undefined,
-            );
+            const name = org.name as string;
+            const location = (org.location as string) || undefined;
+            const domain = (org.domain as string) || undefined;
+            // Use Google Places when a key is configured (precise); otherwise
+            // the self-hosted web-reviews enricher (Trustpilot/G2/… via SearXNG).
+            if (process.env.GOOGLE_API_KEY) {
+              const { GooglePlacesService } =
+                await import("@/lib/services/google-places-service");
+              return new GooglePlacesService().getPlaceReviews(
+                name,
+                location,
+                domain,
+              );
+            }
+            const { getWebReviews } =
+              await import("@/lib/services/reviews-service");
+            return getWebReviews(name, location, domain);
           })()
         : Promise.resolve(null),
     ]);

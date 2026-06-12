@@ -164,8 +164,10 @@ export const INTEGRATIONS: Integration[] = [
     name: "Google Places",
     category: "enrichment",
     severity: "optional",
-    feature: "Google reviews + Places enrichment signal",
-    consequence: "Google Reviews signal fails; falls back to no rating data.",
+    feature:
+      "Precise Google ratings (optional upgrade over self-hosted reviews)",
+    consequence:
+      "Reviews come from the self-hosted web-reviews enricher (Trustpilot/G2/…) instead of Google's exact star rating.",
     envVars: ["GOOGLE_API_KEY"],
     signupUrl:
       "https://developers.google.com/maps/documentation/places/web-service",
