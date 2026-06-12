@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Upload } from "lucide-react";
-import readXlsxFile from "read-excel-file/web-worker";
+import readXlsxFile from "read-excel-file/browser";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -209,12 +209,13 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
       setOpen(true);
       const isExcel = /\.xlsx?$/i.test(file.name);
       if (isExcel) {
+        // readXlsxFile resolves to an array of sheets ({ sheet, data }); take
+        // the first sheet's rows-of-cells and normalize every cell to a trimmed
+        // string, reusing the same column mapping as CSV.
         readXlsxFile(file)
-          .then((sheet) => {
-            // Default call resolves to rows-of-cells; normalize every cell to a
-            // trimmed string and reuse the same column mapping as CSV.
-            const grid = sheet as unknown as unknown[][];
-            const matrix: string[][] = grid.map((row) =>
+          .then((sheets) => {
+            const data = (sheets[0]?.data ?? []) as unknown[][];
+            const matrix: string[][] = data.map((row) =>
               row.map((cell) => (cell == null ? "" : String(cell).trim())),
             );
             const [h = [], ...rows] = matrix;
@@ -223,9 +224,13 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
               rows.filter((r) => r.some((c) => c)),
             );
           })
-          .catch(() =>
-            setError("Could not read the Excel file. Is it a valid .xlsx?"),
-          );
+          .catch((err: unknown) => {
+            console.error("[xlsx] parse failed", err);
+            const msg = err instanceof Error ? err.message : String(err);
+            setError(
+              `Could not read the Excel file (${msg}). It must be a modern .xlsx — re-save legacy .xls files as .xlsx, or export as CSV.`,
+            );
+          });
         return;
       }
       const reader = new FileReader();
