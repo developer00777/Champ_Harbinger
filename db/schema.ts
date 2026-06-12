@@ -907,3 +907,71 @@ export const champiqQueue = pgTable(
     byStatus: index("champiq_queue_status_idx").on(t.status),
   }),
 );
+
+// ─── Mailbox connectors (send + read through a user's mailbox) ────────────────
+
+/**
+ * A connected mailbox a user sends/receives outreach through. `type` selects
+ * the connector implementation (SMTP/IMAP today, gmail/outlook OAuth later).
+ * Secrets (SMTP password / OAuth tokens) live encrypted in `secretEncrypted`;
+ * `config` holds non-secret settings (hosts, ports, secure flags).
+ */
+export const mailboxConnections = pgTable(
+  "mailbox_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    type: text("type").notNull(), // "smtp_imap" | "gmail" | "outlook"
+    label: text("label"),
+    fromAddress: text("from_address").notNull(),
+    fromName: text("from_name"),
+    config: jsonb("config")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    secretEncrypted: text("secret_encrypted"),
+    status: text("status").notNull().default("active"), // active | error | disconnected
+    lastError: text("last_error"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    isDefault: boolean("is_default").notNull().default(false),
+    ...timestamps,
+  },
+  (t) => ({
+    byUser: index("mailbox_connections_user_idx").on(t.clerkUserId),
+  }),
+);
+
+/**
+ * Inbound messages synced from a connected mailbox (replies + the inbox view).
+ * When a message replies to one of our sent emails, `sentEmailId` links it and
+ * the matching sent_emails row is stamped replied.
+ */
+export const mailboxMessages = pgTable(
+  "mailbox_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => mailboxConnections.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    messageId: text("message_id"), // RFC Message-ID header
+    inReplyTo: text("in_reply_to"),
+    fromAddress: text("from_address"),
+    toAddress: text("to_address"),
+    subject: text("subject"),
+    snippet: text("snippet"),
+    body: text("body"),
+    sentEmailId: uuid("sent_email_id").references(() => sentEmails.id, {
+      onDelete: "set null",
+    }),
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    byUser: index("mailbox_messages_user_idx").on(t.clerkUserId),
+    byConnection: index("mailbox_messages_connection_idx").on(t.connectionId),
+    byMessageId: index("mailbox_messages_message_id_idx").on(t.messageId),
+  }),
+);

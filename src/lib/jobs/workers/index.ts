@@ -4,9 +4,11 @@ import {
   TRACKING_RUN,
   OUTREACH_FOLLOWUPS,
   ENRICH_COMPANY,
+  MAILBOX_SYNC,
   type EnrichCompanyJob,
 } from "@/lib/jobs/boss";
 import { dispatchDueTrackingConfigs } from "@/lib/jobs/handlers/dispatch-tracking";
+import { syncMailboxes } from "@/lib/jobs/handlers/sync-mailboxes";
 import { getAppBaseUrl, workerHeaders } from "@/lib/jobs/internal-auth";
 
 async function postInternal(path: string, body: unknown): Promise<void> {
@@ -34,8 +36,11 @@ export async function startWorkers(): Promise<void> {
   const dispatchCron = process.env.TRACKING_DISPATCH_CRON || "*/5 * * * *";
   const followupsCron = process.env.OUTREACH_FOLLOWUPS_CRON || "*/15 * * * *";
 
+  const mailboxSyncCron = process.env.MAILBOX_SYNC_CRON || "*/3 * * * *";
+
   await boss.schedule(TRACKING_DISPATCH, dispatchCron);
   await boss.schedule(OUTREACH_FOLLOWUPS, followupsCron);
+  await boss.schedule(MAILBOX_SYNC, mailboxSyncCron);
 
   await boss.work(TRACKING_DISPATCH, async () => {
     const result = await dispatchDueTrackingConfigs();
@@ -72,7 +77,16 @@ export async function startWorkers(): Promise<void> {
     );
   });
 
+  await boss.work(MAILBOX_SYNC, async () => {
+    const r = await syncMailboxes();
+    if (r.synced > 0 || r.replies > 0) {
+      console.log(
+        `[worker] mailbox sync: ${r.synced} new, ${r.replies} replies`,
+      );
+    }
+  });
+
   console.log(
-    `[worker] ready — dispatch:"${dispatchCron}" followups:"${followupsCron}"`,
+    `[worker] ready — dispatch:"${dispatchCron}" followups:"${followupsCron}" mailbox:"${mailboxSyncCron}"`,
   );
 }

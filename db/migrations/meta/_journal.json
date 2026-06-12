@@ -43,6 +43,13 @@
       "when": 1781131711073,
       "tag": "0005_swift_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781264118204,
+      "tag": "0006_good_guardsmen",
+      "breakpoints": true
     }
   ]
 }

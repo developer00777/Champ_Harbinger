@@ -15,6 +15,7 @@ export const TRACKING_DISPATCH = "tracking-dispatch";
 export const TRACKING_RUN = "tracking-run";
 export const OUTREACH_FOLLOWUPS = "outreach-followups";
 export const ENRICH_COMPANY = "enrich-company";
+export const MAILBOX_SYNC = "mailbox-sync";
 
 declare global {
   var __harbinger_boss: PgBoss | undefined;
@@ -42,6 +43,7 @@ export async function getBoss(): Promise<PgBoss> {
         TRACKING_RUN,
         OUTREACH_FOLLOWUPS,
         ENRICH_COMPANY,
+        MAILBOX_SYNC,
       ]) {
         try {
           await boss.createQueue(queue);

@@ -4,6 +4,10 @@ import { schema } from "@/db";
 import { getEmailProvider } from "@/lib/email/provider";
 import { trackUsage } from "@/lib/services/cost-tracker";
 import { emailsSentTotal } from "@/lib/monitoring/metrics";
+import {
+  getDefaultMailboxRow,
+  getConnectorForRow,
+} from "@/lib/mailbox/registry";
 
 export interface EnrollmentForSend {
   id: string;
@@ -73,34 +77,59 @@ export async function sendApprovedDraft(
     .where(eq(schema.userSettings.clerkUserId, draft.clerkUserId))
     .limit(1);
 
-  const emailProvider = getEmailProvider();
-  if (!emailProvider.enabled) {
+  // Prefer the user's connected mailbox (SMTP/IMAP/OAuth); otherwise fall back
+  // to the configured EmailProvider (ChampMail / stub).
+  const mailboxRow = await getDefaultMailboxRow(draft.clerkUserId);
+  const emailProvider = mailboxRow ? null : getEmailProvider();
+  if (!mailboxRow && emailProvider && !emailProvider.enabled) {
     return {
       ok: false,
       reason:
-        "Email sending is disabled. Configure ChampMail or another provider to enable.",
+        "Email sending is disabled. Connect a mailbox (Settings → Mailboxes) or configure ChampMail.",
     };
   }
 
+  const fromEmail =
+    mailboxRow?.fromAddress ?? settings?.fromEmail ?? "ChampHarbinger";
+
   try {
-    const result = await emailProvider.send({
-      to: draft.toEmail,
-      from: settings?.fromEmail ?? "ChampHarbinger",
-      subject: draft.subject,
-      html: draft.bodyHtml,
-      text: draft.bodyText ?? "",
-      replyTo: settings?.replyToEmail ?? undefined,
-    });
-
-    if (result.status === "failed") {
-      emailsSentTotal.labels("failed").inc();
-      return {
-        ok: false,
-        reason: result.error ?? "Email provider returned failed status",
-      };
+    let messageId: string;
+    if (mailboxRow) {
+      try {
+        const connector = getConnectorForRow(mailboxRow);
+        const res = await connector.send({
+          to: draft.toEmail,
+          subject: draft.subject,
+          text: draft.bodyText ?? "",
+          html: draft.bodyHtml,
+          replyTo: settings?.replyToEmail ?? undefined,
+        });
+        messageId = res.messageId;
+      } catch (err) {
+        emailsSentTotal.labels("failed").inc();
+        return {
+          ok: false,
+          reason: `Mailbox send failed: ${err instanceof Error ? err.message : "unknown"}`,
+        };
+      }
+    } else {
+      const result = await emailProvider!.send({
+        to: draft.toEmail,
+        from: fromEmail,
+        subject: draft.subject,
+        html: draft.bodyHtml,
+        text: draft.bodyText ?? "",
+        replyTo: settings?.replyToEmail ?? undefined,
+      });
+      if (result.status === "failed") {
+        emailsSentTotal.labels("failed").inc();
+        return {
+          ok: false,
+          reason: result.error ?? "Email provider returned failed status",
+        };
+      }
+      messageId = result.providerId ?? result.id;
     }
-
-    const messageId = result.providerId ?? result.id;
 
     await adminDb.insert(schema.sentEmails).values({
       agentmailMessageId: messageId,
@@ -112,7 +141,7 @@ export async function sendApprovedDraft(
       clerkUserId: draft.clerkUserId,
       clerkOrgId: draft.clerkOrgId,
       toEmail: draft.toEmail,
-      fromEmail: settings?.fromEmail ?? "ChampHarbinger",
+      fromEmail,
       subject: draft.subject,
       status: "sent",
       sentAt: now,
