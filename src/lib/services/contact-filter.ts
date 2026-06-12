@@ -4,6 +4,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
 import { recordAiUsage } from "@/lib/ai/usage";
+import { searxSearch } from "@/lib/search/searxng-client";
 import {
   UNTRUSTED_NOTICE,
   stringify,
@@ -92,6 +93,44 @@ async function fetchSitemapUrls(domain: string): Promise<string[]> {
  * Fetches the sitemap first to find real URLs instead of guessing paths.
  * Falls back to a short guess list if no sitemap exists.
  */
+/** Normalize a URL to a canonical LinkedIn profile (https://www.linkedin.com/in/...). */
+function toLinkedInProfile(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)linkedin\.com$/i.test(u.hostname)) return null;
+    if (!/^\/in\//i.test(u.pathname)) return null;
+    return `https://www.linkedin.com${u.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find a person's LinkedIn profile URL via web search (SearXNG). LinkedIn is the
+ * join key we use to map a contact onto LakeB2B, so we want it on every contact
+ * even when the company page doesn't link it. Returns null when SearXNG is
+ * unconfigured or nothing matches.
+ */
+export async function findLinkedInUrl(
+  name: string,
+  orgName: string,
+): Promise<string | null> {
+  if (!name.trim()) return null;
+  // Plain queries surface LinkedIn profiles via the metasearch engines; the
+  // `site:` operator does NOT work through SearXNG/DuckDuckGo, so avoid it.
+  for (const q of [
+    `"${name}" ${orgName} linkedin`,
+    `${name} ${orgName} linkedin.com/in`,
+  ]) {
+    const results = await searxSearch(q, 8);
+    for (const r of results) {
+      const profile = toLinkedInProfile(r.url);
+      if (profile) return profile;
+    }
+  }
+  return null;
+}
+
 export async function findPeopleOnDomain(
   domain: string,
   orgName: string,
@@ -212,7 +251,25 @@ ${wrapUntrusted(combinedContent.slice(0, 12000))}`,
       },
     });
 
-    return object.people;
+    // Backfill LinkedIn URLs (the LakeB2B join key) for anyone the page didn't
+    // link, via web search — 3 at a time to bound latency.
+    const people = object.people;
+    const missing = people.filter((p) => !p.linkedinUrl && p.name?.trim());
+    for (let i = 0; i < missing.length; i += 3) {
+      const batch = missing.slice(i, i + 3);
+      await Promise.all(
+        batch.map(async (p) => {
+          try {
+            const li = await findLinkedInUrl(p.name, orgName);
+            if (li) p.linkedinUrl = li;
+          } catch {
+            // best-effort
+          }
+        }),
+      );
+    }
+
+    return people;
   } catch (err) {
     console.error("[contact-filter] Domain people extraction failed:", err);
     return [];
