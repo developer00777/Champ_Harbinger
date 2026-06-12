@@ -1,5 +1,6 @@
 import { withAction } from "@/lib/services/cost-tracker";
 import { getCurrentUser } from "@/lib/auth";
+import { verifyWorkerSecret } from "@/lib/jobs/internal-auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { eq, and } from "drizzle-orm";
@@ -64,18 +65,24 @@ async function getActiveSignalSlugs(
 }
 
 export async function POST(request: Request) {
-  let userId: string;
-  try {
-    ({ userId } = await getCurrentUser());
-  } catch {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: Record<string, unknown>;
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  // Auth: a Clerk session for direct UI calls, OR the worker secret + an
+  // explicit userId for queued bulk-enrichment jobs.
+  let userId: string;
+  if (verifyWorkerSecret(request) && typeof body.userId === "string") {
+    userId = body.userId;
+  } else {
+    try {
+      ({ userId } = await getCurrentUser());
+    } catch {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
   const { companyId, campaignId } = body as {

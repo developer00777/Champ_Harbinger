@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Mail } from "lucide-react";
+import { ChevronDown, Mail, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { CsvUpload } from "@/components/campaign/csv-upload";
@@ -42,6 +43,86 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       </div>
       <div className="text-sm">{value}</div>
     </div>
+  );
+}
+
+function EnrichAllButton({
+  campaignId,
+  onDataChanged,
+}: {
+  campaignId: string;
+  onDataChanged: () => void;
+}) {
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{
+    enriched: number;
+    total: number;
+  } | null>(null);
+
+  const poll = async () => {
+    // ~6 min ceiling; refresh the pipeline each tick so rows fill in live.
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        const res = await fetch(
+          `/api/enrich-company/bulk?campaignId=${campaignId}`,
+        );
+        if (!res.ok) break;
+        const p = (await res.json()) as {
+          enriched: number;
+          total: number;
+          pending: number;
+        };
+        setProgress({ enriched: p.enriched, total: p.total });
+        onDataChanged();
+        if (p.pending <= 0) {
+          toast.success("Enrichment complete");
+          break;
+        }
+      } catch {
+        // keep polling
+      }
+    }
+    setRunning(false);
+    setProgress(null);
+  };
+
+  const start = async () => {
+    setRunning(true);
+    try {
+      const res = await fetch("/api/enrich-company/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to start enrichment");
+        setRunning(false);
+        return;
+      }
+      if (data.queued === 0) {
+        toast.success("All companies are already enriched");
+        setRunning(false);
+        return;
+      }
+      toast.success(`Enriching ${data.queued} companies in the background…`);
+      void poll();
+    } catch {
+      toast.error("Failed to start enrichment");
+      setRunning(false);
+    }
+  };
+
+  return (
+    <Button variant="outline" size="sm" onClick={start} disabled={running}>
+      <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+      {running
+        ? progress
+          ? `Enriching ${progress.enriched}/${progress.total}`
+          : "Enriching…"
+        : "Enrich all"}
+    </Button>
   );
 }
 
@@ -121,6 +202,10 @@ export function CampaignHeader({
             onProfileChanged={onProfileChanged}
           />
           <SetUpOutreachButton campaignName={campaign.name} />
+          <EnrichAllButton
+            campaignId={campaign.id}
+            onDataChanged={onDataChanged}
+          />
           <CampaignSignalsPopover campaignId={campaign.id} />
           <CsvUpload campaignId={campaign.id} onImported={onDataChanged} />
         </div>

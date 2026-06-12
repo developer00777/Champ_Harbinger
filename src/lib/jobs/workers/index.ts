@@ -3,6 +3,8 @@ import {
   TRACKING_DISPATCH,
   TRACKING_RUN,
   OUTREACH_FOLLOWUPS,
+  ENRICH_COMPANY,
+  type EnrichCompanyJob,
 } from "@/lib/jobs/boss";
 import { dispatchDueTrackingConfigs } from "@/lib/jobs/handlers/dispatch-tracking";
 import { getAppBaseUrl, workerHeaders } from "@/lib/jobs/internal-auth";
@@ -53,6 +55,21 @@ export async function startWorkers(): Promise<void> {
 
   await boss.work(OUTREACH_FOLLOWUPS, async () => {
     await postInternal("/api/outreach/process", { type: "followups" });
+  });
+
+  // Bulk enrichment: process up to 5 companies concurrently per poll so a
+  // 50-company campaign finishes in ~1-2 min instead of serially.
+  await boss.work(ENRICH_COMPANY, { batchSize: 5 }, async (jobs) => {
+    await Promise.allSettled(
+      jobs.map((job) => {
+        const { companyId, campaignId, userId } = job.data as EnrichCompanyJob;
+        return postInternal("/api/enrich-company", {
+          companyId,
+          campaignId,
+          userId,
+        });
+      }),
+    );
   });
 
   console.log(

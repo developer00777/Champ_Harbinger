@@ -14,6 +14,7 @@ import { PgBoss } from "pg-boss";
 export const TRACKING_DISPATCH = "tracking-dispatch";
 export const TRACKING_RUN = "tracking-run";
 export const OUTREACH_FOLLOWUPS = "outreach-followups";
+export const ENRICH_COMPANY = "enrich-company";
 
 declare global {
   var __harbinger_boss: PgBoss | undefined;
@@ -40,6 +41,7 @@ export async function getBoss(): Promise<PgBoss> {
         TRACKING_DISPATCH,
         TRACKING_RUN,
         OUTREACH_FOLLOWUPS,
+        ENRICH_COMPANY,
       ]) {
         try {
           await boss.createQueue(queue);
@@ -68,4 +70,22 @@ export async function enqueueTrackingRun(
     { trackingConfigId },
     { retryLimit: 2, retryBackoff: true },
   );
+}
+
+export interface EnrichCompanyJob {
+  companyId: string;
+  campaignId: string;
+  userId: string;
+}
+
+/** Enqueue a single company enrichment (used by the bulk "Enrich All" action). */
+export async function enqueueEnrichCompany(
+  job: EnrichCompanyJob,
+): Promise<void> {
+  const boss = await getBoss();
+  await boss.send(ENRICH_COMPANY, job, {
+    retryLimit: 1,
+    // de-dupe in-flight jobs for the same company so double-clicks don't pile up
+    singletonKey: `${job.campaignId}:${job.companyId}`,
+  });
 }

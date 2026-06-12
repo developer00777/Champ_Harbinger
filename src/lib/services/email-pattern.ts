@@ -267,7 +267,14 @@ export async function mxCheck(
   resolver: MxResolver = resolveMx,
 ): Promise<boolean> {
   try {
-    const records = await resolver(domain);
+    // Cap the DNS lookup so a slow/blocked resolver can't stall email-finding
+    // (it was hanging ~25s on the OS timeout). Treat a timeout as "no MX".
+    const records = await Promise.race([
+      resolver(domain),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("mx_timeout")), 4000),
+      ),
+    ]);
     return records.length > 0;
   } catch {
     return false;
