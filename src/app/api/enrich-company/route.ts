@@ -288,8 +288,11 @@ async function enrichOrganization(
     const runProduct = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_PRODUCT);
     const runFunding = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_FUNDING);
     const runExecutive = !activeSlugs || activeSlugs.has(SIGNAL_SLUG_EXECUTIVE);
+    // Google Reviews is an optional, key-gated integration: only run it when a
+    // GOOGLE_API_KEY is configured, so it never fails/warns on the default path.
     const runGoogleReviews =
-      !activeSlugs || activeSlugs.has(SIGNAL_SLUG_GOOGLE_REVIEWS);
+      !!process.env.GOOGLE_API_KEY &&
+      (!activeSlugs || activeSlugs.has(SIGNAL_SLUG_GOOGLE_REVIEWS));
 
     const extractor = new WebExtractionService();
     const errors: string[] = [];
