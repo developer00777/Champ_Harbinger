@@ -65,7 +65,7 @@ export async function startWorkers(): Promise<void> {
   // Bulk enrichment: process up to 5 companies concurrently per poll so a
   // 50-company campaign finishes in ~1-2 min instead of serially.
   await boss.work(ENRICH_COMPANY, { batchSize: 5 }, async (jobs) => {
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       jobs.map((job) => {
         const { companyId, campaignId, userId } = job.data as EnrichCompanyJob;
         return postInternal("/api/enrich-company", {
@@ -75,6 +75,15 @@ export async function startWorkers(): Promise<void> {
         });
       }),
     );
+    const failures = results.filter((r) => r.status === "rejected");
+    if (failures.length) {
+      console.error(
+        `[worker] enrich: ${failures.length}/${jobs.length} failed:`,
+        failures
+          .slice(0, 3)
+          .map((f) => (f as PromiseRejectedResult).reason?.message),
+      );
+    }
   });
 
   await boss.work(MAILBOX_SYNC, async () => {

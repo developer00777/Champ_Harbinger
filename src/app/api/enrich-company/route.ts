@@ -428,9 +428,12 @@ async function enrichOrganization(
         fetchedAt: new Date().toISOString(),
       };
     } else if (googleReviewsResult.status === "rejected") {
-      errors.push(
-        `Google Reviews: ${googleReviewsResult.reason?.message || "Failed"}`,
-      );
+      const msg = googleReviewsResult.reason?.message || "Failed";
+      // Google Reviews is an optional integration — a missing GOOGLE_API_KEY
+      // isn't an enrichment failure, so don't surface it as a scary error.
+      if (!/GOOGLE_API_KEY|not configured/i.test(msg)) {
+        errors.push(`Google Reviews: ${msg}`);
+      }
     }
 
     if (errors.length > 0) enrichmentData.errors = errors;
