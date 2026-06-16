@@ -15,7 +15,7 @@ web), enrichment (self-hosted Obscura + Trafilatura scraping, LinkedIn/X scraper
 extraction, email-pattern/MX resolution), signals + `priorityScore` scoring, email
 composition (email-skills), and a send path (mailbox SMTP/IMAP → ChampMail).
 
-A vendor patch (`champharbinger-waterfall-enrichment.patch`) introduced a *parallel*,
+A vendor patch (`champharbinger-waterfall-enrichment.patch`) introduced a _parallel_,
 **paid-vendor-centric** waterfall engine + a standalone MCP server. It duplicates existing
 capability and only works end-to-end with paid keys. This project **re-grounds** that engine
 on Harbinger's owned + LLM-scraping stack, makes it the foundation of an **owned master
@@ -23,14 +23,14 @@ database**, and wires it into the broader STR flow.
 
 ### The three sub-projects (build order SP1 → SP3 → SP2)
 
-- **SP1 — Waterfall Enrichment Engine + Owned Master DB** *(this spec, in depth)*. The
+- **SP1 — Waterfall Enrichment Engine + Owned Master DB** _(this spec, in depth)_. The
   foundation. LakeB2B API first → configurable vendor priority list for requested-but-missing
   fields → owned LLM scraping as the $0 fallback → accumulate verified results into a
   Harbinger-owned master DB.
 - **SP3 — Signal-gated 5-level personalization → ChampMail send w/ human confirmation**
-  *(separate spec)*. Standalone 5-level personalization module; level auto-selected from
+  _(separate spec)_. Standalone 5-level personalization module; level auto-selected from
   brand + company/role + signal strength; human-confirmation gate before ChampMail send.
-- **SP2 — ChampSet ↔ Harbinger MCP integration** *(separate spec)*. Harbinger exposes an MCP
+- **SP2 — ChampSet ↔ Harbinger MCP integration** _(separate spec)_. Harbinger exposes an MCP
   server (the SP1 engine behind it) + a dataset-import seam so a ChampSet universe flows in,
   gets enriched + scored.
 
@@ -39,7 +39,7 @@ database**, and wires it into the broader STR flow.
 1. `enrichContact(seed)` / `enrichSet(...)` return a populated, confidence-scored record using
    **only `DATABASE_URL` + `OPENROUTER_API_KEY`** (plus optional self-hosted scrape URLs). Zero
    paid-vendor calls when no vendor keys are present.
-2. LakeB2B data API is the **primary** source; only fields it leaves empty *and* that were
+2. LakeB2B data API is the **primary** source; only fields it leaves empty _and_ that were
    requested escalate down the waterfall.
 3. Every accepted enrichment is **diffed against and copied into** the Harbinger-owned master
    tables, with provenance + a join key to LakeB2B and timestamps that support a later sync.
@@ -51,7 +51,7 @@ database**, and wires it into the broader STR flow.
 
 - The standalone MCP server (SP2) and the ChampSet dataset connector (SP2).
 - The 5-level personalization module and ChampMail send gate (SP3).
-- The *actual* periodic LakeB2B↔master sync run (schema + a stubbed job only; full sync
+- The _actual_ periodic LakeB2B↔master sync run (schema + a stubbed job only; full sync
   deferred per product owner: "every day or week, later on").
 - Outlook/Gmail OAuth and the ChampIQ handoff (explicitly later).
 
@@ -94,7 +94,7 @@ database**, and wires it into the broader STR flow.
 `orchestrator.ts`, `cache.ts`, `writeback.ts`, `providers/base.ts`, `config.ts`, the two unit
 test files, and the `enrichment_*` Drizzle tables.
 
-**Re-grounded** (data sources): every adapter's *source*; the rigid `Tier` ladder gains a
+**Re-grounded** (data sources): every adapter's _source_; the rigid `Tier` ladder gains a
 **configurable provider-priority layer**; the email gate uses Harbinger's pattern+MX logic;
 the write-back targets **real Harbinger-owned master tables** instead of an illustrative one.
 
@@ -107,6 +107,7 @@ Migration renumbered to **`0007_waterfall_enrichment.sql`** (repo is at `0006`).
 After editing `schema.ts`, run `pnpm drizzle-kit generate` to refresh the meta snapshot.
 
 ### 2.1 Engine tables (from the patch, retained)
+
 - `enrichment_contacts` — working contact record threaded through a run (denormalized
   best-value columns + scores + status). Clerk-scoped.
 - `enrichment_jobs` — one row per waterfall run (start/resolved tier, required fields, spend,
@@ -119,6 +120,7 @@ After editing `schema.ts`, run `pnpm drizzle-kit generate` to refresh the meta s
   rollback token).
 
 ### 2.2 Owned master tables (NEW — the Harbinger master DB)
+
 The patch wrote to an illustrative external `master_contacts`. We make these **real,
 Harbinger-owned tables in the app DB**, the accumulation target and the thing later synced
 against the LakeB2B master.
@@ -142,7 +144,7 @@ against the LakeB2B master.
     `firmographics jsonb`, `source`, `confidence`, `last_verified`, `last_synced_at`,
     `sync_status`, timestamps; indexes on domain, name, `lakeb2b_id`, `sync_status`.
 
-> The optional **external** LakeB2B master DB (`LAKEB2B_MASTER_DSN`) is supported as a *read*
+> The optional **external** LakeB2B master DB (`LAKEB2B_MASTER_DSN`) is supported as a _read_
 > source for the future sync/compare job, but the owned master above is the build-up target and
 > the default. If `LAKEB2B_MASTER_DSN` is unset, sync simply no-ops.
 
@@ -154,15 +156,17 @@ The core refinement over the patch. Instead of a fixed `T0..T4` ladder, provider
 by a **priority list keyed on price × per-field coverage**, configurable without code.
 
 ### 3.1 Shape (`EnrichmentSettings.providerPriority`)
+
 ```ts
 interface ProviderPriorityEntry {
-  name: string;            // 'owned_scrape' | 'proxycurl' | 'pdl' | 'apollo' | 'zoominfo' | 'reseller:<id>'
-  enabled: boolean;        // false → skipped (also auto-false when key/credential absent)
-  costPerCall: number;     // USD; owned_scrape ≈ 0 (OpenRouter tokens tracked separately)
-  covers: string[];        // fields this provider is good at: ['email','phone','title',...]
-  rank: number;            // lower = tried earlier
+  name: string; // 'owned_scrape' | 'proxycurl' | 'pdl' | 'apollo' | 'zoominfo' | 'reseller:<id>'
+  enabled: boolean; // false → skipped (also auto-false when key/credential absent)
+  costPerCall: number; // USD; owned_scrape ≈ 0 (OpenRouter tokens tracked separately)
+  covers: string[]; // fields this provider is good at: ['email','phone','title',...]
+  rank: number; // lower = tried earlier
 }
 ```
+
 - Sourced from `PROVIDER_PRIORITY` env JSON (with safe defaults), later movable to a DB-backed
   settings row + a Settings UI (out of SP1 scope; env is the SP1 mechanism).
 - **LakeB2B data API is pinned first**, ahead of the priority list — it is the primary source,
@@ -171,6 +175,7 @@ interface ProviderPriorityEntry {
   `proxycurl` → `pdl` → `apollo` → `zoominfo` → `reseller:*`. The product owner overrides this.
 
 ### 3.2 How the orchestrator uses it
+
 1. Compute `missingRequested = requiredFields − fieldsAlreadyFilled` after the owned-master read
    and LakeB2B.
 2. If empty → accept (no escalation, no spend).
@@ -180,8 +185,9 @@ interface ProviderPriorityEntry {
    exhausted. Per-provider circuit breaker still applies.
 
 > The existing `Tier` enum is retained only as a coarse grouping for **budget caps and accept
-> thresholds**; the *ordering* of escalation is the priority list. This keeps the patch's budget
-> + threshold + breaker machinery intact while satisfying "ordered by price × coverage."
+> thresholds**; the _ordering_ of escalation is the priority list. This keeps the patch's budget
+>
+> - threshold + breaker machinery intact while satisfying "ordered by price × coverage."
 
 ---
 
@@ -190,7 +196,7 @@ interface ProviderPriorityEntry {
 The provider that makes "good scraping enrichment on one OpenRouter key" real.
 
 - **Adapter `providers/ownedScrape.ts`** (`covers: email, phone, title, seniority, linkedin,
-  company`, `costPerCall: 0`). Steps, reusing existing services:
+company`, `costPerCall: 0`). Steps, reusing existing services:
   1. If domain known → `WebExtractionService` (direct → Obscura → Trafilatura) on home/team/
      contact pages; `findPeopleOnDomain` + `contact-filter` for candidate people.
   2. If LinkedIn/X URL known → `linkedin-service` / `x-service`.
@@ -199,9 +205,9 @@ The provider that makes "good scraping enrichment on one OpenRouter key" real.
 - **`extract.ts`** (the new heart): pure-ish unit. Input: scraped text/HTML/profile JSON +
   `Contact` seed. Calls OpenRouter via `generateObject` (`models.classification` for routine
   parsing, `models.default` for hard cases) with a zod schema → returns canonical `FieldValue`s
-  + firmographics, each provenance-stamped (`source:'owned_scrape'`, computed confidence,
-  `verified:false` so the email gate runs). The model is **injected** so unit tests pass a fake.
-- Privacy unchanged: only `minimalIdentifiers` ever leave for any *external* provider; the LLM
+  - firmographics, each provenance-stamped (`source:'owned_scrape'`, computed confidence,
+    `verified:false` so the email gate runs). The model is **injected** so unit tests pass a fake.
+- Privacy unchanged: only `minimalIdentifiers` ever leave for any _external_ provider; the LLM
   call sends scraped public text + identifiers, consistent with existing enrich routes.
 
 ---
@@ -210,6 +216,7 @@ The provider that makes "good scraping enrichment on one OpenRouter key" real.
 
 `providers/emailGate.ts` replaces NeverBounce/ZeroBounce/Hunter as the **default** gate, reusing
 Harbinger's `email-tools` / `email-pattern`:
+
 - Infer/confirm the org email pattern; MX-check the domain (existing logic).
 - Map to `EmailVerdict`: pattern-match + MX ok → `deliverable`; MX ok but generic/catch-all
   domain → `catch_all`; no MX / known-bad → `undeliverable`; otherwise `unknown`.
@@ -222,6 +229,7 @@ Harbinger's `email-tools` / `email-pattern`:
 ## 6. Write-back & master build-up
 
 On **accept** (status `accepted`), `MasterDBWriter` (re-pointed at the owned tables):
+
 1. Select fields that are verified and above the confidence floor (email must have passed the
    gate).
 2. Load the existing `master_contacts` row by `email` → `linkedin_url` → `(full_name, domain)`;
@@ -237,6 +245,7 @@ On **accept** (status `accepted`), `MasterDBWriter` (re-pointed at the owned tab
 This is the "compare to the copy, make a copy in our own master DB, build it up" behavior.
 
 ### 6.1 Future sync (schema-ready, stubbed)
+
 `master-sync.ts` exposes `syncWithLakeB2BMaster()` (reads `LAKEB2B_MASTER_DSN` or the LakeB2B
 API, diffs by `lakeb2b_id`/email, updates `sync_status` + `last_synced_at`). SP1 ships the
 function signature + table columns + a `pnpm enrich:sync` script stub and a registered pg-boss
@@ -296,7 +305,7 @@ the primary source; + scrape URLs for best owned coverage).
    if available) → populated, scored record + master row; then a paid-key run to confirm the
    priority list escalates correctly.
 4. **Build gates:** `pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm test`, `pnpm drizzle-kit
-   generate` clean. Em-dash check on added lines (repo convention).
+generate` clean. Em-dash check on added lines (repo convention).
 
 ---
 
@@ -308,7 +317,7 @@ the primary source; + scrape URLs for best owned coverage).
 - All external calls go through `fetchWithTimeout`; circuit breaker + budget caps bound spend and
   failures; every provider no-ops gracefully without its key.
 - Matches the Champ-Flow runbook: Railway/Vercel deploy, then `0007` migration + `drizzle-kit
-  generate`.
+generate`.
 
 ---
 
@@ -324,6 +333,63 @@ the primary source; + scrape URLs for best owned coverage).
 - Migration numbering: fixed (`0004` → `0007`).
 
 ---
+
+## 11b. LinkedIn URL as the universal join key (product-owner emphasis)
+
+The LinkedIn profile URL is the **canonical match key** between Harbinger and LakeB2B. The
+waterfall must treat resolving a LinkedIn URL as a first-class objective, second only to email.
+
+### Person flow (a ChampSet set of people)
+
+1. Normalize each row → seed contact. If no LinkedIn URL, **resolve one**: reuse the existing
+   "backfill LinkedIn URLs via web search" logic (commit `9282857`) + SearXNG/owned scrape.
+2. **LinkedIn URL → LakeB2B lookup** becomes a primary matcher in the LakeB2B adapter
+   (`searchPeople`/lookup by `linkedin_url`), ahead of name+domain. The owned master also keys on
+   `linkedin_url`.
+3. Pull contact details (email, title, seniority, phone) from LakeB2B for that URL; if email is
+   still missing, **keep the LinkedIn URL as the deliverable identifier** (never blank).
+4. Enrich: recent social posts (`linkedin-service`/`x-service`), company + funding firmographics
+   (owned scrape / LakeB2B firmographics), and the signal set below.
+
+### Company flow (a ChampSet set of companies)
+
+1. For each company, **find the relevant decision-maker roles to reach out to** (title/seniority
+   targets from `campaign.icp`) via owned scrape of team/about pages + SearXNG + LinkedIn company
+   people search; produce candidate contacts with resolved LinkedIn URLs.
+2. Run each candidate through the person flow above (LinkedIn → LakeB2B → enrich).
+3. Persist the per-company contact set; expose it for showcasing. **Org-chart visualization is a
+   stretch goal** — only after the core flow is solid; the data model (contacts grouped by org +
+   seniority) already supports it.
+
+### Build sequencing (product-owner directive) + conflict resolution
+
+**LakeB2B API integration is the LAST piece.** Build and validate everything else first — owned
+LLM scrape, LinkedIn-URL resolution, the email gate, the owned master DB build-up, persistence,
+the route, and signal data — all working end-to-end on one OpenRouter key with **LakeB2B
+disabled**. Only then plug the LakeB2B adapter in as the (production-primary) source.
+
+When LakeB2B is plugged in, for a given LinkedIn URL it returns contact details; we then
+**confirm them against the current live LinkedIn/company scrape and resolve conflicts by
+recency**:
+
+- Each `FieldValue` carries `observedAt`. The live owned scrape is stamped `now()`; LakeB2B
+  values carry their record's `last_verified`/observation date.
+- **Conflict rule (field-level):** when LakeB2B and the live scrape disagree on a field value,
+  the **more recently observed value wins** (live LinkedIn scrape usually newer), regardless of
+  raw confidence — overriding the default "higher-confidence-wins" tiebreaker _for genuine value
+  conflicts_. Freshness decay already biases confidence toward recent observations; this rule
+  makes the recency preference explicit and deterministic for conflicts.
+- A detected conflict is recorded: the losing value is kept in `enrichment_field_provenance`
+  (insert-only history) and the owned-master row is flagged `sync_status='conflict'` with both
+  candidates in `field_sources`, so a human/sync job can review later.
+
+### Signals layered on enriched contacts
+
+Reuse the existing signals engine; ensure the enriched record carries the inputs these need:
+active-audience / engagement (from social posts), **intent signals**, **funding signals**, **new
+hires**, **job changes**. These feed `priorityScore` so SP3 can gate personalization on signal
+strength. (Wiring new signal recipes beyond what exists is SP3-adjacent; SP1 guarantees the
+enrichment data + LinkedIn URL needed to compute them is present and stored.)
 
 ## 12. Open items to confirm during the plan
 
