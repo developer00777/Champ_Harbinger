@@ -10,7 +10,6 @@ import {
   JobStatus,
   makeContact,
   Tier,
-  type Contact,
   type EmailVerification,
   type ProviderResult,
 } from "./types";
@@ -36,7 +35,7 @@ class FakeAdapter implements ProviderAdapter {
   isEnabled(): boolean {
     return true;
   }
-  async fetch(_contact: Contact): Promise<ProviderResult> {
+  async fetch(): Promise<ProviderResult> {
     if (this.opts.fail) {
       return emptyResult(this.name, this.tier, "forced_failure");
     }

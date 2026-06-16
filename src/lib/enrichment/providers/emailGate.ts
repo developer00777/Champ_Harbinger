@@ -67,9 +67,13 @@ export async function gateEmail(
  */
 export async function verifyEmailOwned(
   email: string,
-  _settings: EnrichmentSettings,
-  _clerkUserId?: string,
+  settings: EnrichmentSettings,
+  clerkUserId?: string,
 ): Promise<EmailVerification | null> {
+  // settings/clerkUserId are unused by the owned gate today but kept for
+  // interface symmetry with optional paid verifiers added later.
+  void settings;
+  void clerkUserId;
   return gateEmail(email);
 }
 

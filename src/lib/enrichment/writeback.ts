@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import type { SQL } from "drizzle-orm";
 
 import { minimalIdentifiers, type Contact, type FieldValue } from "./types";
 
@@ -220,9 +221,9 @@ export function drizzleMasterStore(): MasterStore {
     async findContact(keys) {
       const { adminDb } = await import("@/lib/db/admin");
       const { schema } = await import("@/db");
-      const { and, eq, or, sql } = await import("drizzle-orm");
+      const { and, eq, sql } = await import("drizzle-orm");
       const mc = schema.masterContacts;
-      let where = undefined as ReturnType<typeof or> | undefined;
+      let where: SQL | undefined = undefined;
       if (keys.email) {
         where = sql`lower(${mc.email}) = lower(${keys.email})`;
       } else if (keys.linkedinUrl) {
