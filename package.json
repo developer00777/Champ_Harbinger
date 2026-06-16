@@ -27,7 +27,8 @@
     "db:seed": "tsx scripts/seed.ts",
     "worker": "tsx scripts/run-worker.ts",
     "worker:dev": "tsx watch scripts/run-worker.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "enrich:sync": "tsx scripts/enrich-sync.ts"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs}": [
