@@ -113,9 +113,12 @@ async function defaultGenerateObject(
     import("@/lib/ai/models"),
   ]);
   const model = await getModel(Models.classification, clerkUserId);
+  // args.schema is always ExtractionSchema; use it directly so the AI SDK can
+  // infer the object type without an unsafe cast.
+  void args.schema;
   const result = await generateObject({
     model,
-    schema: args.schema as Parameters<typeof generateObject>[0]["schema"],
+    schema: ExtractionSchema,
     prompt: args.prompt,
   });
   return { object: result.object as Record<string, unknown> };
