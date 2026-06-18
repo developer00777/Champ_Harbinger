@@ -88,6 +88,7 @@ import {
   comparePageVersions,
   detectRecentChanges,
 } from "./wayback-tools";
+import { searchWeb, searchNews } from "./web-search-tools";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 const rawTools = {
@@ -163,6 +164,8 @@ const rawTools = {
   getPageHistory,
   comparePageVersions,
   detectRecentChanges,
+  searchWeb,
+  searchNews,
 };
 
 type ToolCtx = { userId?: string; campaignId?: string | null };
