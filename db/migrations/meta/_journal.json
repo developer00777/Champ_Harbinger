@@ -64,6 +64,13 @@
       "when": 1781808116958,
       "tag": "0008_robust_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781819666688,
+      "tag": "0009_lame_secret_warriors",
+      "breakpoints": true
     }
   ]
 }
