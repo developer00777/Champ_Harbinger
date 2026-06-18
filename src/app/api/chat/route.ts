@@ -1,4 +1,5 @@
 import { getModel } from "@/lib/ai/provider";
+import { acquireLlmSlot } from "@/lib/ai/concurrency";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -119,7 +120,10 @@ export async function POST(request: Request) {
 
   const startedAt = Date.now();
   const stream = createUIMessageStream({
-    execute: ({ writer }) => {
+    execute: async ({ writer }) => {
+      // Hold one global LLM slot for the whole stream (released on finish/error)
+      // so chat counts toward the shared-key concurrency cap like everything else.
+      const releaseLlmSlot = await acquireLlmSlot();
       const result = streamText({
         model,
         system: systemPrompt,
@@ -165,6 +169,10 @@ export async function POST(request: Request) {
               estimated_cost_usd: estimateClaudeCostFromUsage("sonnet", usage),
             },
           });
+          releaseLlmSlot();
+        },
+        onError() {
+          releaseLlmSlot();
         },
       });
       writer.merge(result.toUIMessageStream());

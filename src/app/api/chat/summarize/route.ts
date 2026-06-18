@@ -1,6 +1,6 @@
 import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
-import { generateText } from "ai";
+import { generateTextLimited as generateText } from "@/lib/ai/generate";
 
 import { recordAiUsage } from "@/lib/ai/usage";
 import { getCurrentUser } from "@/lib/auth";

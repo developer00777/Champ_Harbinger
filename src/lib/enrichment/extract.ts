@@ -107,11 +107,12 @@ async function defaultGenerateObject(
   clerkUserId: string | undefined,
   args: { schema: unknown; prompt: string },
 ): Promise<{ object: Record<string, unknown> }> {
-  const [{ generateObject }, { getModel }, { Models }] = await Promise.all([
-    import("ai"),
-    import("@/lib/ai/provider"),
-    import("@/lib/ai/models"),
-  ]);
+  const [{ generateObjectLimited: generateObject }, { getModel }, { Models }] =
+    await Promise.all([
+      import("@/lib/ai/generate"),
+      import("@/lib/ai/provider"),
+      import("@/lib/ai/models"),
+    ]);
   const model = await getModel(Models.classification, clerkUserId);
   // args.schema is always ExtractionSchema; use it directly so the AI SDK can
   // infer the object type without an unsafe cast.
