@@ -2,6 +2,11 @@ import "server-only";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import { aiEnv } from "./env";
+import { Models } from "./models";
+import {
+  getOllamaClassificationModel,
+  isOllamaConfigured,
+} from "./ollama-provider";
 import { getUserApiKey } from "@/lib/db/user-keys";
 
 /**
@@ -42,4 +47,22 @@ export function getModelSync(modelId?: string): LanguageModel {
   return openrouter(modelId ?? aiEnv.HARBINGER_DEFAULT_MODEL, {
     usage: { include: true },
   }) as unknown as LanguageModel;
+}
+
+/**
+ * Returns the model used for high-volume classification tasks (criteria
+ * translation, verification, signal triage). When `OLLAMA_BASE_URL` is set,
+ * routes through the self-hosted Ollama instance for free per-call inference.
+ * Otherwise falls back to `Models.classification` via OpenRouter.
+ *
+ * Use this in place of `getModelSync(Models.classification)` for any
+ * classification workload that should benefit from a local model when one
+ * is available.
+ */
+export function getClassificationModelSync(): LanguageModel {
+  if (isOllamaConfigured()) {
+    const ollamaModel = getOllamaClassificationModel();
+    if (ollamaModel) return ollamaModel;
+  }
+  return getModelSync(Models.classification);
 }
