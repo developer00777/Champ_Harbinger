@@ -93,6 +93,7 @@ import {
   extractArticle,
   extractArticleBatch,
 } from "./content-extraction-tools";
+import { bulkCrawlDomains, crawlPageWithLLM } from "./bulk-crawl-tools";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 const rawTools = {
@@ -172,6 +173,8 @@ const rawTools = {
   searchNews,
   extractArticle,
   extractArticleBatch,
+  bulkCrawlDomains,
+  crawlPageWithLLM,
 };
 
 type ToolCtx = { userId?: string; campaignId?: string | null };

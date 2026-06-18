@@ -158,6 +158,31 @@ services:
     volumes:
       - ./services/searxng:/etc/searxng:rw
 
+  # Crawl4AI — self-hosted Python bulk-crawl microservice. Bandwidth-only
+  # alternative to Browserbase for large (1M+) company scrapes. Optional: the
+  # app boots without it; bulk-crawl tools surface a 'not configured' error.
+  crawl4ai:
+    build:
+      context: ./services/crawl4ai
+      dockerfile: Dockerfile
+    image: champ-harbinger-crawl4ai:latest
+    container_name: harbinger-crawl4ai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
   # Self-hosted metrics store. Scrapes the app's /api/metrics and serves as a
   # Grafana data source. See prometheus/prometheus.yml.
   prometheus:
