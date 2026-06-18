@@ -30,6 +30,7 @@ import {
   unique,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -231,12 +232,20 @@ export const organizations = pgTable(
     emailPatternUpdatedAt: timestamp("email_pattern_updated_at", {
       withTimezone: true,
     }),
+    // Semantic search embedding (all-MiniLM-L6-v2 → 384 dims).
+    // Requires the `vector` extension (pgvector). Indexed via HNSW for
+    // sub-linear cosine-distance search at million-row scale.
+    embedding: vector("embedding", { dimensions: 384 }),
     ...timestamps,
   },
   (t) => ({
     domainUnique: uniqueIndex("organizations_domain_unique_idx").on(t.domain),
     byLastEnriched: index("organizations_last_enriched_idx").on(
       t.lastEnrichedAt,
+    ),
+    embeddingHnsw: index("organizations_embedding_hnsw_idx").using(
+      "hnsw",
+      t.embedding.op("vector_cosine_ops"),
     ),
     // GIN index for trigram search requires pg_trgm extension:
     // CREATE INDEX organizations_name_trgm_idx ON organizations USING GIN (name gin_trgm_ops);

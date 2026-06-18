@@ -100,6 +100,7 @@ import {
   getRecentFeedItems,
   checkAllMyFeeds,
 } from "./rss-tools";
+import { semanticSearchCompanies } from "./semantic-search-tools";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 const rawTools = {
@@ -185,6 +186,7 @@ const rawTools = {
   listMyFeeds,
   getRecentFeedItems,
   checkAllMyFeeds,
+  semanticSearchCompanies,
 };
 
 type ToolCtx = { userId?: string; campaignId?: string | null };
