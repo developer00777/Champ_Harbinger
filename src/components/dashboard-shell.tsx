@@ -50,15 +50,17 @@ function HeaderAgentButton() {
 export function DashboardShell({
   children,
   banner,
+  isSuperAdmin = false,
 }: {
   children: React.ReactNode;
   banner?: React.ReactNode;
+  isSuperAdmin?: boolean;
 }) {
   return (
     <CampaignProvider>
       <div data-app-shell="">
         <SidebarProvider>
-          <AppSidebar />
+          <AppSidebar isSuperAdmin={isSuperAdmin} />
           <SidebarInset className="max-h-dvh overflow-hidden">
             {banner}
             <header className="bg-background/50 sticky top-0 z-50 flex h-12 shrink-0 items-center gap-2 border-b px-4 backdrop-blur-md lg:px-6">
