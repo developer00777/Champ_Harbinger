@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { validateApiKey } from "@/lib/api/validate-api-key";
+import { assertWithinBudget } from "@/lib/budget/guard";
+import { budgetErrorResponse } from "@/lib/budget/respond";
 import { enrichContact } from "@/lib/enrichment/engine";
 import { Tier } from "@/lib/enrichment/types";
 
@@ -68,6 +70,14 @@ export async function POST(request: Request) {
       },
       { status: 400 },
     );
+  }
+
+  try {
+    await assertWithinBudget({ userId: ctx.userId });
+  } catch (err) {
+    const blocked = budgetErrorResponse(err);
+    if (blocked) return blocked;
+    throw err;
   }
 
   try {
