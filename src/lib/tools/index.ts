@@ -46,6 +46,12 @@ import {
   searchGitHubRepos,
 } from "./github-tools";
 import {
+  getGitHubOrgStats,
+  getGitHubCommitVelocity,
+  getGitHubReleaseCadence,
+  getGitHubStarTrend,
+} from "./github-signal-tools";
+import {
   createTracking,
   bulkCreateTracking,
   getTrackingConfigs,
@@ -76,6 +82,25 @@ import {
   toggleEmailSkill,
 } from "./email-skill-tools";
 import { discoverWithLakeB2B, stageDiscoveryForChampIQ } from "./lakeb2b-tools";
+import { getCompanyJobs, detectHiringSignal } from "./jobs-tools";
+import {
+  getPageHistory,
+  comparePageVersions,
+  detectRecentChanges,
+} from "./wayback-tools";
+import { searchWeb, searchNews } from "./web-search-tools";
+import {
+  extractArticle,
+  extractArticleBatch,
+} from "./content-extraction-tools";
+import { bulkCrawlDomains, crawlPageWithLLM } from "./bulk-crawl-tools";
+import {
+  addFeedMonitor,
+  listMyFeeds,
+  getRecentFeedItems,
+  checkAllMyFeeds,
+} from "./rss-tools";
+import { semanticSearchCompanies } from "./semantic-search-tools";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 const rawTools = {
@@ -118,6 +143,10 @@ const rawTools = {
   fetchGitHubStargazers,
   enrichGitHubProfiles,
   searchGitHubRepos,
+  getGitHubOrgStats,
+  getGitHubCommitVelocity,
+  getGitHubReleaseCadence,
+  getGitHubStarTrend,
   createTracking,
   bulkCreateTracking,
   getTrackingConfigs,
@@ -142,6 +171,22 @@ const rawTools = {
   toggleEmailSkill,
   discoverWithLakeB2B,
   stageDiscoveryForChampIQ,
+  getCompanyJobs,
+  detectHiringSignal,
+  getPageHistory,
+  comparePageVersions,
+  detectRecentChanges,
+  searchWeb,
+  searchNews,
+  extractArticle,
+  extractArticleBatch,
+  bulkCrawlDomains,
+  crawlPageWithLLM,
+  addFeedMonitor,
+  listMyFeeds,
+  getRecentFeedItems,
+  checkAllMyFeeds,
+  semanticSearchCompanies,
 };
 
 type ToolCtx = { userId?: string; campaignId?: string | null };

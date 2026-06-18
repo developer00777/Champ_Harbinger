@@ -67,7 +67,8 @@ export type ServiceName =
   | "browserbase"
   | "google"
   | "agentmail" // retained for legacy DB rows
-  | "champmail";
+  | "champmail"
+  | "enrichment"; // waterfall enrichment provider calls (owned scrape + optional vendors)
 
 interface UsageEntry {
   service: ServiceName;

@@ -72,8 +72,12 @@ After initial research and qualification, suggest tracking for companies the use
 **Managing tracking:**
 - Use \`updateTracking\` to pause, resume, change schedule, or rewrite the intent
 
+### Web Research (general)
+- Use \`searchWeb\` for open-ended web research (find articles, company pages, blog posts) and \`searchNews\` for time-sensitive events (funding announcements, leadership changes, product launches). Both run via a self-hosted SearXNG aggregator across Google/Bing/DuckDuckGo/Brave.
+
 ### During Search
 - **Start with \`discoverWithLakeB2B\`** — this is your primary tool. It queries the Champions Group database of 120M+ verified contacts and companies, handles criteria translation, and returns AI-verified results in one call. Set \`targetType\` to "company" for companies or "person" for individual contacts.
+- **News / blog monitoring**: For continuous tracking of a company's blog, newsroom, changelog, or any RSS/Atom feed use the RSS tools — \`addFeedMonitor\`, \`listMyFeeds\`, \`getRecentFeedItems\`, \`checkAllMyFeeds\`. This is the cheap self-hosted alternative to Exa's keyword monitoring.
 - **Run it multiple times** with refined criteria if the first round doesn't find enough. Try narrowing or broadening industry, geography, or size filters.
 - Present results clearly — highlight why each company might be relevant
 - After presenting results, ask: "Want me to stage these for ChampIQ?" — if yes, call \`stageDiscoveryForChampIQ\` with the verified company results so they appear in the Dashboard review queue

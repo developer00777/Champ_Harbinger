@@ -108,6 +108,20 @@ export const INTEGRATIONS: Integration[] = [
 
   // ─── OPTIONAL ────────────────────────────────────────────────────────────
   {
+    id: "ollama",
+    name: "Ollama",
+    category: "ai",
+    severity: "optional",
+    feature:
+      "Self-hosted local LLM for high-volume classification (criteria translation, signal verification)",
+    consequence:
+      "Classification falls back to the OpenRouter classification model. The app still works — you just pay per call instead of running a free local model.",
+    envVars: ["OLLAMA_BASE_URL"],
+    signupUrl: "https://ollama.com",
+    fixHint:
+      "Run `docker compose up -d ollama && docker compose exec ollama ollama pull llama3.1:8b`, then set OLLAMA_BASE_URL=http://localhost:11434 in .env.local",
+  },
+  {
     id: "obscura",
     name: "Obscura",
     category: "scraping",
@@ -201,6 +215,56 @@ export const INTEGRATIONS: Integration[] = [
     envVars: ["LAKEB2B_API_KEY"],
     keyName: "lakeb2b_api_key",
     fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",
+  },
+  {
+    id: "jobs-aggregator",
+    name: "Job Boards (Greenhouse/Lever/Ashby)",
+    category: "enrichment",
+    severity: "optional",
+    feature: "Hiring signal from public ATS APIs",
+    consequence: "Hiring tools fall back to manual scraping",
+    envVars: [],
+    fixHint:
+      "No setup needed. Use the company's ATS slug (e.g. 'stripe' for Greenhouse).",
+  },
+  {
+    id: "wayback",
+    name: "Wayback Machine",
+    category: "enrichment",
+    severity: "optional",
+    feature:
+      "Historical page snapshots + change detection (pricing, leadership, features) via archive.org",
+    consequence:
+      "Page-history / change-detection tools are unavailable; the agent cannot answer 'what changed on this page since last month?' questions.",
+    envVars: [],
+    fixHint:
+      "Works out of the box — Wayback Machine is a free public API (no key required).",
+  },
+  {
+    id: "crawl4ai",
+    name: "Crawl4AI",
+    category: "scraping",
+    severity: "optional",
+    feature:
+      "Self-hosted bulk web crawling (Apache 2.0). Bandwidth-only alternative to Browserbase for 1M+ company scrapes.",
+    consequence:
+      "Bulk crawl tools (bulkCrawlDomains, crawlPageWithLLM) fall back to a 'service unreachable' message. Per-company scraping still works via Browserbase if configured.",
+    envVars: ["CRAWL4AI_BASE_URL"],
+    fixHint:
+      "Start the service with `docker compose up -d crawl4ai` and set CRAWL4AI_BASE_URL=http://localhost:8000",
+  },
+  {
+    id: "rss-monitor",
+    name: "RSS / Atom Monitor",
+    category: "enrichment",
+    severity: "optional",
+    feature:
+      "Self-hosted RSS / Atom feed monitoring for company blogs, newsrooms, and changelogs",
+    consequence:
+      "No external service needed — works out of the box once a user adds feeds. Skipping this means no continuous news/blog signal coverage.",
+    envVars: [],
+    fixHint:
+      "Add feeds via the addFeedMonitor chat tool, then schedule POST /api/rss/check to run on a cron (e.g. every hour).",
   },
   {
     id: "champoracle",

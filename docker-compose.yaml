@@ -18,7 +18,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: harbinger-postgres
     restart: unless-stopped
     environment:
@@ -50,6 +50,8 @@ services:
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      trafilatura:
         condition: service_healthy
     ports:
       - "${PORT:-3000}:3000"
@@ -156,6 +158,51 @@ services:
     volumes:
       - ./services/searxng:/etc/searxng:rw
 
+  # Crawl4AI — self-hosted Python bulk-crawl microservice. Bandwidth-only
+  # alternative to Browserbase for large (1M+) company scrapes. Optional: the
+  # app boots without it; bulk-crawl tools surface a 'not configured' error.
+  crawl4ai:
+    build:
+      context: ./services/crawl4ai
+      dockerfile: Dockerfile
+    image: champ-harbinger-crawl4ai:latest
+    container_name: harbinger-crawl4ai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Ollama — optional self-hosted LLM for classification (criteria translation,
+  # signal verification). When OLLAMA_BASE_URL is set the app routes those
+  # workloads here instead of OpenRouter; otherwise it falls back to OpenRouter.
+  # Apple Silicon: for Metal acceleration run Ollama natively and point
+  # OLLAMA_BASE_URL at http://host.docker.internal:11434 instead of this service.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: harbinger-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # Self-hosted metrics store. Scrapes the app's /api/metrics and serves as a
   # Grafana data source. See prometheus/prometheus.yml.
   prometheus:
@@ -176,3 +223,4 @@ services:
 volumes:
   harbinger-pg-data:
   harbinger-prom-data:
+  ollama-data:

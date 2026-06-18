@@ -30,6 +30,7 @@ import {
   unique,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -231,12 +232,20 @@ export const organizations = pgTable(
     emailPatternUpdatedAt: timestamp("email_pattern_updated_at", {
       withTimezone: true,
     }),
+    // Semantic search embedding (all-MiniLM-L6-v2 → 384 dims).
+    // Requires the `vector` extension (pgvector). Indexed via HNSW for
+    // sub-linear cosine-distance search at million-row scale.
+    embedding: vector("embedding", { dimensions: 384 }),
     ...timestamps,
   },
   (t) => ({
     domainUnique: uniqueIndex("organizations_domain_unique_idx").on(t.domain),
     byLastEnriched: index("organizations_last_enriched_idx").on(
       t.lastEnrichedAt,
+    ),
+    embeddingHnsw: index("organizations_embedding_hnsw_idx").using(
+      "hnsw",
+      t.embedding.op("vector_cosine_ops"),
     ),
     // GIN index for trigram search requires pg_trgm extension:
     // CREATE INDEX organizations_name_trgm_idx ON organizations USING GIN (name gin_trgm_ops);
@@ -973,5 +982,370 @@ export const mailboxMessages = pgTable(
     byUser: index("mailbox_messages_user_idx").on(t.clerkUserId),
     byConnection: index("mailbox_messages_connection_idx").on(t.connectionId),
     byMessageId: index("mailbox_messages_message_id_idx").on(t.messageId),
+  }),
+);
+
+// ─── Waterfall enrichment (Champ Harbinger) ─────────────────────────────────
+//
+// Owned-first enrichment engine. enrichment_* back the cost-ordered, priority-
+// list waterfall (owned LLM scrape -> optional paid vendors, with LakeB2B as the
+// pinned primary), the field-level confidence model, the per-provider TTL cache,
+// and the provider-call audit. master_contacts / master_organizations are the
+// Harbinger-OWNED master DB that accumulates verified results and later syncs
+// against the LakeB2B master (lakeb2b_id join key, last_synced_at, sync_status).
+
+export const enrichmentContacts = pgTable(
+  "enrichment_contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    clerkOrgId: text("clerk_org_id"),
+    personId: uuid("person_id").references(() => people.id, {
+      onDelete: "set null",
+    }),
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+    externalRef: text("external_ref"),
+    fullName: text("full_name"),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+    company: text("company"),
+    domain: text("domain"),
+    email: text("email"),
+    phone: text("phone"),
+    title: text("title"),
+    seniority: text("seniority"),
+    linkedin: text("linkedin"),
+    firmographics: jsonb("firmographics")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    completenessScore: numeric("completeness_score", { precision: 4, scale: 3 })
+      .notNull()
+      .default("0"),
+    confidenceScore: numeric("confidence_score", { precision: 4, scale: 3 })
+      .notNull()
+      .default("0"),
+    status: text("status").notNull().default("queued"),
+    ...timestamps,
+  },
+  (t) => ({
+    byUser: index("enrichment_contacts_clerk_user_id_idx").on(t.clerkUserId),
+    byOrg: index("enrichment_contacts_clerk_org_id_idx").on(t.clerkOrgId),
+    byEmail: index("enrichment_contacts_email_idx").on(t.email),
+    byDomain: index("enrichment_contacts_domain_idx").on(t.domain),
+    byExternalRef: index("enrichment_contacts_external_ref_idx").on(
+      t.externalRef,
+    ),
+    byStatus: index("enrichment_contacts_status_idx").on(t.status),
+    byPerson: index("enrichment_contacts_person_idx").on(t.personId),
+  }),
+);
+
+export const enrichmentJobs = pgTable(
+  "enrichment_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    clerkOrgId: text("clerk_org_id"),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => enrichmentContacts.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("queued"),
+    startTier: text("start_tier").notNull().default("T0_master"),
+    resolvedTier: text("resolved_tier"),
+    requiredFields: jsonb("required_fields")
+      .$type<string[]>()
+      .default(["email", "title", "company"])
+      .notNull(),
+    confidenceThreshold: numeric("confidence_threshold", {
+      precision: 4,
+      scale: 3,
+    }),
+    totalCostUsd: numeric("total_cost_usd", { precision: 12, scale: 6 })
+      .notNull()
+      .default("0"),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    error: text("error"),
+  },
+  (t) => ({
+    byContact: index("enrichment_jobs_contact_idx").on(t.contactId),
+    byStatus: index("enrichment_jobs_status_idx").on(t.status),
+    byUser: index("enrichment_jobs_clerk_user_id_idx").on(t.clerkUserId),
+  }),
+);
+
+export const enrichmentFieldProvenance = pgTable(
+  "enrichment_field_provenance",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => enrichmentContacts.id, { onDelete: "cascade" }),
+    field: text("field").notNull(),
+    value: text("value"),
+    source: text("source").notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 })
+      .notNull()
+      .default("0"),
+    verified: boolean("verified").notNull().default(false),
+    observedAt: timestamp("observed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    byContact: index("enrichment_field_provenance_contact_idx").on(t.contactId),
+    byField: index("enrichment_field_provenance_field_idx").on(
+      t.contactId,
+      t.field,
+    ),
+  }),
+);
+
+export const enrichmentProviderCalls = pgTable(
+  "enrichment_provider_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id").references(() => enrichmentJobs.id, {
+      onDelete: "cascade",
+    }),
+    contactId: uuid("contact_id").references(() => enrichmentContacts.id, {
+      onDelete: "cascade",
+    }),
+    tier: text("tier").notNull(),
+    provider: text("provider").notNull(),
+    requestIdentifiers: jsonb("request_identifiers")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    success: boolean("success").notNull().default(false),
+    fieldsReturned: jsonb("fields_returned")
+      .$type<string[]>()
+      .default([])
+      .notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 })
+      .notNull()
+      .default("0"),
+    costUsd: numeric("cost_usd", { precision: 12, scale: 6 })
+      .notNull()
+      .default("0"),
+    latencyMs: integer("latency_ms"),
+    httpStatus: integer("http_status"),
+    cacheHit: boolean("cache_hit").notNull().default(false),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    byJob: index("enrichment_provider_calls_job_idx").on(t.jobId),
+    byContact: index("enrichment_provider_calls_contact_idx").on(t.contactId),
+    byProvider: index("enrichment_provider_calls_provider_idx").on(t.provider),
+    byCreated: index("enrichment_provider_calls_created_idx").on(t.createdAt),
+  }),
+);
+
+export const enrichmentCache = pgTable(
+  "enrichment_cache",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityHash: text("identity_hash").notNull(),
+    provider: text("provider").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 })
+      .notNull()
+      .default("0"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    ttlSeconds: integer("ttl_seconds").notNull().default(604800),
+    expiresAt: timestamp("expires_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    uniqueIdentityProvider: unique(
+      "enrichment_cache_identity_provider_unique",
+    ).on(t.identityHash, t.provider),
+    byLookup: index("enrichment_cache_lookup_idx").on(
+      t.identityHash,
+      t.provider,
+    ),
+    byExpires: index("enrichment_cache_expires_idx").on(t.expiresAt),
+  }),
+);
+
+export const masterWritebackLog = pgTable(
+  "master_writeback_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => enrichmentContacts.id, { onDelete: "cascade" }),
+    masterRecordId: text("master_record_id"),
+    fieldsWritten: jsonb("fields_written")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    status: text("status").notNull().default("written"),
+    rollbackToken: text("rollback_token").notNull(),
+    writtenAt: timestamp("written_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    byContact: index("master_writeback_log_contact_idx").on(t.contactId),
+    byRollback: index("master_writeback_log_rollback_idx").on(t.rollbackToken),
+    byMaster: index("master_writeback_log_master_idx").on(t.masterRecordId),
+  }),
+);
+
+/**
+ * Harbinger-owned master contact record. Accumulates verified, deduplicated
+ * contacts built up by the waterfall. lakeb2bId is the join key for the future
+ * daily/weekly sync against the LakeB2B master; syncStatus tracks reconciliation.
+ */
+export const masterContacts = pgTable(
+  "master_contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkOrgId: text("clerk_org_id"),
+    lakeb2bId: text("lakeb2b_id"),
+    email: text("email"),
+    linkedinUrl: text("linkedin_url"),
+    fullName: text("full_name"),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+    domain: text("domain"),
+    companyName: text("company_name"),
+    phone: text("phone"),
+    title: text("title"),
+    seniority: text("seniority"),
+    firmographics: jsonb("firmographics")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    source: text("source").notNull().default("harbinger_waterfall"),
+    confidence: numeric("confidence", { precision: 4, scale: 3 })
+      .notNull()
+      .default("0"),
+    verified: boolean("verified").notNull().default(false),
+    fieldSources: jsonb("field_sources")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    lastVerified: timestamp("last_verified", { withTimezone: true }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    // local_only | in_sync | ahead_of_lakeb2b | behind_lakeb2b | conflict
+    syncStatus: text("sync_status").notNull().default("local_only"),
+    ...timestamps,
+  },
+  (t) => ({
+    byEmail: index("master_contacts_email_idx").on(t.email),
+    byLinkedin: index("master_contacts_linkedin_idx").on(t.linkedinUrl),
+    byDomain: index("master_contacts_domain_idx").on(t.domain),
+    byLakeb2b: index("master_contacts_lakeb2b_idx").on(t.lakeb2bId),
+    byNameDomain: index("master_contacts_name_domain_idx").on(
+      t.fullName,
+      t.domain,
+    ),
+    bySyncStatus: index("master_contacts_sync_status_idx").on(t.syncStatus),
+  }),
+);
+
+/** Harbinger-owned master company record (firmographics build-up). */
+export const masterOrganizations = pgTable(
+  "master_organizations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkOrgId: text("clerk_org_id"),
+    lakeb2bId: text("lakeb2b_id"),
+    domain: text("domain"),
+    name: text("name"),
+    industry: text("industry"),
+    employeeCount: text("employee_count"),
+    revenueBand: text("revenue_band"),
+    firmographics: jsonb("firmographics")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    source: text("source").notNull().default("harbinger_waterfall"),
+    confidence: numeric("confidence", { precision: 4, scale: 3 })
+      .notNull()
+      .default("0"),
+    lastVerified: timestamp("last_verified", { withTimezone: true }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    syncStatus: text("sync_status").notNull().default("local_only"),
+    ...timestamps,
+  },
+  (t) => ({
+    byDomain: index("master_organizations_domain_idx").on(t.domain),
+    byName: index("master_organizations_name_idx").on(t.name),
+    byLakeb2b: index("master_organizations_lakeb2b_idx").on(t.lakeb2bId),
+    bySyncStatus: index("master_organizations_sync_status_idx").on(
+      t.syncStatus,
+    ),
+  }),
+);
+
+// ─── RSS / Atom feed monitor ──────────────────────────────────────────────────
+
+/**
+ * Monitored feeds: user-registered RSS/Atom URLs polled on a schedule.
+ * One row per (clerkUserId, feedUrl) pair.
+ */
+export const monitoredFeeds = pgTable(
+  "monitored_feeds",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    clerkOrgId: text("clerk_org_id"),
+    organizationId: uuid("organization_id"),
+    feedUrl: text("feed_url").notNull(),
+    feedType: text("feed_type").notNull().default("rss"), // rss | atom
+    title: text("title"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    errorCount: integer("error_count").default(0),
+    enabled: boolean("enabled").default(true),
+    ...timestamps,
+  },
+  (t) => ({
+    byUser: index("monitored_feeds_user_idx").on(t.clerkUserId),
+    byOrg: index("monitored_feeds_org_idx").on(t.organizationId),
+    uniqUrl: unique("monitored_feeds_user_url_uniq").on(
+      t.clerkUserId,
+      t.feedUrl,
+    ),
+  }),
+);
+
+/**
+ * Feed items: individual entries pulled from monitored feeds.
+ * Deduplicated by (feedId, guid).
+ */
+export const feedItems = pgTable(
+  "feed_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    feedId: uuid("feed_id")
+      .notNull()
+      .references(() => monitoredFeeds.id, { onDelete: "cascade" }),
+    guid: text("guid").notNull(),
+    title: text("title"),
+    link: text("link"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    summary: text("summary"),
+    content: text("content"),
+    processed: boolean("processed").default(false),
+    ...timestamps,
+  },
+  (t) => ({
+    byFeed: index("feed_items_feed_idx").on(t.feedId),
+    uniqGuid: unique("feed_items_feed_guid_uniq").on(t.feedId, t.guid),
   }),
 );
