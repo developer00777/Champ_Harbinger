@@ -252,6 +252,20 @@ export const INTEGRATIONS: Integration[] = [
     envVars: ["CRAWL4AI_BASE_URL"],
     fixHint:
       "Start the service with `docker compose up -d crawl4ai` and set CRAWL4AI_BASE_URL=http://localhost:8000",
+  },
+  {
+    id: "rss-monitor",
+    name: "RSS / Atom Monitor",
+    category: "enrichment",
+    severity: "optional",
+    feature:
+      "Self-hosted RSS / Atom feed monitoring for company blogs, newsrooms, and changelogs",
+    consequence:
+      "No external service needed — works out of the box once a user adds feeds. Skipping this means no continuous news/blog signal coverage.",
+    envVars: [],
+    fixHint:
+      "Add feeds via the addFeedMonitor chat tool, then schedule POST /api/rss/check to run on a cron (e.g. every hour).",
+  },
   {
     id: "champoracle",
     name: "ChampIQ (ChampOracle)",

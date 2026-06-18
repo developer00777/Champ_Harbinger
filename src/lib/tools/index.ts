@@ -94,6 +94,12 @@ import {
   extractArticleBatch,
 } from "./content-extraction-tools";
 import { bulkCrawlDomains, crawlPageWithLLM } from "./bulk-crawl-tools";
+import {
+  addFeedMonitor,
+  listMyFeeds,
+  getRecentFeedItems,
+  checkAllMyFeeds,
+} from "./rss-tools";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 const rawTools = {
@@ -175,6 +181,10 @@ const rawTools = {
   extractArticleBatch,
   bulkCrawlDomains,
   crawlPageWithLLM,
+  addFeedMonitor,
+  listMyFeeds,
+  getRecentFeedItems,
+  checkAllMyFeeds,
 };
 
 type ToolCtx = { userId?: string; campaignId?: string | null };

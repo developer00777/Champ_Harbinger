@@ -1282,3 +1282,61 @@ export const masterOrganizations = pgTable(
     ),
   }),
 );
+
+// ─── RSS / Atom feed monitor ──────────────────────────────────────────────────
+
+/**
+ * Monitored feeds: user-registered RSS/Atom URLs polled on a schedule.
+ * One row per (clerkUserId, feedUrl) pair.
+ */
+export const monitoredFeeds = pgTable(
+  "monitored_feeds",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    clerkOrgId: text("clerk_org_id"),
+    organizationId: uuid("organization_id"),
+    feedUrl: text("feed_url").notNull(),
+    feedType: text("feed_type").notNull().default("rss"), // rss | atom
+    title: text("title"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    errorCount: integer("error_count").default(0),
+    enabled: boolean("enabled").default(true),
+    ...timestamps,
+  },
+  (t) => ({
+    byUser: index("monitored_feeds_user_idx").on(t.clerkUserId),
+    byOrg: index("monitored_feeds_org_idx").on(t.organizationId),
+    uniqUrl: unique("monitored_feeds_user_url_uniq").on(
+      t.clerkUserId,
+      t.feedUrl,
+    ),
+  }),
+);
+
+/**
+ * Feed items: individual entries pulled from monitored feeds.
+ * Deduplicated by (feedId, guid).
+ */
+export const feedItems = pgTable(
+  "feed_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    feedId: uuid("feed_id")
+      .notNull()
+      .references(() => monitoredFeeds.id, { onDelete: "cascade" }),
+    guid: text("guid").notNull(),
+    title: text("title"),
+    link: text("link"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    summary: text("summary"),
+    content: text("content"),
+    processed: boolean("processed").default(false),
+    ...timestamps,
+  },
+  (t) => ({
+    byFeed: index("feed_items_feed_idx").on(t.feedId),
+    uniqGuid: unique("feed_items_feed_guid_uniq").on(t.feedId, t.guid),
+  }),
+);

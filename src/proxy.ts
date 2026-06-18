@@ -16,6 +16,7 @@ const isPublicRoute = createRouteMatcher([
   "/api/tracking/(.*)", // tracking pixel/webhooks
   "/api/outreach/process(.*)", // outreach sequence processing (called by job scheduler)
   "/api/enrich-company(.*)", // bulk enrichment jobs (worker-secret or session authed in-route)
+  "/api/rss/(.*)", // RSS monitor (authenticated by chh_ API key, not Clerk session)
 ]);
 
 export const proxy = clerkMiddleware(async (auth, request) => {
