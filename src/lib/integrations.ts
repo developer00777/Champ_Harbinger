@@ -214,6 +214,19 @@ export const INTEGRATIONS: Integration[] = [
       "No setup needed. Use the company's ATS slug (e.g. 'stripe' for Greenhouse).",
   },
   {
+    id: "wayback",
+    name: "Wayback Machine",
+    category: "enrichment",
+    severity: "optional",
+    feature:
+      "Historical page snapshots + change detection (pricing, leadership, features) via archive.org",
+    consequence:
+      "Page-history / change-detection tools are unavailable; the agent cannot answer 'what changed on this page since last month?' questions.",
+    envVars: [],
+    fixHint:
+      "Works out of the box — Wayback Machine is a free public API (no key required).",
+  },
+  {
     id: "champoracle",
     name: "ChampIQ (ChampOracle)",
     category: "data",
