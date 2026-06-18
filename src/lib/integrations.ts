@@ -203,6 +203,17 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",
   },
   {
+    id: "jobs-aggregator",
+    name: "Job Boards (Greenhouse/Lever/Ashby)",
+    category: "enrichment",
+    severity: "optional",
+    feature: "Hiring signal from public ATS APIs",
+    consequence: "Hiring tools fall back to manual scraping",
+    envVars: [],
+    fixHint:
+      "No setup needed. Use the company's ATS slug (e.g. 'stripe' for Greenhouse).",
+  },
+  {
     id: "champoracle",
     name: "ChampIQ (ChampOracle)",
     category: "data",
