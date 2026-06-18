@@ -46,6 +46,12 @@ import {
   searchGitHubRepos,
 } from "./github-tools";
 import {
+  getGitHubOrgStats,
+  getGitHubCommitVelocity,
+  getGitHubReleaseCadence,
+  getGitHubStarTrend,
+} from "./github-signal-tools";
+import {
   createTracking,
   bulkCreateTracking,
   getTrackingConfigs,
@@ -118,6 +124,10 @@ const rawTools = {
   fetchGitHubStargazers,
   enrichGitHubProfiles,
   searchGitHubRepos,
+  getGitHubOrgStats,
+  getGitHubCommitVelocity,
+  getGitHubReleaseCadence,
+  getGitHubStarTrend,
   createTracking,
   bulkCreateTracking,
   getTrackingConfigs,
