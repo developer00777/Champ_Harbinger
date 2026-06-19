@@ -345,9 +345,9 @@ export async function enrichSet(
   const limit = input.limit ?? 25;
   const total = seeds.length;
   const page = seeds.slice(offset, offset + limit);
-  const results: Array<Record<string, unknown>> = [];
-
-  for (const seed of page) {
+  async function enrichOne(
+    seed: (typeof page)[number],
+  ): Promise<Record<string, unknown>> {
     try {
       const r = await enrichContact({
         name: seed.name,
@@ -363,7 +363,7 @@ export async function enrichSet(
         clerkUserId: input.clerkUserId,
         clerkOrgId: input.clerkOrgId ?? null,
       });
-      results.push({
+      return {
         externalRef: seed.externalRef ?? null,
         contactId: r.contactId,
         status: r.status,
@@ -372,17 +372,33 @@ export async function enrichSet(
         totalCostUsd: r.totalCostUsd,
         masterWriteback: r.masterWriteback,
         summary: r.summary,
-      });
+      };
     } catch (err) {
       const name = err instanceof Error ? err.name : "Error";
       const msg = err instanceof Error ? err.message : String(err);
-      results.push({
+      return {
         externalRef: seed.externalRef ?? null,
         status: "failed",
         error: `${name}: ${msg}`,
-      });
+      };
     }
   }
+
+  // Bounded-concurrency fan-out across the page. Order is preserved; the inner
+  // LLM calls are globally rate-limited (runLlm), so this won't hammer the key.
+  const concurrency = Math.max(
+    1,
+    Number(process.env.ENRICH_SET_CONCURRENCY) || 4,
+  );
+  const results: Array<Record<string, unknown>> = new Array(page.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, page.length) }, async () => {
+      for (let i = cursor++; i < page.length; i = cursor++) {
+        results[i] = await enrichOne(page[i]);
+      }
+    }),
+  );
 
   const processed = offset + page.length;
   const hasMore = processed < total;

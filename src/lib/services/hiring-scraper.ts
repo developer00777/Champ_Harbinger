@@ -1,4 +1,5 @@
-import { generateObject, jsonSchema } from "ai";
+import { jsonSchema } from "ai";
+import { generateObjectLimited as generateObject } from "@/lib/ai/generate";
 import * as cheerio from "cheerio";
 import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";

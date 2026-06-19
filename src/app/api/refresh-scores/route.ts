@@ -1,5 +1,5 @@
 import { getModelSync as getModel } from "@/lib/ai/provider";
-import { generateObject } from "ai";
+import { generateObjectLimited as generateObject } from "@/lib/ai/generate";
 import { z } from "zod";
 
 import { getProfileForPrompt } from "@/lib/profile";

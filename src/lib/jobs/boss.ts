@@ -65,12 +65,15 @@ export async function getBoss(): Promise<PgBoss> {
  */
 export async function enqueueTrackingRun(
   trackingConfigId: string,
+  clerkUserId?: string,
 ): Promise<void> {
   const boss = await getBoss();
   await boss.send(
     TRACKING_RUN,
-    { trackingConfigId },
-    { retryLimit: 2, retryBackoff: true },
+    { trackingConfigId, clerkUserId },
+    // expireInSeconds is generous: the fair dispatcher may hold a fetched job
+    // in its in-memory backlog (round-robin/per-user cap) before it runs.
+    { retryLimit: 2, retryBackoff: true, expireInSeconds: 3600 },
   );
 }
 
@@ -89,5 +92,8 @@ export async function enqueueEnrichCompany(
     retryLimit: 1,
     // de-dupe in-flight jobs for the same company so double-clicks don't pile up
     singletonKey: `${job.campaignId}:${job.companyId}`,
+    // Generous expiry: the fair dispatcher may hold this in its in-memory
+    // backlog (round-robin / per-user cap) before it actually runs.
+    expireInSeconds: 3600,
   });
 }

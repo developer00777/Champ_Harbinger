@@ -1,4 +1,7 @@
 import { getModel } from "@/lib/ai/provider";
+import { acquireLlmSlot } from "@/lib/ai/concurrency";
+import { assertWithinBudget } from "@/lib/budget/guard";
+import { budgetErrorResponse } from "@/lib/budget/respond";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -66,6 +69,16 @@ export async function POST(request: Request) {
   }
   const user = { id: userId };
 
+  // Stop the conversation before opening a stream if the user/team is over its
+  // weekly budget (402, distinct from a 429 rate-limit).
+  try {
+    await assertWithinBudget({ userId });
+  } catch (err) {
+    const blocked = budgetErrorResponse(err);
+    if (blocked) return blocked;
+    throw err;
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -119,7 +132,10 @@ export async function POST(request: Request) {
 
   const startedAt = Date.now();
   const stream = createUIMessageStream({
-    execute: ({ writer }) => {
+    execute: async ({ writer }) => {
+      // Hold one global LLM slot for the whole stream (released on finish/error)
+      // so chat counts toward the shared-key concurrency cap like everything else.
+      const releaseLlmSlot = await acquireLlmSlot();
       const result = streamText({
         model,
         system: systemPrompt,
@@ -165,6 +181,10 @@ export async function POST(request: Request) {
               estimated_cost_usd: estimateClaudeCostFromUsage("sonnet", usage),
             },
           });
+          releaseLlmSlot();
+        },
+        onError() {
+          releaseLlmSlot();
         },
       });
       writer.merge(result.toUIMessageStream());

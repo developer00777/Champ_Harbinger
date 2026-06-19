@@ -21,8 +21,14 @@ export async function dispatchDueTrackingConfigs(): Promise<{
       id: schema.trackingConfigs.id,
       schedule: schema.trackingConfigs.schedule,
       customIntervalMinutes: schema.trackingConfigs.customIntervalMinutes,
+      // Owner — so the worker can fairly schedule + budget-gate per user.
+      clerkUserId: schema.campaigns.clerkUserId,
     })
     .from(schema.trackingConfigs)
+    .innerJoin(
+      schema.campaigns,
+      eq(schema.trackingConfigs.campaignId, schema.campaigns.id),
+    )
     .where(
       and(
         eq(schema.trackingConfigs.status, "active"),
@@ -44,7 +50,7 @@ export async function dispatchDueTrackingConfigs(): Promise<{
         .set({ nextRunAt: new Date(Date.now() + interval) })
         .where(eq(schema.trackingConfigs.id, config.id));
 
-      await enqueueTrackingRun(config.id);
+      await enqueueTrackingRun(config.id, config.clerkUserId ?? undefined);
       dispatched++;
     } catch (err) {
       console.error("[tracking/dispatch] failed for", config.id, err);

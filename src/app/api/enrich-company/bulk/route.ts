@@ -3,6 +3,8 @@ import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { enqueueEnrichCompany } from "@/lib/jobs/boss";
+import { assertWithinBudget } from "@/lib/budget/guard";
+import { budgetErrorResponse } from "@/lib/budget/respond";
 
 /**
  * Bulk-enrich every company in a campaign asynchronously via the pg-boss queue
@@ -55,6 +57,19 @@ export async function POST(request: Request) {
   const targets = rows.filter(
     (r) => includeEnriched || r.status !== "enriched",
   );
+
+  // Don't queue a big bulk run if the user/team is already over its weekly cap.
+  try {
+    await assertWithinBudget({ userId });
+  } catch (err) {
+    const blocked = budgetErrorResponse(err, {
+      queued: 0,
+      blocked: targets.length,
+    });
+    if (blocked) return blocked;
+    throw err;
+  }
+
   for (const t of targets) {
     await enqueueEnrichCompany({ companyId: t.id, campaignId, userId });
   }

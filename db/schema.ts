@@ -166,6 +166,11 @@ export const apiUsage = pgTable(
     byCampaign: index("api_usage_campaign_idx").on(t.campaignId),
     byAction: index("api_usage_action_idx").on(t.actionId),
     byUser: index("api_usage_clerk_user_id_idx").on(t.clerkUserId),
+    // Weekly per-user spend rollups (budget enforcement + admin console).
+    byUserCreatedAt: index("api_usage_user_created_idx").on(
+      t.clerkUserId,
+      t.createdAt,
+    ),
   }),
 );
 
@@ -1347,5 +1352,70 @@ export const feedItems = pgTable(
   (t) => ({
     byFeed: index("feed_items_feed_idx").on(t.feedId),
     uniqGuid: unique("feed_items_feed_guid_uniq").on(t.feedId, t.guid),
+  }),
+);
+
+// ─── Teams (budget / limit groups — NOT shared workspaces) ─────────────────────
+
+/**
+ * Teams group users for a shared weekly spend cap + admin monitoring ONLY.
+ * Each user's DATA stays private (clerkUserId scoping is unchanged). A team is a
+ * billing/limit boundary, not a shared workspace. Managed by the super-admin.
+ */
+export const teams = pgTable("teams", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  // Null = unlimited (no team-level cap).
+  weeklyLimitUsd: numeric("weekly_limit_usd", { precision: 10, scale: 2 }),
+  // Default per-member weekly cap; a member row can override it.
+  perUserDefaultWeeklyLimitUsd: numeric("per_user_default_weekly_limit_usd", {
+    precision: 10,
+    scale: 2,
+  }),
+  // true = block paid work over the cap; false = warn/alert only.
+  hardStop: boolean("hard_stop").notNull().default(true),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedBy: text("updated_by"),
+});
+
+/**
+ * Team membership. Created at invite time keyed by email (clerkUserId null);
+ * `ensureProvisioned()` links clerkUserId on the member's first login.
+ * One membership per email and (once linked) one team per user.
+ */
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    clerkUserId: text("clerk_user_id"), // null until first login links it
+    perUserWeeklyLimitUsd: numeric("per_user_weekly_limit_usd", {
+      precision: 10,
+      scale: 2,
+    }),
+    status: text("status").notNull().default("invited"), // invited | active | disabled
+    role: text("role").notNull().default("member"), // member | team_admin
+    invitedBy: text("invited_by"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    // Postgres treats NULLs as distinct, so many "invited" rows (null user) coexist.
+    uniqEmail: unique("team_members_email_uniq").on(t.email),
+    uniqUser: unique("team_members_user_uniq").on(t.clerkUserId),
+    byTeam: index("team_members_team_idx").on(t.teamId),
   }),
 );

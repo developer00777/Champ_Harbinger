@@ -1,5 +1,5 @@
 import "server-only";
-import { generateText } from "ai";
+import { generateTextLimited as generateText } from "@/lib/ai/generate";
 import { getClassificationModelSync } from "@/lib/ai/provider";
 import { CompanySearchParamsSchema, PeopleSearchParamsSchema } from "./schemas";
 import type { CompanySearchParams, PeopleSearchParams } from "./schemas";

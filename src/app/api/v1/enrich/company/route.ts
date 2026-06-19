@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateObject } from "ai";
+import { generateObjectLimited as generateObject } from "@/lib/ai/generate";
 import { z } from "zod";
 import { validateApiKey } from "@/lib/api/validate-api-key";
 import { normalizeDomain } from "@/lib/services/knowledge-base";

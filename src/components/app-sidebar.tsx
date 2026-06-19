@@ -9,6 +9,7 @@ import {
   MessageCircle,
   MessageSquare,
   Settings,
+  ShieldCheck,
   Target,
   UserCircle,
   Zap,
@@ -76,7 +77,10 @@ const defaultUser = {
   avatar: "",
 };
 
-export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
+export function AppSidebar({
+  isSuperAdmin = false,
+  ...props
+}: React.ComponentProps<typeof Sidebar> & { isSuperAdmin?: boolean }) {
   const { activeCampaignId, setActiveCampaignId } = useCampaign();
   const champiqStatus = useChampIQStatus();
 
@@ -146,6 +150,17 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
           </SidebarMenuItem>
         )}
         <SidebarMenu>
+          {isSuperAdmin && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={<SafeLink href="/admin" />}
+                tooltip="Admin"
+              >
+                <ShieldCheck />
+                <span>Admin</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
           <SidebarMenuItem>
             <SidebarMenuButton
               render={<SafeLink href="/settings" />}

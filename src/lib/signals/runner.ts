@@ -1,6 +1,7 @@
 import { getModelSync as getModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
-import { generateObject, jsonSchema } from "ai";
+import { jsonSchema } from "ai";
+import { generateObjectLimited as generateObject } from "@/lib/ai/generate";
 import { eq, desc, gte, and } from "drizzle-orm";
 import { getScopedDb, schema } from "@/lib/db/scoped";
 import { recordAiUsage } from "@/lib/ai/usage";

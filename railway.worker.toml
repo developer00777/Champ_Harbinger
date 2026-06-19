@@ -1,0 +1,37 @@
+# ============================================================================
+# Railway config TEMPLATE — ChampHarbinger "worker" (background) service
+# ============================================================================
+# Railway only auto-applies a file literally named `railway.toml` (or
+# `railway.json`) at a service's Root Directory. This file is therefore a
+# TEMPLATE for reference — the worker is a SECOND Railway service built from the
+# SAME repo. Either:
+#   (a) set these values in the worker service's dashboard (Build/Deploy tabs), or
+#   (b) point the worker service at a config path of this file via
+#       Settings → Config-as-code → Railway Config File = railway.worker.toml
+#
+# Dashboard settings for the worker service:
+#   Settings → Build → Builder         = Dockerfile
+#   Settings → Build → Dockerfile Path = Dockerfile.worker
+#   Settings → Source → Root Directory = (repo root / empty)
+#   Settings → Networking              = NO public domain (worker is internal-only)
+#   Settings → Deploy → Healthcheck    = none (workers aren't HTTP-served)
+# ============================================================================
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.worker"
+
+[deploy]
+# Dockerfile.worker CMD is `pnpm worker` (tsx scripts/run-worker.ts). No port,
+# no healthcheck — pg-boss pulls jobs from Postgres over DATABASE_URL.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Run DB migrations here, on the worker, BEFORE the new worker boots. The worker
+# image runs a full `pnpm install --frozen-lockfile`, so drizzle-kit (a
+# devDependency) IS present — unlike the slim app runner. drizzle-kit migrate is
+# idempotent. Migration 0008 runs `CREATE EXTENSION IF NOT EXISTS "vector"`, so
+# the Postgres service must permit that extension (pgvector image or pre-created;
+# see docs/DEPLOY-RAILWAY.md). Run this on the worker (or one service) only — not
+# on every service — to avoid concurrent migration races.
+preDeployCommand = "pnpm db:migrate"

@@ -1,0 +1,55 @@
+# ============================================================================
+# Railway config — ChampHarbinger "app" (web) service
+# ============================================================================
+# This file configures the PRIMARY web service only (the Next.js 16 standalone
+# server). Railway applies a repo-root railway.toml to whichever service points
+# its Root Directory at the repo root with no per-service override — make this
+# the "app" service.
+#
+# The other services in the stack (worker, postgres, obscura, trafilatura,
+# searxng, crawl4ai) are SEPARATE Railway services and are configured in the
+# dashboard, NOT here — a single railway.toml cannot express multiple services.
+# Their per-service settings are documented in docs/DEPLOY-RAILWAY.md.
+#
+# IMPORTANT: also set, in the dashboard, for THIS service:
+#   Settings → Build → Builder        = Dockerfile  (never let Railpack autobuild)
+#   Settings → Build → Dockerfile Path = Dockerfile
+#   Settings → Source → Root Directory = (repo root / empty)
+#   Settings → Build → Build Args      = the NEXT_PUBLIC_* values (build-time, see below)
+# ============================================================================
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+# NEXT_PUBLIC_* are inlined into the client bundle at BUILD time (see the ARG/ENV
+# block in Dockerfile). They are build args, NOT runtime env — set them in the
+# dashboard under Settings → Build → Build Args and rebuild when they change.
+# Railway does not read build args from this file; listed here as the canonical
+# set the app needs baked in:
+#   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+#   NEXT_PUBLIC_HARBINGER_APP_URL
+#   NEXT_PUBLIC_SENTRY_DSN              (optional)
+#   NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN   (optional)
+#   NEXT_PUBLIC_POSTHOG_HOST            (optional)
+
+[deploy]
+# The Dockerfile's CMD is `node server.js`. The Next standalone server reads
+# process.env.PORT (Railway injects $PORT) and binds HOSTNAME=0.0.0.0 — both are
+# set in the Dockerfile, so no `sh -c` $PORT wrapping is needed here.
+#
+# Healthcheck: /api/metrics returns HTTP 200 unauthenticated and is DB-fault
+# tolerant (its DB read is wrapped in try/catch), so a slow/cold Postgres does
+# not fail the deploy. This is the same path docker-compose health-checks.
+healthcheckPath = "/api/metrics"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# NOTE on migrations — do NOT add `preDeployCommand = "pnpm db:migrate"` here.
+# `pnpm db:migrate` calls drizzle-kit, which is a *devDependency*. The app's
+# standalone runner image does NOT contain devDependencies (only Next's traced
+# runtime deps are bundled), so the command would fail with "drizzle-kit: not
+# found". Run migrations from the WORKER service instead — its image runs a full
+# `pnpm install` and so has drizzle-kit. See docs/DEPLOY-RAILWAY.md →
+# "Running migrations" for the exact preDeployCommand to put on the worker.
