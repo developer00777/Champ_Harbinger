@@ -36,6 +36,12 @@ ENV NEXT_PUBLIC_HARBINGER_APP_URL=$NEXT_PUBLIC_HARBINGER_APP_URL
 ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 ENV NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN=$NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
 ENV NEXT_PUBLIC_POSTHOG_HOST=$NEXT_PUBLIC_POSTHOG_HOST
+# `next build` evaluates route modules to collect page data; the db client
+# (db/index.ts) and ai env (src/lib/ai/env.ts) validate these at import. The
+# build never connects to anything — supply harmless placeholders so the checks
+# pass. Real values are injected by Railway at runtime in the runner stage.
+ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
+ENV OPENROUTER_API_KEY=sk-build-time-placeholder
 RUN pnpm build
 
 # ----------------------------------------------------------------------------
