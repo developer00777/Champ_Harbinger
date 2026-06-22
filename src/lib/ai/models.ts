@@ -7,6 +7,12 @@ export const Models = {
   default: () =>
     process.env.HARBINGER_DEFAULT_MODEL || "anthropic/claude-sonnet-4.6",
   drafting: "anthropic/claude-sonnet-4.6",
+  // Personalization (cold-email composition). A/B-validated at parity with
+  // claude-sonnet-4 at a fraction of the cost — see scripts/ab-personalization.mts.
+  // Env-overridable (HARBINGER_PERSONALIZATION_MODEL) to swap without a deploy.
+  personalization: () =>
+    process.env.HARBINGER_PERSONALIZATION_MODEL ||
+    "deepseek/deepseek-v4-flash",
   // claude-haiku-4.5 is cheap, fast, and v3-spec compliant via OpenRouter.
   // openai/gpt-4o-mini returned a v1 spec response that AI SDK 6 rejects
   // for generateObject calls.
