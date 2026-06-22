@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { StatCards } from "@/components/dashboard/stat-cards";
 import { CampaignTable } from "@/components/dashboard/campaign-table";
 import { ChampIQQueueWidget } from "@/components/dashboard/champiq-queue-widget";
+import { QuickStartHub } from "@/components/quick-start/quick-start-hub";
 import {
   ListRowsSkeleton,
   PageHeaderSkeleton,
@@ -135,6 +136,8 @@ export default function DashboardPage() {
         </div>
 
         <ChampIQQueueWidget />
+
+        <QuickStartHub />
 
         <StatCards totals={data.totals} />
 
