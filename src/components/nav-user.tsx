@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { EllipsisVertical, LogOut } from "lucide-react";
-import { useClerk } from "@clerk/nextjs";
+import { useClerk, useUser } from "@clerk/nextjs";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -33,7 +33,7 @@ function getInitials(name: string) {
 export function NavUser({
   user,
 }: {
-  readonly user: {
+  readonly user?: {
     readonly name: string;
     readonly email: string;
     readonly avatar: string;
@@ -42,6 +42,19 @@ export function NavUser({
   const { isMobile } = useSidebar();
   const router = useRouter();
   const { signOut } = useClerk();
+  const { user: clerkUser } = useUser();
+
+  // Prefer the live Clerk identity; fall back to any passed-in prop, then to
+  // sensible placeholders so the footer is never blank for a signed-in user.
+  const email =
+    clerkUser?.primaryEmailAddress?.emailAddress ?? user?.email ?? "";
+  const name =
+    clerkUser?.fullName?.trim() ||
+    clerkUser?.username ||
+    email ||
+    user?.name ||
+    "Account";
+  const avatar = clerkUser?.imageUrl || user?.avatar || "";
 
   async function handleSignOut() {
     await signOut();
@@ -63,15 +76,15 @@ export function NavUser({
             }
           >
             <Avatar className="h-8 w-8 rounded-lg grayscale">
-              <AvatarImage src={user.avatar || undefined} alt={user.name} />
+              <AvatarImage src={avatar || undefined} alt={name} />
               <AvatarFallback className="rounded-lg">
-                {getInitials(user.name)}
+                {getInitials(name)}
               </AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-medium">{user.name}</span>
+              <span className="truncate font-medium">{name}</span>
               <span className="text-muted-foreground truncate text-xs">
-                {user.email}
+                {email}
               </span>
             </div>
             <EllipsisVertical className="ml-auto size-4" />
@@ -86,18 +99,15 @@ export function NavUser({
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                   <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarImage
-                      src={user.avatar || undefined}
-                      alt={user.name}
-                    />
+                    <AvatarImage src={avatar || undefined} alt={name} />
                     <AvatarFallback className="rounded-lg">
-                      {getInitials(user.name)}
+                      {getInitials(name)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-medium">{user.name}</span>
+                    <span className="truncate font-medium">{name}</span>
                     <span className="text-muted-foreground truncate text-xs">
-                      {user.email}
+                      {email}
                     </span>
                   </div>
                 </div>

@@ -135,9 +135,9 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <ChampIQQueueWidget />
-
         <QuickStartHub />
+
+        <ChampIQQueueWidget />
 
         <StatCards totals={data.totals} />
 

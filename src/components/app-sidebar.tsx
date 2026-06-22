@@ -71,12 +71,6 @@ const navItems = [
   },
 ];
 
-const defaultUser = {
-  name: "",
-  email: "",
-  avatar: "",
-};
-
 export function AppSidebar({
   isSuperAdmin = false,
   ...props
@@ -184,7 +178,7 @@ export function AppSidebar({
           </SidebarMenuItem>
         </SidebarMenu>
         <SidebarSeparator />
-        <NavUser user={defaultUser} />
+        <NavUser />
       </SidebarFooter>
     </Sidebar>
   );
