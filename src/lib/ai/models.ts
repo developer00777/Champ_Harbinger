@@ -1,24 +1,31 @@
 /**
- * Named model presets to avoid scattering OpenRouter model IDs throughout
- * the codebase. Override per-call only when a feature needs something
- * specific (cheap classifier vs. heavy drafting model).
+ * Every LLM call in the app routes through ONE model, chosen by a single env
+ * var. No model id is hard-coded anywhere except the last-resort default below,
+ * so switching the whole app to a different model is a one-line config change —
+ * no code edit, no redeploy of code.
+ *
+ *   HARBINGER_MODEL=deepseek/deepseek-v4-flash   ← the one knob
+ *
+ * DeepSeek V4 Flash is the chosen model: cheap/fast, v3-spec compliant for
+ * generateObject, and A/B-validated at parity with Claude Sonnet 4 for
+ * personalization (scripts/ab-personalization.mts).
  */
+const DEFAULT_MODEL = "deepseek/deepseek-v4-flash";
+
+function model(): string {
+  return process.env.HARBINGER_MODEL || DEFAULT_MODEL;
+}
+
+// All tiers reference the same env-driven model. The presets remain so call
+// sites can stay semantic (Models.classification, Models.drafting, …) and a
+// future need to split a tier onto its own model is a one-line change here.
 export const Models = {
-  default: () =>
-    process.env.HARBINGER_DEFAULT_MODEL || "anthropic/claude-sonnet-4.6",
-  drafting: "anthropic/claude-sonnet-4.6",
-  // Personalization (cold-email composition). A/B-validated at parity with
-  // claude-sonnet-4 at a fraction of the cost — see scripts/ab-personalization.mts.
-  // Env-overridable (HARBINGER_PERSONALIZATION_MODEL) to swap without a deploy.
-  personalization: () =>
-    process.env.HARBINGER_PERSONALIZATION_MODEL ||
-    "deepseek/deepseek-v4-flash",
-  // claude-haiku-4.5 is cheap, fast, and v3-spec compliant via OpenRouter.
-  // openai/gpt-4o-mini returned a v1 spec response that AI SDK 6 rejects
-  // for generateObject calls.
-  classification: "anthropic/claude-haiku-4.5",
-  cheap: "anthropic/claude-haiku-4.5",
-  reasoning: "openai/o1-mini",
+  default: model,
+  drafting: model(),
+  personalization: model,
+  classification: model(),
+  cheap: model(),
+  reasoning: model(),
 } as const;
 
 export type ModelKey = keyof typeof Models;
