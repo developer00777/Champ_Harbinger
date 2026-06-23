@@ -276,6 +276,120 @@ ${wrapUntrusted(combinedContent.slice(0, 12000))}`,
   }
 }
 
+/** Parse a person's name from a LinkedIn search-result title, e.g.
+ *  "Jane Doe - VP Engineering - Acme | LinkedIn" → "Jane Doe". */
+function parseLinkedInName(title: string | null): string | null {
+  if (!title) return null;
+  let t = title.replace(/\s*[|\-–—]\s*LinkedIn.*$/i, "").trim();
+  // The name is the first segment before a " - " / " | " separator.
+  t = t.split(/\s+[-–—|]\s+/)[0].trim();
+  if (!/[a-zA-Z]/.test(t) || t.length < 3 || t.length > 60) return null;
+  if (t.split(/\s+/).length < 2) return null; // need at least first + last
+  return t;
+}
+
+const DEFAULT_DECISION_MAKER_TITLES = [
+  "CEO",
+  "Founder",
+  "CTO",
+  "VP Engineering",
+  "Head of Product",
+  "Director",
+];
+
+/**
+ * Phase 2: find people at a company via web/LinkedIn search, role-filtered.
+ * This is what surfaces people for companies whose own site has no scrapable
+ * team page (most of them). Builds plain-text queries per target role (the
+ * `site:` operator does NOT work through SearXNG), collects LinkedIn /in/
+ * profiles, and verifies each against the company with the existing LLM filter.
+ * Returns [] when SearXNG is unconfigured (searxSearch no-ops).
+ */
+export async function findPeopleViaSearch(
+  company: CompanyContext,
+  targetTitles: string[],
+): Promise<DomainPerson[]> {
+  const titles = targetTitles.length
+    ? targetTitles
+    : DEFAULT_DECISION_MAKER_TITLES;
+
+  const candidates: CandidateContact[] = [];
+  const seen = new Set<string>();
+  for (const title of titles.slice(0, 8)) {
+    for (const q of [
+      `"${company.name}" ${title} linkedin`,
+      `${company.name} ${title} linkedin.com/in`,
+    ]) {
+      const results = await searxSearch(q, 8);
+      for (const r of results) {
+        const li = toLinkedInProfile(r.url);
+        if (!li || seen.has(li)) continue;
+        seen.add(li);
+        const name = parseLinkedInName(r.title);
+        if (!name) continue;
+        candidates.push({
+          name,
+          title: null,
+          linkedinUrl: li,
+          rawHeadline: r.title || r.content || null,
+        });
+      }
+    }
+  }
+  if (candidates.length === 0) return [];
+
+  const verified = await filterContactsByCompany(company, candidates);
+  return verified
+    .map((v): DomainPerson | null => {
+      const c = candidates[v.index];
+      if (!c) return null;
+      return {
+        name: v.name || c.name,
+        title: v.title,
+        email: null,
+        linkedinUrl: c.linkedinUrl,
+      };
+    })
+    .filter((p): p is DomainPerson => p !== null);
+}
+
+/**
+ * Find as many people as possible at a company, role-filtered. Runs the
+ * team-page scrape (Phase 1) and the LinkedIn/web search (Phase 2) in parallel
+ * and merges + dedupes by LinkedIn URL (falling back to name). This is what
+ * find-contacts calls: it returns people even when the company site has no team
+ * page, and biases toward the requested roles.
+ */
+export async function findPeopleForCompany(
+  company: CompanyContext,
+  targetTitles: string[] = [],
+): Promise<DomainPerson[]> {
+  const [scraped, searched] = await Promise.all([
+    company.domain
+      ? findPeopleOnDomain(company.domain, company.name)
+      : Promise.resolve<DomainPerson[]>([]),
+    findPeopleViaSearch(company, targetTitles),
+  ]);
+
+  const byKey = new Map<string, DomainPerson>();
+  for (const p of [...scraped, ...searched]) {
+    if (!p.name?.trim()) continue;
+    const key = (p.linkedinUrl || p.name.toLowerCase()).trim();
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, p);
+    } else {
+      byKey.set(key, {
+        name: existing.name || p.name,
+        title: existing.title || p.title,
+        email: existing.email || p.email,
+        linkedinUrl: existing.linkedinUrl || p.linkedinUrl,
+      });
+    }
+  }
+  return [...byKey.values()];
+}
+
 // ── Company name matching ────────────────────────────────────────────────
 
 /**

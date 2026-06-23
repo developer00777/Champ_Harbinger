@@ -17,7 +17,7 @@ import {
   linkPersonToCampaign,
 } from "@/lib/services/knowledge-base";
 import {
-  findPeopleOnDomain,
+  findPeopleForCompany,
   type CompanyContext,
 } from "@/lib/services/contact-filter";
 import {
@@ -207,40 +207,48 @@ async function findContactsForCompany(
       .filter((u): u is string => u !== null),
   );
 
-  // ── Phase 1: Search the company's own website for team/staff ───────
-  if (company.domain) {
-    try {
-      const domainPeople = await findPeopleOnDomain(
-        company.domain,
-        company.name,
-      );
-      for (const dp of domainPeople) {
-        if (dp.linkedinUrl && existingUrls.has(dp.linkedinUrl)) continue;
+  // Target roles for this campaign (filters the people search). Falls back to
+  // decision-makers inside findPeopleForCompany when unset.
+  const [campaignRow] = await adminDb
+    .select({ icp: schema.campaigns.icp })
+    .from(schema.campaigns)
+    .where(eq(schema.campaigns.id, campaignId))
+    .limit(1);
+  const targetTitles =
+    ((campaignRow?.icp as Record<string, unknown> | null)?.targetTitles as
+      | string[]
+      | undefined) || [];
 
-        const person = await findOrCreatePerson({
-          name: dp.name,
-          title: dp.title,
-          linkedin_url: dp.linkedinUrl,
-          work_email: dp.email,
-          organization_id: orgId,
-          source: "website",
+  // Find as many people as possible at the company, role-filtered: team-page
+  // scrape + LinkedIn/web search, merged. Runs even with no domain.
+  try {
+    const found = await findPeopleForCompany(company, targetTitles);
+    for (const dp of found) {
+      if (dp.linkedinUrl && existingUrls.has(dp.linkedinUrl)) continue;
+
+      const person = await findOrCreatePerson({
+        name: dp.name,
+        title: dp.title,
+        linkedin_url: dp.linkedinUrl,
+        work_email: dp.email,
+        organization_id: orgId,
+        source: dp.linkedinUrl ? "linkedin_search" : "website",
+      });
+
+      if (dp.email) {
+        await recordVerifiedEmail(makeEmailPatternDb(adminDb), {
+          personId: person.id,
+          email: dp.email,
+          source: "team_page",
         });
-
-        if (dp.email) {
-          await recordVerifiedEmail(makeEmailPatternDb(adminDb), {
-            personId: person.id,
-            email: dp.email,
-            source: "team_page",
-          });
-        }
-
-        await linkPersonToCampaign(person.id, campaignId);
-        if (dp.linkedinUrl) existingUrls.add(dp.linkedinUrl);
-        totalFound++;
       }
-    } catch (err) {
-      console.error("[findContactsForCompany] Domain scrape failed:", err);
+
+      await linkPersonToCampaign(person.id, campaignId);
+      if (dp.linkedinUrl) existingUrls.add(dp.linkedinUrl);
+      totalFound++;
     }
+  } catch (err) {
+    console.error("[findContactsForCompany] People search failed:", err);
   }
 
   return { totalFound };
