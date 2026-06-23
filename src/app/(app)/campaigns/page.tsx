@@ -29,6 +29,13 @@ interface CampaignRow {
   createdAt: string;
 }
 
+// Per-campaign outreach metrics (recent window) from /api/dashboard, keyed by id.
+interface CampaignMetrics {
+  leads: number;
+  openRate: number; // integer percent 0–100
+  replyRate: number; // integer percent 0–100
+}
+
 function StatusPill({ status }: { status: string }) {
   const className =
     campaignStatusStyles[status as CampaignStatus]?.className ??
@@ -194,6 +201,7 @@ function formatCreated(value: string): string {
 
 export default function CampaignsIndexPage() {
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
+  const [metrics, setMetrics] = useState<Record<string, CampaignMetrics>>({});
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -201,20 +209,46 @@ export default function CampaignsIndexPage() {
   useEffect(() => {
     mountedRef.current = true;
 
-    const fetchCampaigns = async () => {
-      const res = await fetch("/api/campaigns");
-      if (!res.ok) {
-        if (mountedRef.current) setLoading(false);
-        return;
+    // Canonical list from /api/campaigns (name/status/createdAt + delete target);
+    // real outreach metrics merged in from /api/dashboard by id. Metrics are
+    // best-effort — the list still renders if the dashboard call fails.
+    const load = async () => {
+      const [campRes, dashRes] = await Promise.allSettled([
+        fetch("/api/campaigns"),
+        fetch("/api/dashboard"),
+      ]);
+
+      if (campRes.status === "fulfilled" && campRes.value.ok) {
+        const data = (await campRes.value.json()) as CampaignRow[];
+        if (mountedRef.current) setCampaigns(data ?? []);
       }
-      const data = (await res.json()) as CampaignRow[];
-      if (mountedRef.current) {
-        setCampaigns(data ?? []);
-        setLoading(false);
+
+      if (dashRes.status === "fulfilled" && dashRes.value.ok) {
+        const dash = (await dashRes.value.json()) as {
+          campaigns?: Array<{
+            id: string;
+            leads: number;
+            openRate: number;
+            replyRate: number;
+          }>;
+        };
+        if (mountedRef.current && dash.campaigns) {
+          const map: Record<string, CampaignMetrics> = {};
+          for (const c of dash.campaigns) {
+            map[c.id] = {
+              leads: c.leads,
+              openRate: c.openRate,
+              replyRate: c.replyRate,
+            };
+          }
+          setMetrics(map);
+        }
       }
+
+      if (mountedRef.current) setLoading(false);
     };
 
-    void fetchCampaigns();
+    void load();
     return () => {
       mountedRef.current = false;
     };
@@ -242,16 +276,27 @@ export default function CampaignsIndexPage() {
     setDeletingId(null);
   };
 
-  // Stat strip derived from the campaigns actually loaded — no invented metrics.
+  // Stat strip from real loaded data + dashboard metrics (no invented numbers).
   const stats = useMemo(() => {
     const total = campaigns.length;
     const active = campaigns.filter((c) => c.status === "active").length;
-    const paused = campaigns.filter((c) => c.status === "paused").length;
-    const inProgress = campaigns.filter(
-      (c) => c.status === "discovery" || c.status === "researching",
-    ).length;
-    return { total, active, paused, inProgress };
-  }, [campaigns]);
+    const rows = campaigns
+      .map((c) => metrics[c.id])
+      .filter((m): m is CampaignMetrics => Boolean(m));
+    const totalLeads = rows.reduce((s, m) => s + m.leads, 0);
+    const sent = rows.filter((m) => m.openRate > 0 || m.replyRate > 0);
+    const avg = (sel: (m: CampaignMetrics) => number) =>
+      sent.length
+        ? Math.round(sent.reduce((s, m) => s + sel(m), 0) / sent.length)
+        : 0;
+    return {
+      total,
+      active,
+      totalLeads,
+      avgOpen: avg((m) => m.openRate),
+      avgReply: avg((m) => m.replyRate),
+    };
+  }, [campaigns, metrics]);
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -284,20 +329,20 @@ export default function CampaignsIndexPage() {
             sub={`${stats.active} active`}
           />
           <StatCardItem
-            label="Active"
-            value={stats.active}
-            sub="running now"
+            label="Total leads"
+            value={stats.totalLeads.toLocaleString()}
+            sub="across all"
             tone="orange"
           />
           <StatCardItem
-            label="In progress"
-            value={stats.inProgress}
-            sub="discovery & research"
+            label="Avg open rate"
+            value={`${stats.avgOpen}%`}
+            sub="sent emails"
           />
           <StatCardItem
-            label="Paused"
-            value={stats.paused}
-            sub="on hold"
+            label="Avg reply rate"
+            value={`${stats.avgReply}%`}
+            sub="sent emails"
             tone="success"
           />
         </div>
@@ -332,70 +377,86 @@ export default function CampaignsIndexPage() {
                 <tr className="border-border bg-muted border-b">
                   <th className="eyebrow px-4 py-3 text-left">Name</th>
                   <th className="eyebrow px-4 py-3 text-left">Status</th>
-                  <th className="eyebrow px-4 py-3 text-left">Created</th>
+                  <th className="eyebrow px-4 py-3 text-right">Leads</th>
+                  <th className="eyebrow px-4 py-3 text-right">Open rate</th>
+                  <th className="eyebrow px-4 py-3 text-right">Reply rate</th>
                   <th className="w-12 px-4 py-3" />
                 </tr>
               </thead>
               <tbody>
-                {campaigns.map((campaign) => (
-                  <tr
-                    key={campaign.id}
-                    className="border-border hover:bg-muted/60 border-b transition-colors last:border-b-0"
-                  >
-                    <td className="px-4 py-3.5">
-                      <Link
-                        href={`/campaigns/${campaign.id}`}
-                        className="focus-visible:ring-ring rounded-sm font-semibold hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                      >
-                        {campaign.name}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <StatusPill status={campaign.status} />
-                    </td>
-                    <td className="text-muted-foreground px-4 py-3.5 text-xs tabular-nums">
-                      {formatCreated(campaign.createdAt)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <Dialog>
-                        <DialogTrigger
-                          render={
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label="Delete campaign"
-                              disabled={deletingId === campaign.id}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          }
-                        />
-                        <DialogContent>
-                          <DialogTitle>Delete campaign</DialogTitle>
-                          <DialogDescription>
-                            This will permanently delete &quot;{campaign.name}
-                            &quot; and all its companies and contacts. This
-                            cannot be undone.
-                          </DialogDescription>
-                          <DialogFooter>
-                            <DialogClose render={<Button variant="outline" />}>
-                              Cancel
-                            </DialogClose>
-                            <Button
-                              variant="destructive"
-                              onClick={() => handleDelete(campaign)}
-                              disabled={deletingId === campaign.id}
-                            >
-                              {deletingId === campaign.id
-                                ? "Deleting..."
-                                : "Delete Campaign"}
-                            </Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                    </td>
-                  </tr>
-                ))}
+                {campaigns.map((campaign) => {
+                  const m = metrics[campaign.id];
+                  return (
+                    <tr
+                      key={campaign.id}
+                      className="border-border hover:bg-muted/60 border-b transition-colors last:border-b-0"
+                    >
+                      <td className="px-4 py-3.5">
+                        <Link
+                          href={`/campaigns/${campaign.id}`}
+                          className="focus-visible:ring-ring block rounded-sm font-semibold hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                        >
+                          {campaign.name}
+                        </Link>
+                        <span className="text-muted-foreground text-xs">
+                          Created {formatCreated(campaign.createdAt)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <StatusPill status={campaign.status} />
+                      </td>
+                      <td className="px-4 py-3.5 text-right text-sm tabular-nums">
+                        {m ? m.leads.toLocaleString() : "—"}
+                      </td>
+                      <td className="px-4 py-3.5 text-right text-sm tabular-nums">
+                        {m && m.leads > 0 ? `${m.openRate}%` : "—"}
+                      </td>
+                      <td className="px-4 py-3.5 text-right text-sm tabular-nums">
+                        {m && m.leads > 0 ? `${m.replyRate}%` : "—"}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <Dialog>
+                          <DialogTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label="Delete campaign"
+                                disabled={deletingId === campaign.id}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            }
+                          />
+                          <DialogContent>
+                            <DialogTitle>Delete campaign</DialogTitle>
+                            <DialogDescription>
+                              This will permanently delete &quot;{campaign.name}
+                              &quot; and all its companies and contacts. This
+                              cannot be undone.
+                            </DialogDescription>
+                            <DialogFooter>
+                              <DialogClose
+                                render={<Button variant="outline" />}
+                              >
+                                Cancel
+                              </DialogClose>
+                              <Button
+                                variant="destructive"
+                                onClick={() => handleDelete(campaign)}
+                                disabled={deletingId === campaign.id}
+                              >
+                                {deletingId === campaign.id
+                                  ? "Deleting..."
+                                  : "Delete Campaign"}
+                              </Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
