@@ -69,6 +69,10 @@
   --color-accent: var(--accent);
   --color-highlight: var(--highlight);
   --color-highlight-foreground: var(--highlight-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-peach: var(--peach);
+  --color-peach-foreground: var(--peach-foreground);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -121,8 +125,19 @@
   --accent-foreground: oklch(0.2 0.02 260);
   --highlight: oklch(0.7 0.21 355);
   --highlight-foreground: oklch(0.99 0.002 260);
+  /* success (verdant green) — used for active/positive states + reply-rate */
+  --success: oklch(0.62 0.16 150);
+  --success-foreground: oklch(0.99 0.002 260);
+  /* peach — warm orange-tinted surface for action banners + icon tiles */
+  --peach: oklch(0.965 0.022 55);
+  --peach-foreground: oklch(0.47 0.17 41);
   --destructive: oklch(0.6 0.22 28);
   --destructive-foreground: oklch(0.99 0.002 260);
+  /* card + popover elevation (Aegis design system) */
+  --shadow-card:
+    0 1px 2px 0 oklch(0.2 0.02 260 / 0.05),
+    0 1px 3px 0 oklch(0.2 0.02 260 / 0.05);
+  --shadow-pop: 0 10px 34px -10px oklch(0.2 0.02 260 / 0.18);
   --border: oklch(0.92 0.006 260);
   --input: oklch(0.92 0.006 260);
   --ring: oklch(0.67 0.18 39);
@@ -159,8 +174,14 @@
   --accent-foreground: oklch(0.96 0.004 260);
   --highlight: oklch(0.75 0.21 355);
   --highlight-foreground: oklch(0.16 0.008 260);
+  --success: oklch(0.7 0.15 152);
+  --success-foreground: oklch(0.16 0.008 260);
+  --peach: oklch(0.27 0.03 50);
+  --peach-foreground: oklch(0.83 0.1 60);
   --destructive: oklch(0.66 0.21 28);
   --destructive-foreground: oklch(0.96 0.004 260);
+  --shadow-card: 0 1px 2px 0 oklch(0 0 0 / 0.3), 0 1px 3px 0 oklch(0 0 0 / 0.3);
+  --shadow-pop: 0 10px 34px -10px oklch(0 0 0 / 0.6);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.73 0.16 42);
@@ -194,6 +215,25 @@
   overflow: hidden;
   overscroll-behavior: none;
   height: 100dvh;
+}
+
+/* Mono uppercase eyebrow label — section/column/stat labels (Aegis). */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.625rem;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.shadow-card {
+  box-shadow: var(--shadow-card);
+}
+
+.shadow-pop {
+  box-shadow: var(--shadow-pop);
 }
 
 .scrollbar-none {

@@ -1,185 +1,112 @@
 "use client";
 
-import { SafeLink } from "@/components/safe-link";
-
+import { usePathname } from "next/navigation";
 import {
   Eye,
   LayoutDashboard,
   Mail,
   MessageCircle,
-  MessageSquare,
-  Settings,
-  ShieldCheck,
   Target,
   UserCircle,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 
-import { NavUser } from "@/components/nav-user";
+import { SafeLink } from "@/components/safe-link";
 import { SidebarCampaigns } from "@/components/sidebar-campaigns";
 import { useCampaign } from "@/lib/campaign-context";
 import { useChampIQStatus } from "@/hooks/use-champiq-status";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarSeparator,
-} from "@/components/ui/sidebar";
 
-const navItems = [
-  {
-    title: "Overview",
-    url: "/dashboard",
-    icon: LayoutDashboard,
-  },
-  {
-    title: "Chat",
-    url: "/chat",
-    icon: MessageCircle,
-  },
-  {
-    title: "Campaigns",
-    url: "/campaigns",
-    icon: Target,
-  },
-  {
-    title: "Signals",
-    url: "/signals",
-    icon: Zap,
-  },
-  {
-    title: "Tracking",
-    url: "/tracking",
-    icon: Eye,
-  },
-  {
-    title: "Outreach",
-    url: "/outreach",
-    icon: Mail,
-  },
-  {
-    title: "Profiles",
-    url: "/profile",
-    icon: UserCircle,
-  },
+interface NavItem {
+  title: string;
+  url: string;
+  icon: LucideIcon;
+}
+
+const navItems: NavItem[] = [
+  { title: "Overview", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Chat", url: "/chat", icon: MessageCircle },
+  { title: "Campaigns", url: "/campaigns", icon: Target },
+  { title: "Signals", url: "/signals", icon: Zap },
+  { title: "Tracking", url: "/tracking", icon: Eye },
+  { title: "Outreach", url: "/outreach", icon: Mail },
+  { title: "Profiles", url: "/profile", icon: UserCircle },
 ];
 
-export function AppSidebar({
-  isSuperAdmin = false,
-  ...props
-}: React.ComponentProps<typeof Sidebar> & { isSuperAdmin?: boolean }) {
+function isActive(pathname: string | null, url: string): boolean {
+  if (!pathname) return false;
+  if (url === "/dashboard") return pathname === "/dashboard";
+  return pathname === url || pathname.startsWith(`${url}/`);
+}
+
+/**
+ * Fixed 220px left rail (Aegis). Icon nav with a peach active state, a mono
+ * "Campaigns" section (the live campaign switcher), and a ChampIQ status
+ * footer. Account / settings / admin live in the top-bar account menu.
+ */
+export function AppSidebar() {
+  const pathname = usePathname();
   const { activeCampaignId, setActiveCampaignId } = useCampaign();
   const champiqStatus = useChampIQStatus();
 
   return (
-    <Sidebar variant="inset" collapsible="icon" {...props}>
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              render={<SafeLink href="/dashboard" />}
+    <aside className="bg-sidebar sticky top-[52px] hidden h-[calc(100dvh-52px)] w-[220px] shrink-0 flex-col border-r border-border md:flex">
+      <nav className="flex flex-col gap-0.5 p-2.5">
+        {navItems.map((item) => {
+          const active = isActive(pathname, item.url);
+          return (
+            <SafeLink
+              key={item.title}
+              href={item.url}
+              className={`flex h-[34px] items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] transition-colors ${
+                active
+                  ? "bg-peach text-primary font-medium"
+                  : "text-foreground/80 hover:bg-accent hover:text-foreground"
+              }`}
             >
-              <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                <span className="text-sm font-bold">CH</span>
-              </div>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">ChampHarbinger</span>
-              </div>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel className="sr-only">Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    render={<SafeLink href={item.url} />}
-                    tooltip={item.title}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+              <item.icon className="h-[18px] w-[18px]" />
+              {item.title}
+            </SafeLink>
+          );
+        })}
+      </nav>
 
-        <SidebarSeparator />
-
+      <div className="min-h-0 flex-1 overflow-y-auto px-2.5">
         <SidebarCampaigns
           activeCampaignId={activeCampaignId}
           onSelectCampaign={setActiveCampaignId}
         />
-      </SidebarContent>
-      <SidebarFooter>
-        {champiqStatus === "connected" && (
-          <div className="mx-2 mb-1 flex items-center gap-1.5 px-2 py-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-            <span className="text-muted-foreground text-xs">ChampIQ live</span>
+      </div>
+
+      <div className="border-t border-border p-2.5">
+        {champiqStatus === "unconfigured" ? (
+          <SafeLink
+            href="/settings?tab=champiq"
+            className="text-muted-foreground hover:text-foreground flex items-center gap-2 px-1.5 py-1 text-xs transition-colors"
+          >
+            <Zap className="h-3.5 w-3.5" />
+            Connect ChampIQ
+          </SafeLink>
+        ) : (
+          <div className="flex items-center gap-2 px-1.5 py-1">
+            <span className="relative flex h-2 w-2">
+              {champiqStatus === "connected" && (
+                <span className="absolute inset-0 animate-ping rounded-full bg-green-500/60" />
+              )}
+              <span
+                className={`relative h-2 w-2 rounded-full ${
+                  champiqStatus === "connected"
+                    ? "bg-green-500"
+                    : "bg-muted-foreground/40"
+                }`}
+              />
+            </span>
+            <span className="text-muted-foreground text-xs">
+              {champiqStatus === "connected" ? "ChampIQ live" : "ChampIQ"}
+            </span>
           </div>
         )}
-        {champiqStatus === "unconfigured" && (
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              render={<SafeLink href="/settings?tab=champiq" />}
-              tooltip="Connect ChampIQ"
-              className="text-muted-foreground"
-            >
-              <Zap className="h-3.5 w-3.5" />
-              <span className="text-xs">Connect ChampIQ</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        )}
-        <SidebarMenu>
-          {isSuperAdmin && (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                render={<SafeLink href="/admin" />}
-                tooltip="Admin"
-              >
-                <ShieldCheck />
-                <span>Admin</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              render={<SafeLink href="/settings" />}
-              tooltip="Settings"
-            >
-              <Settings />
-              <span>Settings</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              render={
-                <a href="mailto:hello@championsgroup.com?subject=ChampHarbinger%20feedback" />
-              }
-              tooltip="Feedback"
-              aria-label="Give feedback"
-            >
-              <MessageSquare />
-              <span>Feedback</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-        <SidebarSeparator />
-        <NavUser />
-      </SidebarFooter>
-    </Sidebar>
+      </div>
+    </aside>
   );
 }

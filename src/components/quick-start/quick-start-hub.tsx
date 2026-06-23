@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Loader2,
   Mail,
+  PencilLine,
   Search,
   Sparkles,
   Upload,
@@ -15,10 +16,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CsvUpload } from "@/components/campaign/csv-upload";
 
@@ -62,8 +61,18 @@ interface DraftRow {
   bodyText: string;
 }
 
-const QUICK_CRITERIA_PLACEHOLDER =
-  "B2B SaaS, 10-50 employees, US, seed-funded";
+const STEPS: { key: Step; label: string }[] = [
+  { key: "entry", label: "Describe" },
+  { key: "companies", label: "Companies" },
+  { key: "contacts", label: "Contacts" },
+  { key: "drafts", label: "Drafts" },
+];
+
+const TRY_EXAMPLES = [
+  "Fintech, Series A, EU",
+  "Dev tools, US, PLG",
+  "Healthcare SaaS",
+];
 
 // LinkedIn link normalization — same pattern as components/chat/contact-card.tsx
 function linkedinHref(url: string): string {
@@ -85,10 +94,7 @@ function textToHtml(text: string): string {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function todayLabel(): string {
@@ -108,11 +114,13 @@ export function QuickStartHub() {
   // Campaign context
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
   const [campaignId, setCampaignId] = useState<string>("");
-  const [quickLine, setQuickLine] = useState("");
+  const [pickExisting, setPickExisting] = useState(false);
   const [creatingCampaign, setCreatingCampaign] = useState(false);
 
-  // Entry (discover)
+  // Entry — the ICP/context line, used both to discover companies and as the
+  // new campaign's offering/positioning when one is auto-created.
   const [criteria, setCriteria] = useState("");
+  const [entryTab, setEntryTab] = useState<"describe" | "upload">("describe");
   const [discovering, setDiscovering] = useState(false);
 
   // Companies staged in the campaign
@@ -150,16 +158,14 @@ export function QuickStartHub() {
     };
   }, []);
 
-  // Ensure a campaign exists; quick-create one from the single "what you sell /
-  // who you target" line if none is selected. Returns the campaign id or null.
+  // Ensure a campaign exists; quick-create one from the criteria line if none
+  // is selected. Returns the campaign id or null.
   const ensureCampaign = useCallback(async (): Promise<string | null> => {
     if (campaignId) return campaignId;
 
-    const line = quickLine.trim();
+    const line = criteria.trim();
     if (!line) {
-      setError(
-        "Pick an existing campaign or describe what you sell and who you target.",
-      );
+      setError("Describe who you want to reach, or pick an existing campaign.");
       return null;
     }
 
@@ -189,16 +195,20 @@ export function QuickStartHub() {
       setCampaignId(created.id);
       return created.id;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create campaign.");
+      setError(
+        err instanceof Error ? err.message : "Could not create campaign.",
+      );
       return null;
     } finally {
       setCreatingCampaign(false);
     }
-  }, [campaignId, quickLine]);
+  }, [campaignId, criteria]);
 
   // Re-fetch the campaign's staged companies + contacts.
   const refreshCampaign = useCallback(
-    async (id: string): Promise<{ companies: StagedCompany[]; contacts: StagedContact[] }> => {
+    async (
+      id: string,
+    ): Promise<{ companies: StagedCompany[]; contacts: StagedContact[] }> => {
       const res = await fetch(`/api/campaigns/${id}`);
       if (!res.ok) return { companies: [], contacts: [] };
       const json = (await res.json()) as {
@@ -272,10 +282,11 @@ export function QuickStartHub() {
 
   // ── Step: CSV imported → load staged companies ─────────────────────────────
   const handleCsvImported = useCallback(async () => {
-    if (!campaignId) return;
+    const id = campaignId;
+    if (!id) return;
     setLoadingCompanies(true);
     try {
-      const { companies: refreshed } = await refreshCampaign(campaignId);
+      const { companies: refreshed } = await refreshCampaign(id);
       setCompanies(refreshed);
       setStep("companies");
     } finally {
@@ -399,7 +410,6 @@ export function QuickStartHub() {
   const reset = () => {
     setStep("entry");
     setError(null);
-    setCriteria("");
     setCompanies([]);
     setContacts([]);
     setSelectedContactIds(new Set());
@@ -407,165 +417,279 @@ export function QuickStartHub() {
     setSaved(false);
   };
 
+  // Chips derived from the criteria line for the "This run" rail.
+  const runChips = criteria
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <section className="border-border bg-card overflow-hidden rounded-lg border">
-      <header className="border-border flex items-center gap-3 border-b px-4 py-3">
-        <div className="bg-champions-orange/10 text-champions-orange flex h-8 w-8 items-center justify-center rounded-lg">
-          <Sparkles className="h-4 w-4" />
+    <section>
+      {/* Header: sparkles + title + horizontal step rail */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="bg-peach text-peach-foreground flex h-10 w-10 items-center justify-center rounded-xl">
+          <Sparkles className="h-5 w-5" />
         </div>
         <div className="flex-1">
-          <h2 className="text-sm font-semibold">Quick Start</h2>
-          <p className="text-muted-foreground text-xs">
+          <h2 className="text-xl font-bold tracking-tight">Quick Start</h2>
+          <p className="text-muted-foreground text-sm">
             Go from companies to personalized drafts in a few clicks.
           </p>
         </div>
-        <StepIndicator step={step} />
-      </header>
+        <StepRail current={step} />
+      </div>
 
-      <div className="space-y-4 p-4">
-        {error && (
-          <div className="bg-destructive/10 text-destructive rounded-md px-3 py-2 text-sm">
-            {error}
-          </div>
-        )}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_300px]">
+        <div className="space-y-4">
+          {error && (
+            <div className="bg-destructive/10 text-destructive rounded-lg px-3 py-2 text-sm">
+              {error}
+            </div>
+          )}
 
-        {step === "entry" && (
-          <EntryStep
-            campaigns={campaigns}
-            campaignId={campaignId}
-            onCampaignChange={setCampaignId}
-            quickLine={quickLine}
-            onQuickLineChange={setQuickLine}
-            creatingCampaign={creatingCampaign}
-            criteria={criteria}
-            onCriteriaChange={setCriteria}
-            discovering={discovering}
-            onDiscover={handleDiscover}
-            onCsvImported={handleCsvImported}
-            ensureCampaign={ensureCampaign}
-          />
-        )}
+          {step === "entry" && (
+            <EntryStep
+              campaigns={campaigns}
+              campaignId={campaignId}
+              onCampaignChange={setCampaignId}
+              pickExisting={pickExisting}
+              onTogglePickExisting={() => setPickExisting((v) => !v)}
+              criteria={criteria}
+              onCriteriaChange={setCriteria}
+              entryTab={entryTab}
+              onEntryTab={setEntryTab}
+              discovering={discovering}
+              onDiscover={handleDiscover}
+              creatingCampaign={creatingCampaign}
+              onCsvImported={handleCsvImported}
+              ensureCampaign={ensureCampaign}
+            />
+          )}
 
-        {step === "companies" && (
-          <CompaniesStep
-            companies={companies}
-            loading={loadingCompanies}
-            findingContacts={findingContacts}
-            onBack={reset}
-            onFindContacts={handleFindContacts}
-          />
-        )}
+          {step === "companies" && (
+            <CompaniesStep
+              companies={companies}
+              loading={loadingCompanies}
+              findingContacts={findingContacts}
+              onBack={reset}
+              onFindContacts={handleFindContacts}
+            />
+          )}
 
-        {step === "contacts" && (
-          <ContactsStep
-            contacts={contacts}
-            selectedIds={selectedContactIds}
-            onToggle={(id) =>
-              setSelectedContactIds((prev) => {
-                const next = new Set(prev);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                return next;
-              })
-            }
-            onToggleAll={(checked) =>
-              setSelectedContactIds(
-                checked ? new Set(contacts.map((c) => c.id)) : new Set(),
-              )
-            }
-            drafting={drafting}
-            onBack={() => setStep("companies")}
-            onDraft={handleDraft}
-          />
-        )}
+          {step === "contacts" && (
+            <ContactsStep
+              contacts={contacts}
+              selectedIds={selectedContactIds}
+              onToggle={(id) =>
+                setSelectedContactIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                })
+              }
+              onToggleAll={(checked) =>
+                setSelectedContactIds(
+                  checked ? new Set(contacts.map((c) => c.id)) : new Set(),
+                )
+              }
+              drafting={drafting}
+              onBack={() => setStep("companies")}
+              onDraft={handleDraft}
+            />
+          )}
 
-        {step === "drafts" && (
-          <DraftsStep
-            drafts={drafts}
-            onEdit={(id, patch) =>
-              setDrafts((prev) =>
-                prev.map((d) => (d.id === id ? { ...d, ...patch } : d)),
-              )
-            }
-            saving={savingDrafts}
-            saved={saved}
-            onSave={handleSaveDrafts}
-            onDone={reset}
-          />
-        )}
+          {step === "drafts" && (
+            <DraftsStep
+              drafts={drafts}
+              onEdit={(id, patch) =>
+                setDrafts((prev) =>
+                  prev.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+                )
+              }
+              saving={savingDrafts}
+              saved={saved}
+              onSave={handleSaveDrafts}
+              onDone={reset}
+            />
+          )}
+
+          {step === "entry" && <InfoCards />}
+        </div>
+
+        <RunRail
+          step={step}
+          chips={runChips}
+          companiesCount={companies.length}
+          contactsCount={contacts.length}
+          draftsCount={drafts.length}
+        />
       </div>
     </section>
   );
 }
 
-// ── Step indicator ─────────────────────────────────────────────────────────
+// ── Step rail (horizontal) ───────────────────────────────────────────────────
 
-function StepIndicator({ step }: { step: Step }) {
-  const order: Step[] = ["entry", "companies", "contacts", "drafts"];
-  const idx = order.indexOf(step);
+function StepRail({ current }: { current: Step }) {
+  const idx = STEPS.findIndex((s) => s.key === current);
   return (
-    <div className="hidden items-center gap-1.5 sm:flex">
-      {order.map((s, i) => (
-        <span
-          key={s}
-          className={`h-1.5 w-6 rounded-full ${
-            i <= idx ? "bg-champions-orange" : "bg-muted"
-          }`}
-          aria-hidden
-        />
+    <div className="hidden items-center sm:flex">
+      {STEPS.map((s, i) => (
+        <div key={s.key} className="flex items-center">
+          <div className="flex items-center gap-2">
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${
+                i <= idx
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {i + 1}
+            </span>
+            <span
+              className={`font-mono text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                i === idx ? "text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              {s.label}
+            </span>
+          </div>
+          {i < STEPS.length - 1 && <span className="bg-border mx-2 h-px w-6" />}
+        </div>
       ))}
     </div>
   );
 }
 
-// ── Campaign context control ─────────────────────────────────────────────────
+// ── This-run rail ────────────────────────────────────────────────────────────
 
-function CampaignContext({
-  campaigns,
-  campaignId,
-  onCampaignChange,
-  quickLine,
-  onQuickLineChange,
-  creating,
+function RunRail({
+  step,
+  chips,
+  companiesCount,
+  contactsCount,
+  draftsCount,
 }: {
-  campaigns: CampaignOption[];
-  campaignId: string;
-  onCampaignChange: (id: string) => void;
-  quickLine: string;
-  onQuickLineChange: (v: string) => void;
-  creating: boolean;
+  step: Step;
+  chips: string[];
+  companiesCount: number;
+  contactsCount: number;
+  draftsCount: number;
 }) {
+  const rows: { icon: typeof Building2; label: string; value: string }[] = [
+    {
+      icon: Building2,
+      label: "Companies",
+      value: companiesCount > 0 ? String(companiesCount) : "not started",
+    },
+    {
+      icon: Users,
+      label: "Contacts",
+      value: contactsCount > 0 ? String(contactsCount) : "pending",
+    },
+    {
+      icon: Mail,
+      label: "Drafts",
+      value: draftsCount > 0 ? String(draftsCount) : "pending",
+    },
+  ];
+
+  const nextCopy: Record<Step, string> = {
+    entry:
+      "Describe your buyer, then I find matching companies and the right people inside them.",
+    companies:
+      "Review the companies I staged, then find the right people inside them.",
+    contacts:
+      "Pick who to reach, then I draft a personalized message for each.",
+    drafts: "Edit anything, then save the drafts to your outreach queue.",
+  };
+
   return (
-    <div className="bg-muted/40 space-y-2 rounded-lg p-3">
-      <p className="text-xs font-medium">Campaign context</p>
-      <p className="text-muted-foreground text-xs">
-        Contacts and drafts need an offering and target profile. Pick a campaign
-        or describe yours in one line.
-      </p>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="sm:w-1/2">
-          <Select
-            value={campaignId}
-            onValueChange={onCampaignChange}
-            placeholder="Use an existing campaign…"
-            items={campaigns.map((c) => ({ value: c.id, label: c.name }))}
-            aria-label="Existing campaign"
-          />
+    <aside className="bg-card shadow-card h-fit rounded-xl border border-border p-4">
+      <p className="eyebrow mb-3">This run</p>
+
+      {chips.length > 0 ? (
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {chips.map((c) => (
+            <span
+              key={c}
+              className="bg-muted text-foreground/80 rounded-md px-2 py-1 text-xs"
+            >
+              {c}
+            </span>
+          ))}
         </div>
-        <span className="text-muted-foreground text-center text-xs sm:px-1">
-          or
-        </span>
-        <div className="sm:w-1/2">
-          <Input
-            value={quickLine}
-            onChange={(e) => onQuickLineChange(e.target.value)}
-            placeholder="What you sell / who you target"
-            disabled={!!campaignId || creating}
-          />
-        </div>
+      ) : (
+        <p className="text-muted-foreground mb-4 text-xs">
+          Your targeting shows up here once you describe a buyer.
+        </p>
+      )}
+
+      <div className="space-y-1">
+        {rows.map((r) => (
+          <div
+            key={r.label}
+            className="flex items-center justify-between border-t border-border py-2.5 first:border-t-0"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="text-muted-foreground flex h-6 w-6 items-center justify-center rounded-md bg-muted">
+                <r.icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="text-sm font-medium">{r.label}</span>
+            </div>
+            <span className="text-muted-foreground text-xs">{r.value}</span>
+          </div>
+        ))}
       </div>
+
+      <div className="mt-3 border-t border-border pt-3">
+        <p className="eyebrow mb-1.5 flex items-center gap-1.5">
+          <ArrowRight className="h-3 w-3" /> Next
+        </p>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          {nextCopy[step]}
+        </p>
+      </div>
+    </aside>
+  );
+}
+
+// ── Info cards (entry only) ──────────────────────────────────────────────────
+
+function InfoCards() {
+  const items = [
+    {
+      icon: PencilLine,
+      title: "You describe",
+      body: "One line on who you sell to.",
+    },
+    {
+      icon: Search,
+      title: "I research",
+      body: "Find companies, people, and signals.",
+    },
+    { icon: Check, title: "You review", body: "Edit drafts, then send." },
+  ];
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {items.map((it) => (
+        <div
+          key={it.title}
+          className="bg-card flex items-start gap-2.5 rounded-xl border border-border p-3"
+        >
+          <span className="bg-peach text-peach-foreground flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
+            <it.icon className="h-3.5 w-3.5" />
+          </span>
+          <div>
+            <p className="text-sm font-semibold">{it.title}</p>
+            <p className="text-muted-foreground text-xs">{it.body}</p>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -576,98 +700,174 @@ function EntryStep({
   campaigns,
   campaignId,
   onCampaignChange,
-  quickLine,
-  onQuickLineChange,
-  creatingCampaign,
+  pickExisting,
+  onTogglePickExisting,
   criteria,
   onCriteriaChange,
+  entryTab,
+  onEntryTab,
   discovering,
   onDiscover,
+  creatingCampaign,
   onCsvImported,
   ensureCampaign,
 }: {
   campaigns: CampaignOption[];
   campaignId: string;
   onCampaignChange: (id: string) => void;
-  quickLine: string;
-  onQuickLineChange: (v: string) => void;
-  creatingCampaign: boolean;
+  pickExisting: boolean;
+  onTogglePickExisting: () => void;
   criteria: string;
   onCriteriaChange: (v: string) => void;
+  entryTab: "describe" | "upload";
+  onEntryTab: (t: "describe" | "upload") => void;
   discovering: boolean;
+  creatingCampaign: boolean;
   onDiscover: () => void;
   onCsvImported: () => void;
   ensureCampaign: () => Promise<string | null>;
 }) {
   return (
-    <div className="space-y-4">
-      <CampaignContext
-        campaigns={campaigns}
-        campaignId={campaignId}
-        onCampaignChange={onCampaignChange}
-        quickLine={quickLine}
-        onQuickLineChange={onQuickLineChange}
-        creating={creatingCampaign}
+    <div className="bg-card shadow-card rounded-xl border border-border p-5">
+      <p className="eyebrow mb-2">Campaign context</p>
+      <h3 className="text-lg font-semibold">Who do you want to reach?</h3>
+      <p className="text-muted-foreground mt-0.5 text-sm">
+        Describe your ideal customer, or drop a list. I&apos;ll do the homework.
+      </p>
+
+      {/* Source tabs */}
+      <div className="bg-muted mt-4 inline-flex gap-1 rounded-lg p-1">
+        <TabButton
+          active={entryTab === "describe"}
+          onClick={() => onEntryTab("describe")}
+          icon={Search}
+        >
+          Describe criteria
+        </TabButton>
+        <TabButton
+          active={entryTab === "upload"}
+          onClick={() => onEntryTab("upload")}
+          icon={Upload}
+        >
+          Upload list
+        </TabButton>
+      </div>
+
+      <Textarea
+        value={criteria}
+        onChange={(e) => onCriteriaChange(e.target.value)}
+        placeholder="B2B SaaS, 10–50 employees, US, seed-funded"
+        rows={3}
+        className="mt-3.5"
       />
 
-      <Tabs defaultValue="describe">
-        <TabsList>
-          <TabsTrigger value="describe">
-            <Search className="h-3.5 w-3.5" />
-            Describe criteria
-          </TabsTrigger>
-          <TabsTrigger value="upload">
-            <Upload className="h-3.5 w-3.5" />
-            Upload companies
-          </TabsTrigger>
-        </TabsList>
+      {entryTab === "describe" && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground mr-0.5 text-xs">Try:</span>
+          {TRY_EXAMPLES.map((ex) => (
+            <button
+              key={ex}
+              type="button"
+              onClick={() => onCriteriaChange(ex)}
+              className="hover:border-primary hover:text-foreground text-muted-foreground rounded-full border border-border px-2.5 py-1 text-xs transition-colors"
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+      )}
 
-        <TabsContent value="describe">
-          <div className="space-y-2">
-            <Textarea
-              value={criteria}
-              onChange={(e) => onCriteriaChange(e.target.value)}
-              placeholder={QUICK_CRITERIA_PLACEHOLDER}
-              rows={3}
-            />
-            <div className="flex justify-end">
-              <Button onClick={onDiscover} disabled={discovering}>
-                {discovering ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Finding companies…
-                  </>
-                ) : (
-                  <>
-                    Find companies
-                    <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        </TabsContent>
+      {entryTab === "describe" ? (
+        <div className="mt-4 flex items-center gap-3">
+          <Button
+            onClick={onDiscover}
+            disabled={discovering || creatingCampaign}
+          >
+            {discovering ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Finding companies…
+              </>
+            ) : (
+              <>
+                Find companies
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </Button>
+          <button
+            type="button"
+            onClick={onTogglePickExisting}
+            className="text-muted-foreground hover:text-foreground text-sm transition-colors"
+          >
+            or pick an existing campaign
+          </button>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-2">
+          <p className="text-muted-foreground text-sm">
+            Upload a CSV or Excel of company names. I&apos;ll stage them into
+            your campaign (the line above becomes its context).
+          </p>
+          <CsvUploadGate
+            campaignId={campaignId}
+            ensureCampaign={ensureCampaign}
+            onImported={onCsvImported}
+          />
+          <button
+            type="button"
+            onClick={onTogglePickExisting}
+            className="text-muted-foreground hover:text-foreground text-sm transition-colors"
+          >
+            or pick an existing campaign
+          </button>
+        </div>
+      )}
 
-        <TabsContent value="upload">
-          <div className="space-y-2">
-            <p className="text-muted-foreground text-sm">
-              Upload a CSV or Excel of company names. We&apos;ll stage them in
-              your campaign.
-            </p>
-            <CsvUploadGate
-              campaignId={campaignId}
-              ensureCampaign={ensureCampaign}
-              onImported={onCsvImported}
-            />
-          </div>
-        </TabsContent>
-      </Tabs>
+      {pickExisting && (
+        <div className="mt-3 max-w-sm">
+          <Select
+            value={campaignId}
+            onValueChange={onCampaignChange}
+            placeholder="Use an existing campaign…"
+            items={campaigns.map((c) => ({ value: c.id, label: c.name }))}
+            aria-label="Existing campaign"
+          />
+        </div>
+      )}
     </div>
   );
 }
 
+function TabButton({
+  active,
+  onClick,
+  icon: Icon,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: typeof Search;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+        active
+          ? "bg-card text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {children}
+    </button>
+  );
+}
+
 // CsvUpload needs a campaignId up-front. If none is selected yet, we create one
-// first (from the quick line) and then render the real CsvUpload.
+// first (from the criteria line) and then render the real CsvUpload.
 function CsvUploadGate({
   campaignId,
   ensureCampaign,
@@ -677,8 +877,6 @@ function CsvUploadGate({
   ensureCampaign: () => Promise<string | null>;
   onImported: () => void;
 }) {
-  // A campaign created locally (via the quick line) before the parent's
-  // campaignId is set. The parent's campaignId always wins when present.
   const [createdId, setCreatedId] = useState<string>("");
   const effectiveId = campaignId || createdId;
 
@@ -717,7 +915,7 @@ function CompaniesStep({
   onFindContacts: () => void;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="bg-card shadow-card space-y-3 rounded-xl border border-border p-5">
       <div className="flex items-center gap-2 text-sm font-medium">
         <Building2 className="text-muted-foreground h-4 w-4" />
         {loading
@@ -740,7 +938,7 @@ function CompaniesStep({
           {companies.map((co) => (
             <div
               key={co.id}
-              className="border-border bg-background flex items-center gap-3 rounded-lg border px-3 py-2"
+              className="bg-background flex items-center gap-3 rounded-lg border border-border px-3 py-2"
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{co.name}</p>
@@ -803,7 +1001,7 @@ function ContactsStep({
     contacts.length > 0 && selectedIds.size === contacts.length;
 
   return (
-    <div className="space-y-3">
+    <div className="bg-card shadow-card space-y-3 rounded-xl border border-border p-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Users className="text-muted-foreground h-4 w-4" />
@@ -816,7 +1014,7 @@ function ContactsStep({
               type="checkbox"
               checked={allSelected}
               onChange={(e) => onToggleAll(e.target.checked)}
-              className="accent-champions-orange h-3.5 w-3.5"
+              className="accent-primary h-3.5 w-3.5"
             />
             Select all
           </label>
@@ -833,13 +1031,13 @@ function ContactsStep({
           {contacts.map((c) => (
             <label
               key={c.id}
-              className="border-border bg-background flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2"
+              className="bg-background flex cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2"
             >
               <input
                 type="checkbox"
                 checked={selectedIds.has(c.id)}
                 onChange={() => onToggle(c.id)}
-                className="accent-champions-orange h-3.5 w-3.5 shrink-0"
+                className="accent-primary h-3.5 w-3.5 shrink-0"
               />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -870,10 +1068,7 @@ function ContactsStep({
         <Button variant="ghost" size="sm" onClick={onBack}>
           Back
         </Button>
-        <Button
-          onClick={onDraft}
-          disabled={drafting || selectedIds.size === 0}
-        >
+        <Button onClick={onDraft} disabled={drafting || selectedIds.size === 0}>
           {drafting ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -903,25 +1098,27 @@ function DraftsStep({
   onDone,
 }: {
   drafts: DraftRow[];
-  onEdit: (id: string, patch: Partial<Pick<DraftRow, "subject" | "bodyText">>) => void;
+  onEdit: (
+    id: string,
+    patch: Partial<Pick<DraftRow, "subject" | "bodyText">>,
+  ) => void;
   saving: boolean;
   saved: boolean;
   onSave: () => void;
   onDone: () => void;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="bg-card shadow-card space-y-3 rounded-xl border border-border p-5">
       <div className="flex items-center gap-2 text-sm font-medium">
         <Mail className="text-muted-foreground h-4 w-4" />
-        {drafts.length} personalized{" "}
-        {drafts.length === 1 ? "draft" : "drafts"}
+        {drafts.length} personalized {drafts.length === 1 ? "draft" : "drafts"}
       </div>
 
       <div className="max-h-[28rem] space-y-3 overflow-y-auto">
         {drafts.map((d) => (
           <div
             key={d.id}
-            className="border-border bg-background space-y-2 rounded-lg border p-3"
+            className="bg-background space-y-2 rounded-lg border border-border p-3"
           >
             <div className="text-muted-foreground text-xs">
               To: <span className="text-foreground">{d.contact.name}</span>
@@ -929,11 +1126,11 @@ function DraftsStep({
               {d.contact.company ? ` · ${d.contact.company}` : ""} ·{" "}
               {d.contact.email}
             </div>
-            <Input
+            <input
               value={d.subject}
               onChange={(e) => onEdit(d.id, { subject: e.target.value })}
               aria-label="Subject"
-              className="font-medium"
+              className="border-input bg-card focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2"
             />
             <Textarea
               value={d.bodyText}
@@ -950,7 +1147,7 @@ function DraftsStep({
           {saved ? "Done" : "Discard & start over"}
         </Button>
         {saved ? (
-          <span className="text-champions-orange flex items-center gap-1.5 text-sm font-medium">
+          <span className="text-success flex items-center gap-1.5 text-sm font-medium">
             <Check className="h-4 w-4" />
             Drafts saved
           </span>

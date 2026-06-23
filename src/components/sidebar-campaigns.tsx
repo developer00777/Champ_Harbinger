@@ -2,15 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { SafeLink } from "@/components/safe-link";
-import { Loader2, Target } from "lucide-react";
-import {
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/components/ui/sidebar";
+import { Loader2 } from "lucide-react";
 import {
   campaignStatusDotStyles,
   type CampaignStatus,
@@ -30,6 +22,11 @@ interface SidebarCampaignsProps {
   onSelectCampaign: (id: string | null) => void;
 }
 
+/**
+ * The "Campaigns" section of the left rail. Self-contained: fetches the user's
+ * campaigns and polls every 10s so agent-created campaigns appear live. Plain
+ * markup styled to the Aegis sidebar (mono eyebrow + dot-tagged rows).
+ */
 export function SidebarCampaigns({
   activeCampaignId,
   onSelectCampaign,
@@ -80,52 +77,50 @@ export function SidebarCampaigns({
   }, []);
 
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel>Campaigns</SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {loading && (
-            <SidebarMenuItem>
-              <SidebarMenuButton disabled>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Loading...</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
+    <div className="pt-3">
+      <p className="eyebrow px-2.5 pb-2">Campaigns</p>
 
-          {!loading && campaigns.length === 0 && (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                onClick={() => onSelectCampaign(null)}
-                render={<SafeLink href="/chat" />}
-                tooltip="Speak to agent to create a campaign"
-                className="text-muted-foreground"
-              >
-                <span className="text-xs">Speak to agent to get started</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
+      {loading && (
+        <div className="text-muted-foreground flex items-center gap-2 px-2.5 py-1.5 text-xs">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading…
+        </div>
+      )}
 
-          {campaigns.map((campaign) => (
-            <SidebarMenuItem key={campaign.id}>
-              <SidebarMenuButton
-                isActive={activeCampaignId === campaign.id}
-                onClick={() => onSelectCampaign(campaign.id)}
-                render={<SafeLink href={`/campaigns/${campaign.id}`} />}
-                tooltip={campaign.name}
-              >
-                <div className="relative">
-                  <Target className="h-4 w-4" />
-                  <span
-                    className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${campaignStatusDotStyles[campaign.status as CampaignStatus] || "bg-gray-400"}`}
-                  />
-                </div>
-                <span className="truncate">{campaign.name}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
+      {!loading && campaigns.length === 0 && (
+        <SafeLink
+          href="/chat"
+          onClick={() => onSelectCampaign(null)}
+          className="text-muted-foreground hover:text-foreground block px-2.5 py-1.5 text-xs transition-colors"
+        >
+          Speak to agent to get started
+        </SafeLink>
+      )}
+
+      <div className="flex flex-col gap-0.5">
+        {campaigns.map((campaign) => {
+          const active = activeCampaignId === campaign.id;
+          const dot =
+            campaignStatusDotStyles[campaign.status as CampaignStatus] ||
+            "bg-gray-400";
+          return (
+            <SafeLink
+              key={campaign.id}
+              href={`/campaigns/${campaign.id}`}
+              onClick={() => onSelectCampaign(campaign.id)}
+              title={campaign.name}
+              className={`flex h-[30px] items-center gap-2.5 rounded-lg px-2.5 text-[12.5px] transition-colors ${
+                active
+                  ? "bg-peach text-primary font-medium"
+                  : "text-foreground/80 hover:bg-accent hover:text-foreground"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+              <span className="truncate">{campaign.name}</span>
+            </SafeLink>
+          );
+        })}
+      </div>
+    </div>
   );
 }

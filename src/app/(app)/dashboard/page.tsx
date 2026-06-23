@@ -9,7 +9,6 @@ import { ChampIQQueueWidget } from "@/components/dashboard/champiq-queue-widget"
 import { QuickStartHub } from "@/components/quick-start/quick-start-hub";
 import {
   ListRowsSkeleton,
-  PageHeaderSkeleton,
   StatsRowSkeleton,
 } from "@/components/ui/skeleton-presets";
 
@@ -91,84 +90,75 @@ export default function DashboardPage() {
     setRange(newRange);
   };
 
-  if (loading && !data) {
-    return (
-      <div className="flex-1 overflow-y-auto">
-        <div className="space-y-6 p-4 md:p-6">
-          <PageHeaderSkeleton />
-          <StatsRowSkeleton count={4} />
-          <div className="bg-muted/40 h-64 animate-pulse rounded-lg" />
-          <ListRowsSkeleton count={3} />
-        </div>
-      </div>
-    );
-  }
-
-  if (!data) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <p className="text-muted-foreground text-sm">
-            {error
-              ? `Failed to load dashboard: ${error}`
-              : "Failed to load dashboard"}
-          </p>
-          <button
-            type="button"
-            onClick={() => fetchData(range)}
-            className="bg-foreground/10 hover:bg-foreground/15 rounded-md px-3 py-1.5 text-xs font-medium"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="space-y-6 p-4 md:p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
-          <p className="text-muted-foreground text-sm">
-            Cross-campaign performance at a glance.
-          </p>
-        </div>
-
+      <div className="mx-auto w-full max-w-[1180px] space-y-8 p-4 md:p-6 lg:px-8 lg:py-7">
+        {/* Hero: the Quick Start flow */}
         <QuickStartHub />
 
-        <ChampIQQueueWidget />
+        {/* Cross-campaign performance */}
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold tracking-tight">Performance</h2>
 
-        <StatCards totals={data.totals} />
+          <ChampIQQueueWidget />
 
-        <OutreachChart
-          timeSeries={data.timeSeries}
-          range={range}
-          onRangeChange={handleRangeChange}
-        />
-
-        {topSignals.length > 0 && (
-          <section className="rounded-lg border p-4">
-            <h2 className="text-sm font-semibold text-muted-foreground mb-3">
-              Top signals fired
-            </h2>
-            <div className="space-y-2">
-              {topSignals.map((s) => (
-                <div key={s.name} className="flex justify-between text-sm">
-                  <span>{s.name}</span>
-                  <span className="font-medium text-champions-orange">
-                    {s.count}×
-                  </span>
-                </div>
-              ))}
+          {loading && !data ? (
+            <div className="space-y-6">
+              <StatsRowSkeleton count={4} />
+              <div className="bg-muted/40 h-64 animate-pulse rounded-lg" />
+              <ListRowsSkeleton count={3} />
             </div>
-          </section>
-        )}
+          ) : !data ? (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-border py-10">
+              <p className="text-muted-foreground text-sm">
+                {error
+                  ? `Failed to load performance: ${error}`
+                  : "Failed to load performance"}
+              </p>
+              <button
+                type="button"
+                onClick={() => fetchData(range)}
+                className="bg-foreground/10 hover:bg-foreground/15 rounded-md px-3 py-1.5 text-xs font-medium"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <>
+              <StatCards totals={data.totals} />
 
-        <div>
-          <h2 className="mb-3 text-lg font-semibold">Campaigns</h2>
-          <CampaignTable campaigns={data.campaigns} />
-        </div>
+              <OutreachChart
+                timeSeries={data.timeSeries}
+                range={range}
+                onRangeChange={handleRangeChange}
+              />
+
+              {topSignals.length > 0 && (
+                <section className="rounded-xl border border-border p-4">
+                  <p className="eyebrow mb-3">Top signals fired</p>
+                  <div className="space-y-2">
+                    {topSignals.map((s) => (
+                      <div
+                        key={s.name}
+                        className="flex justify-between text-sm"
+                      >
+                        <span>{s.name}</span>
+                        <span className="text-champions-orange font-medium">
+                          {s.count}×
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <div>
+                <h3 className="mb-3 text-base font-semibold">Campaigns</h3>
+                <CampaignTable campaigns={data.campaigns} />
+              </div>
+            </>
+          )}
+        </section>
       </div>
     </div>
   );

@@ -1,52 +1,15 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { MessageCircle, X } from "lucide-react";
-
 import { AgentPanel } from "@/components/agent-panel";
 import { AppSidebar } from "@/components/app-sidebar";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
-import { CampaignProvider, useCampaign } from "@/lib/campaign-context";
+import { TopBar } from "@/components/top-bar";
+import { CampaignProvider } from "@/lib/campaign-context";
 
-function HeaderAgentButton() {
-  const { activeCampaignId, agentOpen, setAgentOpen } = useCampaign();
-  const pathname = usePathname();
-
-  if (pathname?.startsWith("/chat")) return null;
-
-  const label = activeCampaignId ? "Campaign Agent" : "Agent";
-
-  return (
-    <div className="flex items-center gap-0.5">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setAgentOpen(!agentOpen)}
-        aria-pressed={agentOpen}
-      >
-        <MessageCircle className="mr-1.5 h-4 w-4" />
-        {label}
-      </Button>
-      {agentOpen && (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Close agent panel"
-          onClick={() => setAgentOpen(false)}
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      )}
-    </div>
-  );
-}
-
+/**
+ * Authenticated app shell (Aegis). A full-width top bar sits above a row of
+ * [sidebar · main · agent panel]. The campaign context wraps the whole tree so
+ * the sidebar switcher, top-bar agent toggle, and agent panel stay in sync.
+ */
 export function DashboardShell({
   children,
   banner,
@@ -58,33 +21,16 @@ export function DashboardShell({
 }) {
   return (
     <CampaignProvider>
-      <div data-app-shell="">
-        <SidebarProvider>
-          <AppSidebar isSuperAdmin={isSuperAdmin} />
-          <SidebarInset className="max-h-dvh overflow-hidden">
-            {banner}
-            <header className="bg-background/50 sticky top-0 z-50 flex h-12 shrink-0 items-center gap-2 border-b px-4 backdrop-blur-md lg:px-6">
-              <div className="flex w-full items-center justify-between">
-                <div className="flex items-center gap-1 lg:gap-2">
-                  <SidebarTrigger className="-ml-1" />
-                  <Separator
-                    orientation="vertical"
-                    className="mx-2 data-[orientation=vertical]:h-4"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <HeaderAgentButton />
-                </div>
-              </div>
-            </header>
-            <div className="relative flex min-h-0 flex-1">
-              <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                {children}
-              </div>
-              <AgentPanel />
-            </div>
-          </SidebarInset>
-        </SidebarProvider>
+      <div data-app-shell="" className="flex h-dvh flex-col">
+        <TopBar isSuperAdmin={isSuperAdmin} />
+        {banner}
+        <div className="flex min-h-0 flex-1">
+          <AppSidebar />
+          <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            {children}
+          </main>
+          <AgentPanel />
+        </div>
       </div>
     </CampaignProvider>
   );
