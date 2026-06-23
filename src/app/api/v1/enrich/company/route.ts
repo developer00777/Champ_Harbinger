@@ -50,7 +50,10 @@ export async function POST(request: Request) {
     model: getModelSync(Models.cheap),
     schema: z.object({
       score: z.number().min(0).max(10),
-      talking_points: z.array(z.string()).length(3),
+      // No array .length()/.min()/.max() — they become JSON-schema
+      // minItems/maxItems, which Anthropic/Bedrock structured output reject.
+      // The prompt asks for exactly 3; we clamp in code below.
+      talking_points: z.array(z.string()).describe("exactly 3 talking points"),
     }),
     prompt: `Analyze this company from a sales perspective.
 Domain: ${domain}
@@ -65,6 +68,6 @@ Generate:
     company: { domain, description: combinedText.slice(0, 300) || null },
     contacts,
     score: object.score,
-    talking_points: object.talking_points,
+    talking_points: object.talking_points.slice(0, 3),
   });
 }

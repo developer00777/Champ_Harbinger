@@ -56,20 +56,28 @@ export async function ensureProvisioned(
   clerkUserId: string,
   email: string | null | undefined,
 ): Promise<void> {
-  const [existing] = await adminDb
-    .select({ id: schema.teamMembers.id })
-    .from(schema.teamMembers)
-    .where(eq(schema.teamMembers.clerkUserId, clerkUserId))
-    .limit(1);
-  if (existing) return; // already linked
-  if (!email) return;
-  await adminDb
-    .update(schema.teamMembers)
-    .set({ clerkUserId, status: "active", updatedAt: new Date() })
-    .where(
-      and(
-        eq(schema.teamMembers.email, normEmail(email)),
-        isNull(schema.teamMembers.clerkUserId),
-      ),
-    );
+  // Best-effort: this runs in the authed layout on every request. A failure
+  // here (e.g. team_members missing during a partial migration, or a transient
+  // DB error) must NEVER take down every authed page — log and continue. The
+  // user simply isn't auto-linked to a team this request.
+  try {
+    const [existing] = await adminDb
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.clerkUserId, clerkUserId))
+      .limit(1);
+    if (existing) return; // already linked
+    if (!email) return;
+    await adminDb
+      .update(schema.teamMembers)
+      .set({ clerkUserId, status: "active", updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.teamMembers.email, normEmail(email)),
+          isNull(schema.teamMembers.clerkUserId),
+        ),
+      );
+  } catch (err) {
+    console.error("[teams] ensureProvisioned failed (non-fatal):", err);
+  }
 }

@@ -47,7 +47,13 @@ function isAggregator(domain: string): boolean {
 }
 
 async function generateSearchQueries(criteria: string): Promise<string[]> {
-  const schema = z.object({ queries: z.array(z.string()).min(1).max(5) });
+  // NOTE: do not put array .min()/.max() here — they become JSON-schema
+  // minItems/maxItems, which Anthropic/Bedrock structured output reject
+  // ("For 'array' type, property 'maxItems' is not supported"). Keep the
+  // count guidance in the prompt and enforce the cap in code below.
+  const schema = z.object({
+    queries: z.array(z.string()).describe("3 to 5 web search queries"),
+  });
   const startedAt = Date.now();
   const result = await generateObject({
     model: getModelSync(Models.classification),
@@ -60,7 +66,7 @@ async function generateSearchQueries(criteria: string): Promise<string[]> {
     modelLabel: Models.classification,
     startedAt,
   });
-  return result.object.queries;
+  return result.object.queries.filter((q) => q.trim()).slice(0, 5);
 }
 
 async function normalizeCompany(
