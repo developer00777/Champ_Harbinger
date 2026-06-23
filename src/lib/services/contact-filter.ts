@@ -118,11 +118,14 @@ export async function findLinkedInUrl(
   if (!name.trim()) return null;
   // Plain queries surface LinkedIn profiles via the metasearch engines; the
   // `site:` operator does NOT work through SearXNG/DuckDuckGo, so avoid it.
+  // Unquoted queries return more LinkedIn results than quoted exact-name ones,
+  // so try those first, then fall back to the stricter quoted form.
   for (const q of [
-    `"${name}" ${orgName} linkedin`,
+    `${name} ${orgName} linkedin`,
     `${name} ${orgName} linkedin.com/in`,
+    `"${name}" ${orgName} linkedin`,
   ]) {
-    const results = await searxSearch(q, 8);
+    const results = await searxSearch(q, 10);
     for (const r of results) {
       const profile = toLinkedInProfile(r.url);
       if (profile) return profile;
@@ -251,25 +254,9 @@ ${wrapUntrusted(combinedContent.slice(0, 12000))}`,
       },
     });
 
-    // Backfill LinkedIn URLs (the LakeB2B join key) for anyone the page didn't
-    // link, via web search — 3 at a time to bound latency.
-    const people = object.people;
-    const missing = people.filter((p) => !p.linkedinUrl && p.name?.trim());
-    for (let i = 0; i < missing.length; i += 3) {
-      const batch = missing.slice(i, i + 3);
-      await Promise.all(
-        batch.map(async (p) => {
-          try {
-            const li = await findLinkedInUrl(p.name, orgName);
-            if (li) p.linkedinUrl = li;
-          } catch {
-            // best-effort
-          }
-        }),
-      );
-    }
-
-    return people;
+    // LinkedIn-URL backfill happens once on the merged set in
+    // findPeopleForCompany, so scraped + searched people are covered uniformly.
+    return object.people;
   } catch (err) {
     console.error("[contact-filter] Domain people extraction failed:", err);
     return [];
@@ -387,7 +374,27 @@ export async function findPeopleForCompany(
       });
     }
   }
-  return [...byKey.values()];
+  const merged = [...byKey.values()];
+
+  // Backfill LinkedIn profile URLs for anyone still missing one — every contact
+  // should carry its LinkedIn link (the outreach handle + LakeB2B join key).
+  // Search-based (we get the public URL, not the blocked page), bounded to 4 at
+  // a time to keep latency in check.
+  const missing = merged.filter((p) => !p.linkedinUrl && p.name?.trim());
+  for (let i = 0; i < missing.length; i += 4) {
+    await Promise.all(
+      missing.slice(i, i + 4).map(async (p) => {
+        try {
+          const li = await findLinkedInUrl(p.name, company.name);
+          if (li) p.linkedinUrl = li;
+        } catch {
+          // best-effort — a missing LinkedIn URL never blocks the contact
+        }
+      }),
+    );
+  }
+
+  return merged;
 }
 
 // ── Company name matching ────────────────────────────────────────────────

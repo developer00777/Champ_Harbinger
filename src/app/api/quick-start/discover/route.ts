@@ -4,6 +4,7 @@ import { schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { getDiscoveryProvider } from "@/lib/discovery";
 import { withAction } from "@/lib/services/cost-tracker";
+import { enqueueEnrichCompany } from "@/lib/jobs/boss";
 import {
   findOrCreateOrganization,
   linkOrganizationToCampaign,
@@ -138,12 +139,25 @@ export async function POST(request: Request) {
         }
       }
 
+      // Auto-kick contact-finding for everything we just staged. Incoming
+      // companies should get their people found automatically — that's the
+      // point. The worker processes these ~5 at a time (fair-dispatched, budget
+      // -guarded); contacts stream into the campaign without per-company clicks.
+      if (campaignId && staged.length > 0) {
+        await Promise.allSettled(
+          staged.map((s) =>
+            enqueueEnrichCompany({ companyId: s.id, campaignId, userId }),
+          ),
+        );
+      }
+
       return Response.json({
         companies,
         campaignId: campaignId ?? null,
         imported,
         skipped,
         staged,
+        contactFindingQueued: campaignId ? staged.length : 0,
       });
     },
   );

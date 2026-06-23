@@ -176,7 +176,7 @@ export function QuickStartHub() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: `Quick Start — ${todayLabel()}`,
+          name: `Quick Start · ${todayLabel()}`,
           icp: line,
           config: { offering: line, source: "quick_start" },
         }),

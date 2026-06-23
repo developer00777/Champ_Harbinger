@@ -8,6 +8,7 @@ import {
   linkOrganizationToCampaign,
   normalizeDomain,
 } from "@/lib/services/knowledge-base";
+import { enqueueEnrichCompany } from "@/lib/jobs/boss";
 
 export async function POST(request: Request) {
   let userId: string;
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
   const seenDomains = new Set<string>();
   let imported = 0;
   let skipped = 0;
+  const stagedLinkIds: string[] = [];
 
   for (const company of companies) {
     if (!company.name?.trim()) {
@@ -125,9 +127,19 @@ export async function POST(request: Request) {
       source: "csv",
     });
 
-    await linkOrganizationToCampaign(org.id, campaignId);
+    const link = await linkOrganizationToCampaign(org.id, campaignId);
+    stagedLinkIds.push(link.id);
     imported++;
   }
+
+  // Auto-kick contact-finding for every uploaded company — a list of companies
+  // in should produce people out, automatically. Worker-processed in the
+  // background (fair-dispatched + budget-guarded).
+  await Promise.allSettled(
+    stagedLinkIds.map((id) =>
+      enqueueEnrichCompany({ companyId: id, campaignId, userId }),
+    ),
+  );
 
   const posthog = getPostHogClient();
   posthog.capture({
