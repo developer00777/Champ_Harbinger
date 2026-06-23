@@ -20,7 +20,7 @@ export function TrackingTimeline({ changes }: { changes: TrackingChange[] }) {
     <div className="space-y-1 py-2">
       {changes.map((change) => (
         <div key={change.id} className="flex items-start gap-3 text-sm">
-          <span className="text-muted-foreground w-14 shrink-0 text-xs">
+          <span className="text-muted-foreground w-14 shrink-0 font-mono text-xs">
             {formatDate(change.detected_at)}
           </span>
           <div className="flex-1">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2 } from "lucide-react";
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { campaignStatusStyles, type CampaignStatus } from "@/lib/status-styles";
 
 interface CampaignRow {
   id: string;
@@ -28,10 +29,25 @@ interface CampaignRow {
   createdAt: string;
 }
 
+function StatusPill({ status }: { status: string }) {
+  const className =
+    campaignStatusStyles[status as CampaignStatus]?.className ??
+    campaignStatusStyles.paused.className;
+  return (
+    <span
+      className={`inline-flex rounded-full px-2 py-0.5 font-mono text-xs ${className}`}
+    >
+      {status}
+    </span>
+  );
+}
+
 function NewCampaignDialog({
   onCreated,
+  trigger,
 }: {
   onCreated: (campaign: CampaignRow) => void;
+  trigger: React.ReactElement;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -72,14 +88,7 @@ function NewCampaignDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <Plus className="size-3.5" />
-            New campaign
-          </Button>
-        }
-      />
+      <DialogTrigger render={trigger} />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New campaign</DialogTitle>
@@ -142,6 +151,47 @@ function NewCampaignDialog({
   );
 }
 
+// Stat strip card — mono eyebrow + big number + small sub (Aegis).
+function StatCardItem({
+  label,
+  value,
+  sub,
+  tone = "default",
+}: {
+  label: string;
+  value: string | number;
+  sub: string;
+  tone?: "default" | "orange" | "success";
+}) {
+  const valueClass =
+    tone === "orange"
+      ? "text-champions-orange"
+      : tone === "success"
+        ? "text-success"
+        : "text-foreground";
+  return (
+    <div className="bg-card border-border shadow-card rounded-xl border p-4">
+      <p className="eyebrow mb-2">{label}</p>
+      <p
+        className={`text-[28px] leading-none font-bold tracking-tight tabular-nums ${valueClass}`}
+      >
+        {value}
+      </p>
+      <p className="text-muted-foreground mt-1.5 text-xs">{sub}</p>
+    </div>
+  );
+}
+
+function formatCreated(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function CampaignsIndexPage() {
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,10 +242,22 @@ export default function CampaignsIndexPage() {
     setDeletingId(null);
   };
 
+  // Stat strip derived from the campaigns actually loaded — no invented metrics.
+  const stats = useMemo(() => {
+    const total = campaigns.length;
+    const active = campaigns.filter((c) => c.status === "active").length;
+    const paused = campaigns.filter((c) => c.status === "paused").length;
+    const inProgress = campaigns.filter(
+      (c) => c.status === "discovery" || c.status === "researching",
+    ).length;
+    return { total, active, paused, inProgress };
+  }, [campaigns]);
+
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="space-y-6 p-4 md:p-6">
-        <div className="flex items-start justify-between">
+      <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 md:p-6 lg:px-8 lg:py-7">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Campaigns</h1>
             <p className="text-muted-foreground text-sm">
@@ -205,53 +267,96 @@ export default function CampaignsIndexPage() {
           </div>
           <NewCampaignDialog
             onCreated={(c) => setCampaigns((prev) => [c, ...prev])}
+            trigger={
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Plus className="size-3.5" />
+                New campaign
+              </Button>
+            }
           />
         </div>
 
+        {/* Stat strip */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCardItem
+            label="Campaigns"
+            value={stats.total}
+            sub={`${stats.active} active`}
+          />
+          <StatCardItem
+            label="Active"
+            value={stats.active}
+            sub="running now"
+            tone="orange"
+          />
+          <StatCardItem
+            label="In progress"
+            value={stats.inProgress}
+            sub="discovery & research"
+          />
+          <StatCardItem
+            label="Paused"
+            value={stats.paused}
+            sub="on hold"
+            tone="success"
+          />
+        </div>
+
+        {/* Table */}
         {loading ? (
-          <div className="space-y-2">
+          <div className="bg-card border-border shadow-card space-y-2 rounded-xl border p-4">
             <div className="bg-muted/40 h-9 w-full animate-pulse rounded" />
             <div className="bg-muted/40 h-9 w-full animate-pulse rounded" />
             <div className="bg-muted/40 h-9 w-full animate-pulse rounded" />
           </div>
         ) : campaigns.length === 0 ? (
-          <div className="border-border flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-12 text-center">
+          <div className="bg-card border-border shadow-card flex flex-col items-center gap-3 rounded-xl border px-6 py-12 text-center">
             <p className="text-sm font-medium">No campaigns yet</p>
             <p className="text-muted-foreground text-xs">
               Create your first campaign to start discovering prospects.
             </p>
             <NewCampaignDialog
               onCreated={(c) => setCampaigns((prev) => [c, ...prev])}
+              trigger={
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <Plus className="size-3.5" />
+                  New campaign
+                </Button>
+              }
             />
           </div>
         ) : (
-          <div className="border-border overflow-hidden rounded-lg border">
+          <div className="bg-card border-border shadow-card overflow-hidden rounded-xl border">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-border bg-muted/50 border-b">
-                  <th className="px-4 py-2.5 text-left font-medium">Name</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Status</th>
-                  <th className="w-12 px-4 py-2.5" />
+                <tr className="border-border bg-muted border-b">
+                  <th className="eyebrow px-4 py-3 text-left">Name</th>
+                  <th className="eyebrow px-4 py-3 text-left">Status</th>
+                  <th className="eyebrow px-4 py-3 text-left">Created</th>
+                  <th className="w-12 px-4 py-3" />
                 </tr>
               </thead>
               <tbody>
                 {campaigns.map((campaign) => (
                   <tr
                     key={campaign.id}
-                    className="border-border border-b last:border-b-0"
+                    className="border-border hover:bg-muted/60 border-b transition-colors last:border-b-0"
                   >
-                    <td className="px-4 py-2.5">
+                    <td className="px-4 py-3.5">
                       <Link
                         href={`/campaigns/${campaign.id}`}
-                        className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2"
+                        className="focus-visible:ring-ring rounded-sm font-semibold hover:underline focus-visible:ring-2 focus-visible:outline-none"
                       >
                         {campaign.name}
                       </Link>
                     </td>
-                    <td className="text-muted-foreground px-4 py-2.5 capitalize">
-                      {campaign.status}
+                    <td className="px-4 py-3.5">
+                      <StatusPill status={campaign.status} />
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="text-muted-foreground px-4 py-3.5 text-xs tabular-nums">
+                      {formatCreated(campaign.createdAt)}
+                    </td>
+                    <td className="px-4 py-3.5">
                       <Dialog>
                         <DialogTrigger
                           render={

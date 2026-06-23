@@ -5,14 +5,12 @@ import { useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import { Select } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { TogglePill } from "@/components/ui/toggle-pill";
 import {
   TrackingTable,
   type TrackingRow,
   type ViewMode,
 } from "@/components/tracking/tracking-table";
-import { ReadinessBadge } from "@/components/tracking/readiness-badge";
 import type { Campaign } from "@/lib/types/campaign";
 
 export default function TrackingPage() {
@@ -97,7 +95,7 @@ function TrackingPageContent() {
   if (loading) {
     return (
       <div className="flex-1 overflow-y-auto">
-        <div className="space-y-6 p-4 md:p-6">
+        <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 md:p-6 lg:px-8 lg:py-7">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Tracking</h1>
             <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
@@ -110,81 +108,80 @@ function TrackingPageContent() {
     );
   }
 
+  const showCounts = Boolean(selectedCampaignId) && rows.length > 0;
+
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="space-y-6 p-4 md:p-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Tracking</h1>
-          <p className="text-muted-foreground text-sm">
-            Monitor companies over time. Signals run on schedule and flag
-            entities when thresholds are met.
-          </p>
-        </div>
-
-        {/* Campaign selector + stats */}
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="w-full max-w-xs">
-            <label
-              htmlFor="campaign-select"
-              className="text-muted-foreground mb-1 block text-xs font-medium"
-            >
-              Campaign
-            </label>
-            <Select
-              id="campaign-select"
-              value={selectedCampaignId}
-              onValueChange={setSelectedCampaignId}
-              placeholder="Select a campaign"
-              items={campaigns.map((c) => ({ value: c.id, label: c.name }))}
-            />
+      <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 md:p-6 lg:px-8 lg:py-7">
+        {/* Header: title + subtitle, readiness counts on the right */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Tracking</h1>
+            <p className="text-muted-foreground mt-0.5 text-sm">
+              Monitor companies over time. Signals run on schedule and flag
+              entities when thresholds are met.
+            </p>
           </div>
 
-          {selectedCampaignId && rows.length > 0 && (
-            <ul className="flex gap-3" aria-label="Readiness counts">
-              <li className="flex items-center gap-1.5">
-                <ReadinessBadge tag="ready_to_contact" />
-                <span className="text-muted-foreground text-xs tabular-nums">
-                  {readyCount}
-                </span>
+          {showCounts && (
+            <ul
+              className="flex items-center gap-2"
+              aria-label="Readiness counts"
+            >
+              <li className="inline-flex h-7 items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span className="tabular-nums">{readyCount}</span> ready to
+                contact
               </li>
-              <li className="flex items-center gap-1.5">
-                <ReadinessBadge tag="monitoring" />
-                <span className="text-muted-foreground text-xs tabular-nums">
-                  {monitoringCount}
-                </span>
+              <li className="bg-muted text-muted-foreground inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-semibold">
+                <span className="bg-muted-foreground h-1.5 w-1.5 rounded-full" />
+                <span className="tabular-nums">{monitoringCount}</span>{" "}
+                monitoring
               </li>
             </ul>
           )}
         </div>
 
-        <Separator />
-
-        {/* View toggle */}
-        {selectedCampaignId && rows.length > 0 && (
-          <div className="flex gap-1.5">
-            <TogglePill
-              active={viewMode === "by-signal"}
-              onClick={() => setViewMode("by-signal")}
-            >
-              By Signal
-            </TogglePill>
-            <TogglePill
-              active={viewMode === "by-company"}
-              onClick={() => setViewMode("by-company")}
-            >
-              By Company
-            </TogglePill>
+        {/* Campaign selector + view toggle */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="w-full max-w-xs sm:w-auto sm:min-w-[200px]">
+            <Select
+              id="campaign-select"
+              value={selectedCampaignId}
+              onValueChange={setSelectedCampaignId}
+              placeholder="Select a campaign"
+              aria-label="Campaign"
+              items={campaigns.map((c) => ({ value: c.id, label: c.name }))}
+            />
           </div>
-        )}
+
+          {showCounts && (
+            <div className="flex gap-1.5">
+              <TogglePill
+                active={viewMode === "by-signal"}
+                onClick={() => setViewMode("by-signal")}
+              >
+                By Signal
+              </TogglePill>
+              <TogglePill
+                active={viewMode === "by-company"}
+                onClick={() => setViewMode("by-company")}
+              >
+                By Company
+              </TogglePill>
+            </div>
+          )}
+        </div>
 
         {/* Table */}
         {!selectedCampaignId ? (
-          <p className="text-muted-foreground py-12 text-center text-sm">
-            Select a campaign to view tracked entities.
-          </p>
+          <div className="bg-card shadow-card border-border rounded-xl border px-6 py-16 text-center">
+            <p className="text-muted-foreground text-sm">
+              Select a campaign to view tracked entities.
+            </p>
+          </div>
         ) : rows.length === 0 ? (
-          <div className="border-border flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+          <div className="bg-card shadow-card border-border flex flex-col items-center gap-2 rounded-xl border px-6 py-16 text-center">
             <p className="text-sm font-medium">
               No tracking configured for this campaign
             </p>

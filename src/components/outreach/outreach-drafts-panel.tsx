@@ -181,7 +181,7 @@ export function OutreachDraftsPanel({
           return (
             <div
               key={key}
-              className="border-border overflow-hidden rounded-lg border"
+              className="border-border bg-card shadow-card overflow-hidden rounded-xl border"
             >
               <button
                 type="button"

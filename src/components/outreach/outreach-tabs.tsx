@@ -31,8 +31,11 @@ export function OutreachTabs({
 
   return (
     <Tabs defaultValue="inbox" className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="inbox">
+      <TabsList className="border-border h-auto justify-start gap-0 rounded-none border-b bg-transparent p-0 text-muted-foreground">
+        <TabsTrigger
+          value="inbox"
+          className="data-[active]:border-primary data-[active]:text-foreground -mb-px rounded-none border-b-2 border-transparent bg-transparent px-4 py-2 font-medium text-muted-foreground shadow-none data-[active]:bg-transparent data-[active]:shadow-none"
+        >
           Inbox
           {drafts.length > 0 && (
             <span className="text-muted-foreground ml-1 text-xs tabular-nums">
@@ -40,8 +43,18 @@ export function OutreachTabs({
             </span>
           )}
         </TabsTrigger>
-        <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
-        <TabsTrigger value="sequences">Sequences</TabsTrigger>
+        <TabsTrigger
+          value="pipeline"
+          className="data-[active]:border-primary data-[active]:text-foreground -mb-px rounded-none border-b-2 border-transparent bg-transparent px-4 py-2 font-medium text-muted-foreground shadow-none data-[active]:bg-transparent data-[active]:shadow-none"
+        >
+          Pipeline
+        </TabsTrigger>
+        <TabsTrigger
+          value="sequences"
+          className="data-[active]:border-primary data-[active]:text-foreground -mb-px rounded-none border-b-2 border-transparent bg-transparent px-4 py-2 font-medium text-muted-foreground shadow-none data-[active]:bg-transparent data-[active]:shadow-none"
+        >
+          Sequences
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="inbox">

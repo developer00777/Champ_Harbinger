@@ -957,7 +957,7 @@ function EmailCard({
   }, [edit.bodyText]);
 
   return (
-    <div className="border-border bg-background rounded-lg border p-4 shadow-sm">
+    <div className="border-border bg-card shadow-card rounded-xl border p-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="bg-primary/10 text-primary inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold tabular-nums">

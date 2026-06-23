@@ -11,7 +11,17 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { signalIconMap } from "@/lib/signal-icons";
-import type { Signal } from "@/lib/types/signal";
+import type { Signal, SignalCategory } from "@/lib/types/signal";
+
+// Color-coded category pills (Aegis). Tints work in both light and dark.
+const categoryPillClass: Record<SignalCategory, string> = {
+  hiring: "bg-green-500/15 text-green-700 dark:text-green-400",
+  funding: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  executive: "bg-primary/15 text-primary",
+  product: "bg-pink-500/15 text-pink-700 dark:text-pink-400",
+  engagement: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
+  custom: "bg-muted text-muted-foreground",
+};
 
 const executionLabels: Record<string, string> = {
   browser_script: "Browser Script",
@@ -66,6 +76,9 @@ export function SignalDetailDialog({
       ? "Community"
       : "Custom";
 
+  const categoryClass =
+    categoryPillClass[signal.category] ?? categoryPillClass.custom;
+
   const configBlock = getConfigBlock(signal);
 
   return (
@@ -83,21 +96,23 @@ export function SignalDetailDialog({
 
         {/* Top bar */}
         <div className="flex items-center gap-3 border-b border-border px-5 pr-12 py-3.5">
-          <div className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-md">
+          <div className="bg-peach text-peach-foreground flex size-9 shrink-0 items-center justify-center rounded-lg">
             <Icon className="size-4" />
           </div>
           <div className="min-w-0 flex-1">
             <DialogTitle className="text-sm font-semibold leading-tight">
               {signal.name}
             </DialogTitle>
-            <div className="mt-0.5 flex items-center gap-1.5">
+            <div className="mt-1 flex items-center gap-1.5">
+              <span
+                className={`inline-flex rounded px-1.5 py-0.5 font-mono text-[10px] uppercase leading-tight ${categoryClass}`}
+              >
+                {signal.category}
+              </span>
               <span
                 className={`inline-block rounded px-1 py-px text-[10px] font-medium leading-tight ${badgeClass}`}
               >
                 {badgeLabel}
-              </span>
-              <span className="text-muted-foreground text-[10px] capitalize leading-tight">
-                {signal.category}
               </span>
               <span className="text-border">|</span>
               <span className="text-muted-foreground text-[10px] leading-tight">

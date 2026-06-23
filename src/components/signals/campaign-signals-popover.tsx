@@ -148,7 +148,9 @@ export function CampaignSignalsPopover({
                   className="hover:bg-muted/40 flex items-center justify-between rounded-md px-2 py-1.5"
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    <Icon className="text-muted-foreground size-3.5 shrink-0" />
+                    <span className="bg-peach text-peach-foreground flex size-6 shrink-0 items-center justify-center rounded-md">
+                      <Icon className="size-3.5" />
+                    </span>
                     <span className="truncate text-sm">{signal.name}</span>
                   </div>
                   <Switch

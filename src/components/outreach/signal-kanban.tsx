@@ -22,7 +22,7 @@ const COLUMNS: { status: OutreachStatus; label: string }[] = [
 
 function ContactCard({ card }: { card: EnrollmentCard }) {
   return (
-    <div className="border-border bg-background rounded-lg border p-3 shadow-sm">
+    <div className="border-border bg-card shadow-card rounded-lg border p-3">
       <p className="text-sm font-medium">{card.person_name}</p>
       {(card.person_title || card.company_name) && (
         <p className="text-muted-foreground mt-0.5 text-xs">
@@ -74,9 +74,9 @@ export function SignalKanban({ enrollments }: SignalKanbanProps) {
             (e) => resolveDbEnrollmentStatus(e.status) === col.status,
           );
           return (
-            <div key={col.status} className="border-border rounded-lg border">
+            <div key={col.status} className="border-border rounded-xl border">
               <div className="border-border flex items-center justify-between border-b px-3 py-2">
-                <span className="text-sm font-medium">{col.label}</span>
+                <span className="eyebrow">{col.label}</span>
                 <StatusPill status={col.status}>{cards.length}</StatusPill>
               </div>
               <div className="space-y-2 p-2">

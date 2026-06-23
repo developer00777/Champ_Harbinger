@@ -1,10 +1,8 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import type { SequenceRow } from "@/app/(app)/outreach/page";
 import { ReviewButton } from "@/components/outreach/review-button";
-import { SequenceProgressBar } from "@/components/outreach/sequence-progress-bar";
-import { StatusPill } from "@/components/ui/status-pill";
-import type { OutreachStatus } from "@/lib/outreach/status";
 
 interface SequenceListProps {
   sequences: SequenceRow[];
@@ -12,20 +10,24 @@ interface SequenceListProps {
   onSelect: (id: string) => void;
 }
 
-function mapSequenceStatus(status: string): OutreachStatus {
+// Mono status pill — active=green, paused/completed=muted, draft=primary.
+function sequenceStatusPillClass(status: string): string {
   switch (status) {
-    case "draft":
-      return "blocked";
     case "active":
-      return "ready";
-    case "paused":
-      return "waiting";
-    case "completed":
-      return "replied";
+      return "bg-green-500/15 text-green-700 dark:text-green-400";
+    case "draft":
+      return "bg-primary/10 text-primary";
     default:
-      return "blocked";
+      return "bg-muted text-muted-foreground";
   }
 }
+
+const METRIC_TILES: { key: keyof SequenceRow; label: string }[] = [
+  { key: "enrolled", label: "Enrolled" },
+  { key: "waiting", label: "Waiting" },
+  { key: "sent", label: "Sent" },
+  { key: "replied", label: "Replied" },
+];
 
 export function SequenceList({
   sequences,
@@ -44,55 +46,59 @@ export function SequenceList({
   }
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-lg font-semibold">Sequences</h2>
-      <div className="border-border overflow-hidden rounded-lg border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-border bg-muted/50 border-b">
-              <th className="px-4 py-2.5 text-left font-medium">Sequence</th>
-              <th className="px-4 py-2.5 text-left font-medium">Campaign</th>
-              <th className="px-4 py-2.5 text-left font-medium">Progress</th>
-              <th className="px-4 py-2.5 text-left font-medium">Status</th>
-              <th className="w-24 px-4 py-2.5" />
-            </tr>
-          </thead>
-          <tbody>
-            {sequences.map((seq) => (
-              <tr
-                key={seq.id}
-                className={`border-border cursor-pointer border-b last:border-b-0 transition-colors ${
-                  selectedId === seq.id ? "bg-muted/30" : "hover:bg-muted/20"
-                }`}
-                onClick={() => onSelect(seq.id)}
-              >
-                <td className="px-4 py-2.5 font-medium">{seq.name}</td>
-                <td className="text-muted-foreground px-4 py-2.5">
-                  {seq.campaign_name}
-                </td>
-                <td className="px-4 py-2.5">
-                  <SequenceProgressBar
-                    enrolled={seq.enrolled}
-                    waiting={seq.waiting}
-                    sent={seq.sent}
-                    replied={seq.replied}
-                  />
-                </td>
-                <td className="px-4 py-2.5">
-                  <StatusPill status={mapSequenceStatus(seq.status)}>
-                    {seq.status}
-                  </StatusPill>
-                </td>
-                <td className="px-4 py-2.5">
-                  {seq.status === "draft" && (
-                    <ReviewButton sequenceId={seq.id} />
-                  )}
-                </td>
-              </tr>
+    <section className="space-y-3">
+      {sequences.map((seq) => (
+        <div
+          key={seq.id}
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelect(seq.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelect(seq.id);
+            }
+          }}
+          className={cn(
+            "bg-card shadow-card cursor-pointer rounded-xl border p-4 transition-colors",
+            selectedId === seq.id
+              ? "border-primary"
+              : "border-border hover:border-primary/40",
+          )}
+        >
+          <div className="mb-3 flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-semibold">{seq.name}</div>
+              <div className="text-muted-foreground mt-0.5 text-xs">
+                {seq.campaign_name}
+              </div>
+            </div>
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 font-mono text-xs",
+                sequenceStatusPillClass(seq.status),
+              )}
+            >
+              {seq.status}
+            </span>
+            {seq.status === "draft" && (
+              <div onClick={(e) => e.stopPropagation()}>
+                <ReviewButton sequenceId={seq.id} />
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            {METRIC_TILES.map((tile) => (
+              <div key={tile.key} className="bg-muted rounded-lg p-3">
+                <div className="eyebrow mb-1">{tile.label}</div>
+                <div className="text-2xl font-bold tabular-nums">
+                  {seq[tile.key]}
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </div>
+        </div>
+      ))}
     </section>
   );
 }

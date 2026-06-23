@@ -17,7 +17,7 @@ export function ReadyToSendHero({ drafts, onRefresh }: ReadyToSendHeroProps) {
 
   if (drafts.length === 0) {
     return (
-      <section className="border-border bg-muted/20 rounded-lg border border-dashed px-6 py-8 text-center">
+      <section className="border-border bg-muted/20 rounded-xl border border-dashed px-6 py-8 text-center">
         <p className="text-sm font-medium">All clear</p>
         <p className="text-muted-foreground mt-1 text-xs">
           Nothing is waiting on you right now.
@@ -54,25 +54,27 @@ export function ReadyToSendHero({ drafts, onRefresh }: ReadyToSendHeroProps) {
   };
 
   return (
-    <section className="border-primary/20 bg-primary/5 rounded-lg border p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">
-            {drafts.length} email{drafts.length === 1 ? "" : "s"} ready to send
-          </h2>
-          <p className="text-muted-foreground mt-0.5 text-sm">
-            Approved and past the scheduled delay.
-          </p>
-        </div>
-        <Button onClick={sendAll} disabled={sendingAll}>
-          {sendingAll ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
-          )}
-          Send all
-        </Button>
+    <section className="bg-peach border-border flex items-center gap-4 rounded-2xl border p-5">
+      <div className="bg-primary text-primary-foreground flex h-12 w-12 shrink-0 items-center justify-center rounded-xl">
+        <Send className="h-5 w-5" />
       </div>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-base font-bold">
+          {drafts.length} draft{drafts.length === 1 ? "" : "s"} ready to send
+        </h2>
+        <p className="text-muted-foreground mt-0.5 text-sm">
+          Approved and past the scheduled delay — each is personalized to a real
+          signal.
+        </p>
+      </div>
+      <Button onClick={sendAll} disabled={sendingAll} className="shrink-0">
+        {sendingAll ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Send className="h-4 w-4" />
+        )}
+        Send all
+      </Button>
     </section>
   );
 }

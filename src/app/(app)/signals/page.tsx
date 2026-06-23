@@ -16,9 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { TogglePill } from "@/components/ui/toggle-pill";
 import { SignalCard } from "@/components/signals/signal-card";
 import { SignalDetailDialog } from "@/components/signals/signal-detail-dialog";
 import { useCampaign } from "@/lib/campaign-context";
@@ -441,10 +439,10 @@ function SignalsPageContent() {
   if (loading) {
     return (
       <div className="flex-1 overflow-y-auto">
-        <div className="space-y-6 p-4 md:p-6">
+        <div className="mx-auto w-full max-w-[1100px] space-y-5 p-4 md:p-6 lg:px-8 lg:py-7">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Signals</h1>
-            <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
+            <p className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-sm">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Loading...
             </p>
@@ -456,12 +454,12 @@ function SignalsPageContent() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="space-y-6 p-4 md:p-6">
+      <div className="mx-auto w-full max-w-[1100px] space-y-5 p-4 md:p-6 lg:px-8 lg:py-7">
         {/* Header */}
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Signals</h1>
-            <p className="text-muted-foreground text-sm">
+            <p className="text-muted-foreground mt-0.5 text-sm">
               Browse and manage buying signals. Signals guide the agent on what
               to research for each prospect.
             </p>
@@ -471,38 +469,42 @@ function SignalsPageContent() {
           />
         </div>
 
-        {/* Campaign selector */}
-        <div className="max-w-xs">
-          <label
-            htmlFor="campaign-select"
-            className="text-muted-foreground mb-1 block text-xs font-medium"
-          >
-            Campaign
-          </label>
-          <Select
-            id="campaign-select"
-            value={selectedCampaignId}
-            onValueChange={setSelectedCampaignId}
-            items={[
-              { value: "", label: "No campaign (browse only)" },
-              ...campaigns.map((c) => ({ value: c.id, label: c.name })),
-            ]}
-          />
-        </div>
+        {/* Campaign selector + category filter */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-[220px]">
+            <Select
+              id="campaign-select"
+              aria-label="Campaign"
+              value={selectedCampaignId}
+              onValueChange={setSelectedCampaignId}
+              items={[
+                { value: "", label: "No campaign (browse only)" },
+                ...campaigns.map((c) => ({ value: c.id, label: c.name })),
+              ]}
+            />
+          </div>
 
-        <Separator />
-
-        {/* Category filter */}
-        <div className="flex flex-wrap gap-1.5">
-          {CATEGORIES.map((cat) => (
-            <TogglePill
-              key={cat.value}
-              active={activeCategory === cat.value}
-              onClick={() => setActiveCategory(cat.value)}
-            >
-              {cat.label}
-            </TogglePill>
-          ))}
+          {/* Category filter pills */}
+          <div className="flex flex-wrap gap-1.5">
+            {CATEGORIES.map((cat) => {
+              const active = activeCategory === cat.value;
+              return (
+                <button
+                  key={cat.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setActiveCategory(cat.value)}
+                  className={
+                    active
+                      ? "bg-primary text-primary-foreground rounded-full border border-transparent px-3 py-1 text-xs font-medium transition-colors"
+                      : "border-border text-muted-foreground hover:border-primary hover:text-foreground rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+                  }
+                >
+                  {cat.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Signal cards grid / list */}

@@ -47,6 +47,38 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Square avatar tile + company name with mono domain subline (Aegis pattern).
+function CompanyCell({
+  name,
+  domain,
+}: {
+  name: string;
+  domain: string | null;
+}) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="bg-muted text-muted-foreground flex size-7 flex-none items-center justify-center rounded-lg text-[10px] font-bold">
+        {initials(name)}
+      </span>
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold">{name}</div>
+        {domain && (
+          <div className="text-muted-foreground truncate font-mono text-xs">
+            {domain}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ExpandableSignalRow({ row }: { row: TrackingRow }) {
   const [expanded, setExpanded] = useState(false);
   const [changes, setChanges] = useState<TrackingChange[]>([]);
@@ -93,36 +125,41 @@ function ExpandableSignalRow({ row }: { row: TrackingRow }) {
   return (
     <>
       <tr
-        className="hover:bg-muted/50 cursor-pointer border-b transition-colors"
+        className="hover:bg-muted border-border cursor-pointer border-b transition-colors"
         onClick={toggleExpand}
       >
-        <td className="w-8 px-3 py-2.5">
+        <td className="w-8 py-3 pl-4 pr-1">
           {expanded ? (
             <ChevronDown className="text-muted-foreground size-4" />
           ) : (
             <ChevronRight className="text-muted-foreground size-4" />
           )}
         </td>
-        <td className="px-3 py-2.5 text-sm font-medium">
-          {row.organizationName}
+        <td className="px-3 py-3">
+          <CompanyCell
+            name={row.organizationName}
+            domain={row.organizationDomain}
+          />
         </td>
-        <td className="px-3 py-2.5 text-sm">{row.signalName}</td>
-        <td className="text-muted-foreground px-3 py-2.5 text-sm">
+        <td className="text-muted-foreground px-3 py-3 text-sm">
+          {row.signalName}
+        </td>
+        <td className="text-muted-foreground px-3 py-3 font-mono text-xs">
           {SCHEDULE_LABELS[row.schedule as Schedule] ?? row.schedule}
           {localStatus === "paused" ? " (paused)" : ""}
         </td>
-        <td className="text-muted-foreground px-3 py-2.5 text-sm">
+        <td className="text-muted-foreground px-3 py-3 font-mono text-xs">
           {formatDate(row.lastRunAt)}
         </td>
-        <td className="px-3 py-2.5 text-sm">
+        <td className="px-3 py-3 text-sm">
           {row.latestChangeDescription || (
             <span className="text-muted-foreground">No changes</span>
           )}
         </td>
-        <td className="px-3 py-2.5">
+        <td className="px-3 py-3">
           <ReadinessBadge tag={row.readinessTag} />
         </td>
-        <td className="px-3 py-2.5">
+        <td className="px-3 py-3 pr-4">
           <button
             type="button"
             onClick={togglePause}
@@ -141,7 +178,10 @@ function ExpandableSignalRow({ row }: { row: TrackingRow }) {
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={8} className="bg-muted/30 border-b px-6 py-3">
+          <td
+            colSpan={8}
+            className="bg-muted/40 border-border border-b px-6 py-3"
+          >
             {loadingChanges ? (
               <p className="text-muted-foreground text-xs">Loading...</p>
             ) : (
@@ -190,36 +230,44 @@ function ExpandableCompanyRow({ group }: { group: CompanyGroup }) {
   return (
     <>
       <tr
-        className="hover:bg-muted/50 cursor-pointer border-b transition-colors"
+        className="hover:bg-muted border-border cursor-pointer border-b transition-colors"
         onClick={toggleExpand}
       >
-        <td className="w-8 px-3 py-2.5">
+        <td className="w-8 py-3 pl-4 pr-1">
           {expanded ? (
             <ChevronDown className="text-muted-foreground size-4" />
           ) : (
             <ChevronRight className="text-muted-foreground size-4" />
           )}
         </td>
-        <td className="px-3 py-2.5 text-sm font-medium">
-          {group.organizationName}
+        <td className="px-3 py-3">
+          <CompanyCell
+            name={group.organizationName}
+            domain={group.organizationDomain}
+          />
         </td>
-        <td className="px-3 py-2.5 text-sm">{group.activeSignals} active</td>
-        <td className="text-muted-foreground px-3 py-2.5 text-sm">
+        <td className="text-muted-foreground px-3 py-3 font-mono text-xs">
+          {group.activeSignals} active
+        </td>
+        <td className="text-muted-foreground px-3 py-3 font-mono text-xs">
           {formatDate(group.lastRunAt)}
         </td>
-        <td className="px-3 py-2.5 text-sm" colSpan={2}>
+        <td className="px-3 py-3 text-sm" colSpan={2}>
           {group.latestChangeDescription || (
             <span className="text-muted-foreground">No changes</span>
           )}
         </td>
-        <td className="px-3 py-2.5">
+        <td className="px-3 py-3">
           <ReadinessBadge tag={group.readinessTag} />
         </td>
-        <td />
+        <td className="pr-4" />
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={8} className="bg-muted/30 border-b px-6 py-3">
+          <td
+            colSpan={8}
+            className="bg-muted/40 border-border border-b px-6 py-3"
+          >
             {loadingChanges ? (
               <p className="text-muted-foreground text-xs">Loading...</p>
             ) : (
@@ -248,10 +296,12 @@ export function TrackingTable({
 }) {
   if (rows.length === 0) {
     return (
-      <p className="text-muted-foreground py-12 text-center text-sm">
-        No tracking configs found. Set up tracking in Chat to start monitoring
-        companies.
-      </p>
+      <div className="bg-card shadow-card border-border rounded-xl border px-6 py-16 text-center">
+        <p className="text-muted-foreground text-sm">
+          No tracking configs found. Set up tracking in Chat to start monitoring
+          companies.
+        </p>
+      </div>
     );
   }
 
@@ -303,56 +353,60 @@ export function TrackingTable({
     const groups = Array.from(groupMap.values());
 
     return (
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-muted/50 border-b">
-              <th className="w-8 px-3 py-2" />
-              <th className="px-3 py-2 text-xs font-medium">Company</th>
-              <th className="px-3 py-2 text-xs font-medium">Signals</th>
-              <th className="px-3 py-2 text-xs font-medium">Last Check</th>
-              <th className="px-3 py-2 text-xs font-medium" colSpan={2}>
-                Latest Changes
-              </th>
-              <th className="px-3 py-2 text-xs font-medium">Status</th>
-              <th className="w-10 px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((group) => (
-              <ExpandableCompanyRow
-                key={group.organizationName}
-                group={group}
-              />
-            ))}
-          </tbody>
-        </table>
+      <div className="bg-card shadow-card border-border overflow-hidden rounded-xl border">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-muted border-border border-b">
+                <th className="w-8 py-3 pl-4 pr-1" />
+                <th className="eyebrow px-3 py-3 text-left">Company</th>
+                <th className="eyebrow px-3 py-3 text-left">Signals</th>
+                <th className="eyebrow px-3 py-3 text-left">Last Check</th>
+                <th className="eyebrow px-3 py-3 text-left" colSpan={2}>
+                  Latest Changes
+                </th>
+                <th className="eyebrow px-3 py-3 text-left">Status</th>
+                <th className="w-10 pr-4" />
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((group) => (
+                <ExpandableCompanyRow
+                  key={group.organizationName}
+                  group={group}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }
 
   // By signal (default)
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-left">
-        <thead>
-          <tr className="bg-muted/50 border-b">
-            <th className="w-8 px-3 py-2" />
-            <th className="px-3 py-2 text-xs font-medium">Company</th>
-            <th className="px-3 py-2 text-xs font-medium">Signal</th>
-            <th className="px-3 py-2 text-xs font-medium">Every</th>
-            <th className="px-3 py-2 text-xs font-medium">Last Check</th>
-            <th className="px-3 py-2 text-xs font-medium">Changes</th>
-            <th className="px-3 py-2 text-xs font-medium">Status</th>
-            <th className="w-10 px-3 py-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <ExpandableSignalRow key={row.id} row={row} />
-          ))}
-        </tbody>
-      </table>
+    <div className="bg-card shadow-card border-border overflow-hidden rounded-xl border">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="bg-muted border-border border-b">
+              <th className="w-8 py-3 pl-4 pr-1" />
+              <th className="eyebrow px-3 py-3 text-left">Company</th>
+              <th className="eyebrow px-3 py-3 text-left">Signal</th>
+              <th className="eyebrow px-3 py-3 text-left">Every</th>
+              <th className="eyebrow px-3 py-3 text-left">Last Check</th>
+              <th className="eyebrow px-3 py-3 text-left">Changes</th>
+              <th className="eyebrow px-3 py-3 text-left">Status</th>
+              <th className="w-10 pr-4" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <ExpandableSignalRow key={row.id} row={row} />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

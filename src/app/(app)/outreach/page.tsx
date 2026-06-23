@@ -128,12 +128,7 @@ export default function OutreachPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={handleNewSequence}
-            >
+            <Button size="sm" className="gap-1.5" onClick={handleNewSequence}>
               <Plus className="size-3.5" />
               New Sequence
             </Button>
@@ -167,7 +162,7 @@ export default function OutreachPage() {
         </div>
 
         {champiqStatus === "connected" && outreachMode === "champiq" ? (
-          <div className="text-muted-foreground rounded-lg border bg-muted/20 p-4 text-sm">
+          <div className="text-muted-foreground rounded-xl border bg-muted/20 p-4 text-sm">
             Outreach is being managed by ChampIQ. Visit your ChampIQ canvas to
             review sequences and track replies.{" "}
             <a href="/settings?tab=champiq" className="underline">
@@ -180,14 +175,13 @@ export default function OutreachPage() {
             <span className="text-muted-foreground text-sm">Loading...</span>
           </div>
         ) : sequences.length === 0 ? (
-          <div className="border-border flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+          <div className="border-border flex flex-col items-center gap-2 rounded-xl border border-dashed px-6 py-12 text-center">
             <p className="text-sm font-medium">No outreach sequences yet</p>
             <p className="text-muted-foreground text-xs">
               Create a sequence and the agent will help you design the steps,
               tone, and talking points.
             </p>
             <Button
-              variant="outline"
               size="sm"
               className="mt-1 gap-1.5"
               onClick={handleNewSequence}
