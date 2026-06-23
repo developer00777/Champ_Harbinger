@@ -70,8 +70,8 @@ export function ToolCallCard({
   if (isInline && hasOutput && output != null) {
     return (
       <div className="my-1">
-        <div className="bg-muted/40 border-border flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-          <CheckCircle2 className="h-4 w-4 text-green-500" />
+        <div className="bg-card border-border shadow-card flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+          <CheckCircle2 className="text-success h-4 w-4" />
           <Icon className="text-muted-foreground h-4 w-4" />
           <span className="text-muted-foreground flex-1 truncate">
             {config.label}
@@ -85,7 +85,7 @@ export function ToolCallCard({
   const showLiveView = isLoading && liveViewUrl;
 
   return (
-    <div className="bg-muted/40 border-border my-1 overflow-hidden rounded-lg border text-sm">
+    <div className="bg-card border-border shadow-card my-1 overflow-hidden rounded-lg border text-sm">
       <div className="flex w-full items-center gap-2 px-3 py-2">
         <button
           className="flex flex-1 items-center gap-2 text-left"
@@ -94,9 +94,9 @@ export function ToolCallCard({
           {isLoading ? (
             <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />
           ) : hasError ? (
-            <AlertCircle className="h-4 w-4 text-red-500" />
+            <AlertCircle className="text-destructive h-4 w-4" />
           ) : (
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <CheckCircle2 className="text-success h-4 w-4" />
           )}
           <Icon className="text-muted-foreground h-4 w-4" />
           <span className="text-muted-foreground flex-1 truncate">
@@ -108,7 +108,7 @@ export function ToolCallCard({
             href={liveViewUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs"
+            className="text-muted-foreground hover:text-foreground hover:border-primary flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs transition-colors"
           >
             <ExternalLink className="h-3 w-3" />
             View live
@@ -124,7 +124,7 @@ export function ToolCallCard({
 
       {expanded && hasError && errorText && (
         <div className="border-border border-t px-3 py-2">
-          <p className="text-xs text-red-500">{errorText}</p>
+          <p className="text-destructive text-xs">{errorText}</p>
         </div>
       )}
 
@@ -226,7 +226,7 @@ function CollapsibleToolResult({
     const campaign = data.campaign as { name: string; status: string };
     return (
       <div className="flex items-center gap-2">
-        <CheckCircle2 className="h-3 w-3 text-green-500" />
+        <CheckCircle2 className="text-success h-3 w-3" />
         <span className="text-xs">
           Campaign &quot;{campaign.name}&quot; {data.action as string} (
           {campaign.status})
@@ -262,7 +262,7 @@ function CollapsibleToolResult({
         <span className="text-muted-foreground">Enriched from:</span>{" "}
         {sources.join(", ") || "no sources"}
         {data.errors ? (
-          <p className="mt-1 text-red-500">
+          <p className="text-destructive mt-1">
             Errors: {(data.errors as string[]).join(", ")}
           </p>
         ) : null}

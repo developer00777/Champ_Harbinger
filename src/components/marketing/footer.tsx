@@ -4,26 +4,31 @@ const currentYear = new Date().getFullYear();
 
 export function MarketingFooter() {
   return (
-    <footer className="border-t border-champions-border bg-white">
-      <div className="mx-auto max-w-6xl px-6 py-12">
+    <footer className="border-border bg-background border-t">
+      <div className="mx-auto max-w-6xl px-6 py-14">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           {/* Brand column */}
           <div className="col-span-2 lg:col-span-1">
             <Link
               href="/"
-              className="flex items-center gap-2 text-lg font-bold text-champions-ink"
+              className="flex items-center gap-2.5"
+              aria-label="ChampHarbinger home"
             >
-              <span className="text-champions-orange">●</span>
-              ChampHarbinger
+              <span className="bg-champions-gradient flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold text-white shadow-sm">
+                CH
+              </span>
+              <span className="text-foreground text-lg font-bold tracking-tight">
+                ChampHarbinger
+              </span>
             </Link>
-            <p className="mt-3 text-sm leading-relaxed text-champions-warm-gray">
+            <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
               Detect buying signals before they become deals.
             </p>
-            <p className="mt-3 text-xs text-champions-warm-gray">
+            <p className="text-muted-foreground mt-3 text-xs">
               A{" "}
               <a
                 href="https://championsgroup.io"
-                className="underline hover:text-champions-orange transition-colors"
+                className="hover:text-champions-orange underline transition-colors"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -35,14 +40,12 @@ export function MarketingFooter() {
 
           {/* Product links */}
           <div>
-            <h3 className="text-sm font-semibold uppercase tracking-widest text-champions-warm-gray">
-              Product
-            </h3>
-            <ul className="mt-4 space-y-2 text-sm">
+            <p className="eyebrow">Product</p>
+            <ul className="mt-4 space-y-2.5 text-sm">
               <li>
                 <Link
                   href="#features"
-                  className="text-champions-ink-soft hover:text-champions-orange transition-colors"
+                  className="text-muted-foreground hover:text-champions-orange transition-colors"
                 >
                   Features
                 </Link>
@@ -50,7 +53,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   href="/signup"
-                  className="text-champions-ink-soft hover:text-champions-orange transition-colors"
+                  className="text-muted-foreground hover:text-champions-orange transition-colors"
                 >
                   Get started
                 </Link>
@@ -58,7 +61,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   href="/login"
-                  className="text-champions-ink-soft hover:text-champions-orange transition-colors"
+                  className="text-muted-foreground hover:text-champions-orange transition-colors"
                 >
                   Sign in
                 </Link>
@@ -68,14 +71,12 @@ export function MarketingFooter() {
 
           {/* Champions Group links */}
           <div>
-            <h3 className="text-sm font-semibold uppercase tracking-widest text-champions-warm-gray">
-              Champions Group
-            </h3>
-            <ul className="mt-4 space-y-2 text-sm">
+            <p className="eyebrow">Champions Group</p>
+            <ul className="mt-4 space-y-2.5 text-sm">
               <li>
                 <a
                   href="https://championsgroup.io"
-                  className="text-champions-ink-soft hover:text-champions-orange transition-colors"
+                  className="text-muted-foreground hover:text-champions-orange transition-colors"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -85,7 +86,7 @@ export function MarketingFooter() {
               <li>
                 <a
                   href="https://lakeb2b.com"
-                  className="text-champions-ink-soft hover:text-champions-orange transition-colors"
+                  className="text-muted-foreground hover:text-champions-orange transition-colors"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -95,7 +96,7 @@ export function MarketingFooter() {
               <li>
                 <a
                   href="https://ampliz.com"
-                  className="text-champions-ink-soft hover:text-champions-orange transition-colors"
+                  className="text-muted-foreground hover:text-champions-orange transition-colors"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -107,14 +108,12 @@ export function MarketingFooter() {
 
           {/* Legal */}
           <div>
-            <h3 className="text-sm font-semibold uppercase tracking-widest text-champions-warm-gray">
-              Legal
-            </h3>
-            <ul className="mt-4 space-y-2 text-sm">
+            <p className="eyebrow">Legal</p>
+            <ul className="mt-4 space-y-2.5 text-sm">
               <li>
                 <a
                   href="/privacy"
-                  className="text-champions-ink-soft hover:text-champions-orange transition-colors"
+                  className="text-muted-foreground hover:text-champions-orange transition-colors"
                 >
                   Privacy
                 </a>
@@ -122,7 +121,7 @@ export function MarketingFooter() {
               <li>
                 <a
                   href="/terms"
-                  className="text-champions-ink-soft hover:text-champions-orange transition-colors"
+                  className="text-muted-foreground hover:text-champions-orange transition-colors"
                 >
                   Terms
                 </a>
@@ -131,15 +130,15 @@ export function MarketingFooter() {
           </div>
         </div>
 
-        <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-champions-border pt-6 sm:flex-row">
-          <p className="text-xs text-champions-warm-gray">
+        <div className="border-border mt-12 flex flex-col items-center justify-between gap-4 border-t pt-6 sm:flex-row">
+          <p className="text-muted-foreground text-xs">
             &copy; {currentYear} Champions Group. All rights reserved.
           </p>
-          <p className="text-xs text-champions-warm-gray">
+          <p className="text-muted-foreground text-xs">
             Released under the{" "}
             <a
               href="https://www.gnu.org/licenses/agpl-3.0.html"
-              className="underline hover:text-champions-orange transition-colors"
+              className="hover:text-champions-orange underline transition-colors"
               target="_blank"
               rel="noopener noreferrer"
             >

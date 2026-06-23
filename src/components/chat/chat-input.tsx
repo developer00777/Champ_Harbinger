@@ -82,31 +82,20 @@ export function ChatInput({
   };
 
   return (
-    <div className="bg-background border-t p-4">
+    <div className="bg-card border-border border-t px-4 pt-4 pb-5 md:px-6">
       <div className="mx-auto max-w-3xl">
-        <div className="flex items-end gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="Upload CSV"
-            className="h-[44px] w-[44px] shrink-0"
-            disabled={disabled || isLoading}
-            onClick={() => fileInputRef.current?.click()}
-            title="Upload CSV"
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+        <div className="bg-background border-border shadow-card overflow-hidden rounded-xl border focus-within:border-primary">
           <Textarea
             ref={textareaRef}
-            placeholder="Ask ChampHarbinger anything..."
-            className="max-h-[72px] min-h-[44px] resize-none overflow-y-auto text-sm transition-[height] duration-100"
+            placeholder="Ask anything about your pipeline…"
+            className="max-h-[120px] min-h-[52px] resize-none overflow-y-auto rounded-none border-0 bg-transparent px-4 pt-3.5 pb-0 text-sm shadow-none transition-[height] duration-100 focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
             rows={1}
             value={input}
             disabled={disabled}
@@ -115,31 +104,51 @@ export function ChatInput({
             onInput={(e) => {
               const target = e.target as HTMLTextAreaElement;
               target.style.height = "auto";
-              target.style.height = `${Math.min(target.scrollHeight, 72)}px`;
+              target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
             }}
           />
-          {isLoading ? (
-            <Button
-              size="icon"
-              variant="outline"
-              aria-label="Stop generating"
-              className="h-[44px] w-[44px] shrink-0"
-              onClick={onStop}
-            >
-              <Square className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              size="icon"
-              aria-label="Send message"
-              className="h-[44px] w-[44px] shrink-0"
-              disabled={disabled || !input.trim()}
-              onClick={handleSubmit}
-            >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-          )}
+          <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-2">
+            <div className="flex items-center gap-1.5">
+              {onCsvUpload && (
+                <button
+                  type="button"
+                  aria-label="Upload CSV"
+                  title="Upload CSV"
+                  disabled={disabled || isLoading}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-muted-foreground hover:text-foreground hover:border-primary inline-flex h-7 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  Attach
+                </button>
+              )}
+            </div>
+            {isLoading ? (
+              <Button
+                size="icon"
+                variant="outline"
+                aria-label="Stop generating"
+                className="h-8 w-8 shrink-0 rounded-lg"
+                onClick={onStop}
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                aria-label="Send message"
+                className="h-8 w-8 shrink-0 rounded-lg"
+                disabled={disabled || !input.trim()}
+                onClick={handleSubmit}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
         </div>
+        <p className="text-muted-foreground mt-2 text-center text-[11px]">
+          Shift+Enter for new line · Enter to send
+        </p>
       </div>
     </div>
   );

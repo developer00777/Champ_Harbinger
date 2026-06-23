@@ -6,8 +6,6 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import {
   ListRowsSkeleton,
   PageHeaderSkeleton,
@@ -30,6 +28,19 @@ const emptyForm: ProfileFormData = {
   offering_summary: "",
   notes: "",
 };
+
+// Initials for the rail avatar — derived from the profile's own name/label, no
+// invented data. Falls back to a neutral glyph when there's nothing to use.
+function profileInitials(p: UserProfile): string {
+  const source = p.name?.trim() || p.label?.trim() || p.company_name?.trim();
+  if (!source) return "··";
+  const words = source.split(/\s+/).filter(Boolean);
+  const letters = words
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("");
+  return letters.toUpperCase() || "··";
+}
 
 export default function ProfilePage() {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
@@ -170,7 +181,7 @@ export default function ProfilePage() {
   if (loading) {
     return (
       <div className="flex-1 overflow-y-auto">
-        <div className="space-y-8 p-4 md:p-6">
+        <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 md:p-6 lg:px-8 lg:py-7">
           <PageHeaderSkeleton />
           <ListRowsSkeleton count={4} />
         </div>
@@ -178,264 +189,344 @@ export default function ProfilePage() {
     );
   }
 
+  const canDelete = !!selectedId && profiles.length > 1;
+  const headerLabel = selectedId
+    ? form.label?.trim() || form.name?.trim() || "Profile"
+    : "New profile";
+
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="space-y-8 p-4 md:p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Profiles</h1>
-          <p className="text-muted-foreground text-sm">
-            Create different profiles for different campaigns. Each profile is a
-            seller identity with its own company, offering, and links.
-          </p>
-        </div>
-
-        {/* Profile selector */}
-        <div className="flex items-center gap-3">
-          <div className="min-w-[12rem]">
-            <Select
-              value={selectedId ?? ""}
-              onValueChange={(next) => {
-                if (next) selectProfile(next);
-              }}
-              placeholder="New profile..."
-              aria-label="Select profile"
-              items={profiles.map((p) => ({
-                value: p.id,
-                label: profileDisplayName(p),
-              }))}
-            />
-          </div>
-          <Button variant="outline" size="sm" onClick={startNewProfile}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            New Profile
-          </Button>
-          {selectedId && profiles.length > 1 && (
-            <Button variant="ghost" size="sm" onClick={handleDelete}>
-              <Trash2 className="mr-1.5 h-4 w-4" />
-              Delete
-            </Button>
-          )}
-        </div>
-
-        <Separator />
-
-        {/* Profile Label */}
-        <section className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="label" className="text-sm font-medium leading-none">
-              Profile Label
-            </label>
-            <Input
-              id="label"
-              value={form.label ?? ""}
-              onChange={(e) => update("label", e.target.value)}
-              placeholder="e.g. SaaS Sales, Consulting, Agency Work"
-            />
-            <p className="text-muted-foreground text-xs">
-              A short name to identify this profile when linking it to
-              campaigns.
+      <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 md:p-6 lg:px-8 lg:py-7">
+        {/* Page header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Profiles</h1>
+            <p className="text-muted-foreground text-sm">
+              Create different profiles for different campaigns. Each profile is
+              a seller identity with its own company, offering, and links.
             </p>
           </div>
-        </section>
-
-        <Separator />
-
-        {/* Personal Info */}
-        <section className="space-y-4">
-          <h2 className="text-lg font-semibold">Personal Info</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <label
-                htmlFor="name"
-                className="text-sm font-medium leading-none"
-              >
-                Name
-              </label>
-              <Input
-                id="name"
-                value={form.name ?? ""}
-                onChange={(e) => update("name", e.target.value)}
-                placeholder="Your full name"
-                required
-                aria-required="true"
-              />
-            </div>
-            <div className="space-y-2">
-              <label
-                htmlFor="email"
-                className="text-sm font-medium leading-none"
-              >
-                Email
-              </label>
-              <Input
-                id="email"
-                type="email"
-                value={form.email ?? ""}
-                onChange={(e) => update("email", e.target.value)}
-                placeholder="you@company.com"
-                required
-                aria-required="true"
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label
-              htmlFor="role_title"
-              className="text-sm font-medium leading-none"
-            >
-              Role / Title
-            </label>
-            <Input
-              id="role_title"
-              value={form.role_title ?? ""}
-              onChange={(e) => update("role_title", e.target.value)}
-              placeholder="e.g. Founder & CEO"
-            />
-          </div>
-        </section>
-
-        <Separator />
-
-        {/* Company & Links */}
-        <section className="space-y-4">
-          <h2 className="text-lg font-semibold">Company & Links</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <label
-                htmlFor="company_name"
-                className="text-sm font-medium leading-none"
-              >
-                Company Name
-              </label>
-              <Input
-                id="company_name"
-                value={form.company_name ?? ""}
-                onChange={(e) => update("company_name", e.target.value)}
-                placeholder="Your company"
-              />
-            </div>
-            <div className="space-y-2">
-              <label
-                htmlFor="company_url"
-                className="text-sm font-medium leading-none"
-              >
-                Company Website
-              </label>
-              <Input
-                id="company_url"
-                type="url"
-                value={form.company_url ?? ""}
-                onChange={(e) => update("company_url", e.target.value)}
-                placeholder="https://yourcompany.com"
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label
-              htmlFor="personal_url"
-              className="text-sm font-medium leading-none"
-            >
-              Personal Website
-            </label>
-            <Input
-              id="personal_url"
-              type="url"
-              value={form.personal_url ?? ""}
-              onChange={(e) => update("personal_url", e.target.value)}
-              placeholder="https://yoursite.com"
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <label
-                htmlFor="linkedin_url"
-                className="text-sm font-medium leading-none"
-              >
-                LinkedIn
-              </label>
-              <Input
-                id="linkedin_url"
-                type="url"
-                value={form.linkedin_url ?? ""}
-                onChange={(e) => update("linkedin_url", e.target.value)}
-                placeholder="https://linkedin.com/in/yourname"
-              />
-            </div>
-            <div className="space-y-2">
-              <label
-                htmlFor="twitter_url"
-                className="text-sm font-medium leading-none"
-              >
-                X / Twitter
-              </label>
-              <Input
-                id="twitter_url"
-                type="url"
-                value={form.twitter_url ?? ""}
-                onChange={(e) => update("twitter_url", e.target.value)}
-                placeholder="https://x.com/yourhandle"
-              />
-            </div>
-          </div>
-        </section>
-
-        <Separator />
-
-        {/* About Your Offering */}
-        <section className="space-y-4">
-          <h2 className="text-lg font-semibold">About Your Offering</h2>
-          <div className="space-y-2">
-            <label
-              htmlFor="offering_summary"
-              className="text-sm font-medium leading-none"
-            >
-              What are you selling?
-            </label>
-            <Textarea
-              id="offering_summary"
-              value={form.offering_summary ?? ""}
-              onChange={(e) => update("offering_summary", e.target.value)}
-              placeholder="Describe your product or service in a few sentences. What problem does it solve? Who is it for?"
-              rows={4}
-            />
-          </div>
-          <div className="space-y-2">
-            <label htmlFor="notes" className="text-sm font-medium leading-none">
-              Additional Notes
-            </label>
-            <Textarea
-              id="notes"
-              value={form.notes ?? ""}
-              onChange={(e) => update("notes", e.target.value)}
-              placeholder="Anything else ChampHarbinger should know -- target market, differentiators, constraints, tone preferences, etc."
-              rows={4}
-            />
-          </div>
-        </section>
-
-        <div className="flex justify-end pb-2">
           <Button
-            onClick={handleSave}
-            disabled={
-              saving || loading || !form.name?.trim() || !form.email?.trim()
-            }
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={startNewProfile}
           >
-            {saving
-              ? "Saving..."
-              : selectedId
-                ? "Save Profile"
-                : "Create Profile"}
+            <Plus className="size-3.5" />
+            New profile
           </Button>
         </div>
 
-        <Separator />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
+          {/* Profiles rail */}
+          <aside className="bg-card border-border shadow-card h-fit rounded-xl border p-3">
+            <div className="mb-2 flex items-center justify-between px-2 pt-1">
+              <p className="eyebrow">Profiles</p>
+              <span className="text-muted-foreground text-xs tabular-nums">
+                {profiles.length}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {profiles.map((p) => {
+                const active = p.id === selectedId;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => selectProfile(p.id)}
+                    aria-current={active ? "true" : undefined}
+                    className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                      active
+                        ? "border-primary/60 bg-peach"
+                        : "hover:border-primary/40 hover:bg-muted/60 border-transparent"
+                    }`}
+                  >
+                    <span
+                      className={`flex size-8 shrink-0 items-center justify-center rounded-full font-mono text-xs font-semibold ${
+                        active
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {profileInitials(p)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={`block truncate text-sm font-semibold ${
+                          active ? "text-peach-foreground" : ""
+                        }`}
+                      >
+                        {profileDisplayName(p)}
+                      </span>
+                      <span className="text-muted-foreground block truncate text-xs">
+                        {p.company_name?.trim() ||
+                          p.role_title?.trim() ||
+                          p.email?.trim() ||
+                          "No company"}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
 
-        <EmailSkillsAttacher
-          scopeType="profile"
-          scopeId={selectedId}
-          title="Email skills for this profile"
-          description="Applied whenever a campaign uses this sender identity."
-        />
+              {profiles.length === 0 && (
+                <p className="text-muted-foreground px-3 py-6 text-center text-xs">
+                  No profiles yet. Fill in the form to create your first.
+                </p>
+              )}
+            </div>
+          </aside>
+
+          {/* Form panel */}
+          <div className="space-y-6">
+            <div className="bg-card border-border shadow-card rounded-xl border p-5 md:p-6">
+              {/* Panel header */}
+              <div className="flex items-start justify-between gap-4 pb-5">
+                <div className="min-w-0">
+                  <h2 className="truncate text-xl font-bold tracking-tight">
+                    {headerLabel}
+                  </h2>
+                  <p className="text-muted-foreground mt-0.5 text-sm">
+                    Sender identity used by campaigns. Each profile carries its
+                    own signature and offering summary.
+                  </p>
+                </div>
+                {canDelete && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-muted-foreground gap-1.5"
+                    onClick={handleDelete}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </Button>
+                )}
+              </div>
+
+              {/* Profile label */}
+              <div className="space-y-2">
+                <label htmlFor="label" className="eyebrow block">
+                  Profile label
+                </label>
+                <Input
+                  id="label"
+                  value={form.label ?? ""}
+                  onChange={(e) => update("label", e.target.value)}
+                  placeholder="e.g. SaaS Sales, Consulting, Agency Work"
+                />
+                <p className="text-muted-foreground text-xs">
+                  A short name to identify this profile when linking it to
+                  campaigns.
+                </p>
+              </div>
+
+              {/* Personal info */}
+              <div className="border-border mt-6 mb-4 border-b pb-2.5">
+                <h3 className="text-base font-bold tracking-tight">
+                  Personal info
+                </h3>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label
+                    htmlFor="name"
+                    className="text-sm font-medium leading-none"
+                  >
+                    Name
+                  </label>
+                  <Input
+                    id="name"
+                    value={form.name ?? ""}
+                    onChange={(e) => update("name", e.target.value)}
+                    placeholder="Your full name"
+                    required
+                    aria-required="true"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="email"
+                    className="text-sm font-medium leading-none"
+                  >
+                    Email
+                  </label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={form.email ?? ""}
+                    onChange={(e) => update("email", e.target.value)}
+                    placeholder="you@company.com"
+                    required
+                    aria-required="true"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="role_title"
+                    className="text-sm font-medium leading-none"
+                  >
+                    Role / Title
+                  </label>
+                  <Input
+                    id="role_title"
+                    value={form.role_title ?? ""}
+                    onChange={(e) => update("role_title", e.target.value)}
+                    placeholder="e.g. Founder & CEO"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="company_name"
+                    className="text-sm font-medium leading-none"
+                  >
+                    Company Name
+                  </label>
+                  <Input
+                    id="company_name"
+                    value={form.company_name ?? ""}
+                    onChange={(e) => update("company_name", e.target.value)}
+                    placeholder="Your company"
+                  />
+                </div>
+              </div>
+
+              {/* Company links */}
+              <div className="border-border mt-6 mb-4 border-b pb-2.5">
+                <h3 className="text-base font-bold tracking-tight">Links</h3>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label
+                    htmlFor="company_url"
+                    className="text-sm font-medium leading-none"
+                  >
+                    Company Website
+                  </label>
+                  <Input
+                    id="company_url"
+                    type="url"
+                    value={form.company_url ?? ""}
+                    onChange={(e) => update("company_url", e.target.value)}
+                    placeholder="https://yourcompany.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="personal_url"
+                    className="text-sm font-medium leading-none"
+                  >
+                    Personal Website
+                  </label>
+                  <Input
+                    id="personal_url"
+                    type="url"
+                    value={form.personal_url ?? ""}
+                    onChange={(e) => update("personal_url", e.target.value)}
+                    placeholder="https://yoursite.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="linkedin_url"
+                    className="text-sm font-medium leading-none"
+                  >
+                    LinkedIn
+                  </label>
+                  <Input
+                    id="linkedin_url"
+                    type="url"
+                    value={form.linkedin_url ?? ""}
+                    onChange={(e) => update("linkedin_url", e.target.value)}
+                    placeholder="https://linkedin.com/in/yourname"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="twitter_url"
+                    className="text-sm font-medium leading-none"
+                  >
+                    X / Twitter
+                  </label>
+                  <Input
+                    id="twitter_url"
+                    type="url"
+                    value={form.twitter_url ?? ""}
+                    onChange={(e) => update("twitter_url", e.target.value)}
+                    placeholder="https://x.com/yourhandle"
+                  />
+                </div>
+              </div>
+
+              {/* What you're selling */}
+              <div className="border-border mt-6 mb-4 border-b pb-2.5">
+                <h3 className="text-base font-bold tracking-tight">
+                  What you&apos;re selling
+                </h3>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label
+                    htmlFor="offering_summary"
+                    className="text-sm font-medium leading-none"
+                  >
+                    Offering summary
+                  </label>
+                  <Textarea
+                    id="offering_summary"
+                    value={form.offering_summary ?? ""}
+                    onChange={(e) => update("offering_summary", e.target.value)}
+                    placeholder="Describe your product or service in a few sentences. What problem does it solve? Who is it for?"
+                    rows={4}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="notes"
+                    className="text-sm font-medium leading-none"
+                  >
+                    Additional notes
+                  </label>
+                  <Textarea
+                    id="notes"
+                    value={form.notes ?? ""}
+                    onChange={(e) => update("notes", e.target.value)}
+                    placeholder="Anything else ChampHarbinger should know -- target market, differentiators, constraints, tone preferences, etc."
+                    rows={4}
+                  />
+                </div>
+              </div>
+
+              <div className="border-border mt-6 flex justify-end border-t pt-5">
+                <Button
+                  onClick={handleSave}
+                  disabled={
+                    saving ||
+                    loading ||
+                    !form.name?.trim() ||
+                    !form.email?.trim()
+                  }
+                >
+                  {saving
+                    ? "Saving..."
+                    : selectedId
+                      ? "Save profile"
+                      : "Create profile"}
+                </Button>
+              </div>
+            </div>
+
+            {/* Email skills for this profile */}
+            <div className="bg-card border-border shadow-card rounded-xl border p-5 md:p-6">
+              <EmailSkillsAttacher
+                scopeType="profile"
+                scopeId={selectedId}
+                title="Email skills for this profile"
+                description="Applied whenever a campaign uses this sender identity."
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
-import { SquarePen } from "lucide-react";
+import { MessageCircle, SquarePen } from "lucide-react";
 
 import { useAuth } from "@clerk/nextjs";
 
@@ -160,10 +160,15 @@ function ChatView({
 
   return (
     <div className="bg-background flex min-h-0 flex-1 flex-col">
-      <div className="border-border flex items-center justify-between gap-2 border-b px-4 py-2">
-        <span className="min-w-0 truncate text-sm font-medium">
-          {initialTitle?.trim() || "New chat"}
-        </span>
+      <div className="bg-card border-border flex items-center justify-between gap-2 border-b px-4 py-2.5 md:px-6">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="bg-peach text-peach-foreground flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
+            <MessageCircle className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0 truncate text-sm font-medium">
+            {initialTitle?.trim() || "New chat"}
+          </span>
+        </div>
         <Button
           variant="ghost"
           size="icon"

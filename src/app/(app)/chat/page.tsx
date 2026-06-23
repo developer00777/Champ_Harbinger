@@ -2,12 +2,51 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, MessageCircle, Trash2 } from "lucide-react";
+import {
+  Loader2,
+  MessageCircle,
+  PencilLine,
+  Search,
+  Activity,
+  Trash2,
+} from "lucide-react";
 
 import { ChatInput } from "@/components/chat/chat-input";
 import { SafeLink } from "@/components/safe-link";
 import { Button } from "@/components/ui/button";
 import type { ChatSummary } from "@/lib/services/chat-history";
+
+const STARTERS: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  body: string;
+  prefill: string;
+}[] = [
+  {
+    icon: Search,
+    title: "Research a company",
+    body: "Find signals, contacts, and recent news.",
+    prefill: "Research ",
+  },
+  {
+    icon: PencilLine,
+    title: "Draft an email",
+    body: "Write a personalized cold outreach.",
+    prefill: "Draft a cold email to ",
+  },
+  {
+    icon: MessageCircle,
+    title: "Find contacts",
+    body: "Who should I reach out to at…",
+    prefill: "Find the right contacts at ",
+  },
+  {
+    icon: Activity,
+    title: "Summarize signals",
+    body: "What's changed at my tracked accounts?",
+    prefill: "What are the latest signals across my campaigns?",
+  },
+];
 
 function timeAgo(dateStr: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -67,13 +106,41 @@ export default function ChatPage() {
   return (
     <div className="bg-background flex min-h-0 flex-1 flex-col">
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-4 py-12">
+        <div className="mx-auto max-w-2xl px-6 pt-12 pb-4">
+          {/* Hero */}
           <div className="mb-8 text-center">
-            <h2 className="text-lg font-semibold">How can I help?</h2>
+            <div className="bg-peach text-peach-foreground mx-auto mb-3.5 flex h-12 w-12 items-center justify-center rounded-xl">
+              <MessageCircle className="h-6 w-6" />
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight">
+              How can I help?
+            </h2>
             <p className="text-muted-foreground mt-1 text-sm">
-              Start typing to begin a new conversation, or pick up where you
-              left off.
+              Research a company, draft a message, or ask anything about your
+              pipeline.
             </p>
+          </div>
+
+          {/* Starter prompts */}
+          <div className="mb-7 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {STARTERS.map((s) => (
+              <button
+                key={s.title}
+                type="button"
+                onClick={() => setInput(s.prefill)}
+                className="bg-card shadow-card hover:border-primary group rounded-xl border border-border p-3.5 text-left transition-colors"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="bg-peach text-peach-foreground flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
+                    <s.icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="text-sm font-semibold">{s.title}</span>
+                </div>
+                <p className="text-muted-foreground mt-1.5 text-xs leading-snug">
+                  {s.body}
+                </p>
+              </button>
+            ))}
           </div>
 
           {loading && (
@@ -91,24 +158,22 @@ export default function ChatPage() {
           )}
 
           {!loading && chats.length > 0 && (
-            <div className="space-y-1">
-              <h3 className="text-muted-foreground mb-3 text-xs font-medium uppercase tracking-wide">
-                Recent chats
-              </h3>
+            <div className="space-y-0.5">
+              <h3 className="eyebrow mb-2.5">Recent chats</h3>
               {chats.map((chat) => (
                 <div
                   key={chat.id}
-                  className="hover:bg-muted/50 group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors"
+                  className="hover:bg-muted group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors"
                 >
                   <SafeLink
                     href={`/chat/${chat.id}`}
                     className="flex min-w-0 flex-1 items-center gap-3"
                   >
-                    <MessageCircle className="text-muted-foreground h-4 w-4 shrink-0" />
+                    <MessageCircle className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
                     <span className="min-w-0 flex-1 truncate text-sm">
                       {chat.title}
                     </span>
-                    <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                    <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">
                       {timeAgo(chat.updated_at)}
                     </span>
                   </SafeLink>

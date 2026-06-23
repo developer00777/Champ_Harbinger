@@ -3,11 +3,9 @@
 import { useEffect, useRef } from "react";
 
 import type { UIMessage } from "ai";
-import { Loader2, MessageSquare } from "lucide-react";
+import { Loader2, MessageCircle } from "lucide-react";
 
 import { ChatMessageBubble } from "./chat-message-bubble";
-
-import { Button } from "@/components/ui/button";
 
 const DEFAULT_SUGGESTIONS = [
   "Start a new outbound campaign",
@@ -47,28 +45,29 @@ export function ChatMessages({
   if (messages.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center animate-in fade-in-0 duration-300">
-        <div className="max-w-md space-y-6 text-center">
-          <div className="bg-muted mx-auto flex h-12 w-12 items-center justify-center rounded-full">
-            <MessageSquare className="text-muted-foreground h-6 w-6" />
+        <div className="max-w-md space-y-6 px-4 text-center">
+          <div className="bg-peach text-peach-foreground mx-auto flex h-12 w-12 items-center justify-center rounded-xl">
+            <MessageCircle className="h-6 w-6" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold">How can I help?</h3>
+            <h3 className="text-xl font-bold tracking-tight">
+              How can I help?
+            </h3>
             <p className="text-muted-foreground mt-1 text-sm">
-              I&apos;m ChampHarbinger, your AI outreach assistant. Ask me anything or pick a
-              suggestion below.
+              I&apos;m ChampHarbinger, your AI outreach assistant. Ask me
+              anything or pick a suggestion below.
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-2">
             {suggestions.map((suggestion) => (
-              <Button
+              <button
                 key={suggestion}
-                variant="outline"
-                size="sm"
-                className="h-auto py-2 text-xs whitespace-normal transition-colors"
+                type="button"
+                className="bg-card hover:border-primary hover:text-foreground text-muted-foreground rounded-full border border-border px-3 py-1.5 text-xs whitespace-normal transition-colors"
                 onClick={() => onSuggestionClick(suggestion)}
               >
                 {suggestion}
-              </Button>
+              </button>
             ))}
           </div>
         </div>
@@ -95,10 +94,10 @@ export function ChatMessages({
         ))}
         {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
           <div className="flex gap-3 animate-in fade-in-0 duration-300">
-            <div className="bg-muted flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
-              <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />
+            <div className="bg-peach text-peach-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
+              <Loader2 className="h-4 w-4 animate-spin" />
             </div>
-            <div className="bg-muted/60 rounded-2xl rounded-bl-md px-4 py-2.5">
+            <div className="bg-card border-border rounded-2xl rounded-bl-md border px-4 py-2.5 shadow-card">
               <div className="flex items-center gap-1.5 py-0.5">
                 <span
                   className="bg-muted-foreground/50 h-1.5 w-1.5 rounded-full animate-dot-bounce"

@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 
 import type { UIMessage } from "ai";
 import { isToolUIPart, getToolName } from "ai";
-import { Bot, User } from "lucide-react";
+import { MessageCircle, User } from "lucide-react";
 
 import { ToolCallCard } from "./tool-call-card";
 
@@ -46,13 +46,13 @@ export const ChatMessageBubble = memo(
 
       return (
         <div className="flex justify-end gap-3 animate-in fade-in-0 duration-500">
-          <div className="bg-primary text-primary-foreground max-w-[80%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm">
+          <div className="bg-primary text-primary-foreground max-w-[80%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm shadow-card">
             {textContent && (
               <p className="whitespace-pre-wrap">{textContent}</p>
             )}
           </div>
-          <div className="bg-primary/10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
-            <User className="text-primary h-4 w-4" />
+          <div className="bg-muted text-muted-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
+            <User className="h-4 w-4" />
           </div>
         </div>
       );
@@ -81,8 +81,8 @@ export const ChatMessageBubble = memo(
 
     return (
       <div className="flex gap-3 animate-in fade-in-0 duration-500">
-        <div className="bg-muted flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
-          <Bot className="text-muted-foreground h-4 w-4" />
+        <div className="bg-peach text-peach-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
+          <MessageCircle className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
           {parts.map((part, i) => {
@@ -109,7 +109,7 @@ export const ChatMessageBubble = memo(
               return (
                 <div
                   key={`text-${i}`}
-                  className="bg-muted/60 my-1 rounded-2xl rounded-bl-md px-4 py-2.5 text-sm"
+                  className="bg-card border-border my-1 rounded-2xl rounded-bl-md border px-4 py-2.5 text-sm shadow-card"
                 >
                   {isActivelyStreaming ? (
                     <StreamingMarkdown text={part.text} />
