@@ -15,3 +15,23 @@ search:
     - json
   safe_search: 0
   autocomplete: ""
+
+# Outgoing requests to the upstream engines (Google/Bing/DuckDuckGo/Brave).
+# From a server IP, those engines block this instance (access-denied / CAPTCHA /
+# "too many requests"), so search returns 0 results — which starves both the
+# LinkedIn-URL finder and company discovery. The fix is to route engine traffic
+# through residential/ISP proxies so each request looks like a real user; on an
+# HTTP error SearXNG retries from a different proxy IP.
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 15.0
+  retries: 3
+  pool_connections: 100
+  pool_maxsize: 20
+  # Residential proxy (Bright Data or similar). Bright Data residential rotates
+  # the exit IP per request by default; add `-session-<id>` to the username for
+  # a sticky IP. KEEP REAL CREDENTIALS OUT OF GIT — set these on the deployed
+  # instance's settings.yml / a mounted override, not in the repo.
+  # proxies:
+  #   all://:
+  #     - http://BRD_USERNAME:BRD_PASSWORD@brd.superproxy.io:22225
