@@ -38,6 +38,7 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     name: string;
     icp?: string;
+    targetTitles?: string[];
     config?: Record<string, unknown>;
   };
 
@@ -45,13 +46,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
+  // Build the ICP object. targetTitles (the roles to reach) drives the
+  // contact-finding search filter — see find-contacts / findPeopleForCompany.
+  const targetTitles = (body.targetTitles ?? [])
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const icp: Record<string, unknown> = {};
+  if (body.icp?.trim()) icp.description = body.icp.trim();
+  if (targetTitles.length > 0) icp.targetTitles = targetTitles;
+
   const [campaign] = await adminDb
     .insert(schema.campaigns)
     .values({
       clerkUserId: userId,
       name: body.name.trim(),
       status: "active",
-      icp: body.icp ? { description: body.icp } : {},
+      icp,
       offering: {},
       positioning: {},
       searchCriteria: body.config ?? {},

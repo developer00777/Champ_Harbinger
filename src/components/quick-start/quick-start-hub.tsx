@@ -74,6 +74,25 @@ const TRY_EXAMPLES = [
   "Healthcare SaaS",
 ];
 
+const ROLE_SUGGESTIONS = [
+  "CEO / Founder",
+  "CTO",
+  "VP Engineering",
+  "Head of Product",
+  "VP Sales",
+  "Head of Marketing",
+];
+
+/** Append a role to the comma-separated list if not already present. */
+function appendRole(current: string, role: string): string {
+  const parts = current
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.some((p) => p.toLowerCase() === role.toLowerCase())) return current;
+  return [...parts, role].join(", ");
+}
+
 // LinkedIn link normalization — same pattern as components/chat/contact-card.tsx
 function linkedinHref(url: string): string {
   return url.startsWith("http")
@@ -120,6 +139,9 @@ export function QuickStartHub() {
   // Entry — the ICP/context line, used both to discover companies and as the
   // new campaign's offering/positioning when one is auto-created.
   const [criteria, setCriteria] = useState("");
+  // Roles to reach (comma-separated). Drives the contact-finding filter via the
+  // campaign ICP targetTitles. Empty → engine defaults to decision-makers.
+  const [roles, setRoles] = useState("");
   const [entryTab, setEntryTab] = useState<"describe" | "upload">("describe");
   const [discovering, setDiscovering] = useState(false);
 
@@ -178,6 +200,10 @@ export function QuickStartHub() {
         body: JSON.stringify({
           name: `Quick Start · ${todayLabel()}`,
           icp: line,
+          targetTitles: roles
+            .split(",")
+            .map((r) => r.trim())
+            .filter(Boolean),
           config: { offering: line, source: "quick_start" },
         }),
       });
@@ -202,7 +228,7 @@ export function QuickStartHub() {
     } finally {
       setCreatingCampaign(false);
     }
-  }, [campaignId, criteria]);
+  }, [campaignId, criteria, roles]);
 
   // Re-fetch the campaign's staged companies + contacts.
   const refreshCampaign = useCallback(
@@ -459,6 +485,8 @@ export function QuickStartHub() {
               onTogglePickExisting={() => setPickExisting((v) => !v)}
               criteria={criteria}
               onCriteriaChange={setCriteria}
+              roles={roles}
+              onRolesChange={setRoles}
               entryTab={entryTab}
               onEntryTab={setEntryTab}
               discovering={discovering}
@@ -704,6 +732,8 @@ function EntryStep({
   onTogglePickExisting,
   criteria,
   onCriteriaChange,
+  roles,
+  onRolesChange,
   entryTab,
   onEntryTab,
   discovering,
@@ -719,6 +749,8 @@ function EntryStep({
   onTogglePickExisting: () => void;
   criteria: string;
   onCriteriaChange: (v: string) => void;
+  roles: string;
+  onRolesChange: (v: string) => void;
   entryTab: "describe" | "upload";
   onEntryTab: (t: "describe" | "upload") => void;
   discovering: boolean;
@@ -760,6 +792,35 @@ function EntryStep({
         rows={3}
         className="mt-3.5"
       />
+
+      {/* Target roles — filters which people we find inside each company */}
+      <div className="mt-3.5">
+        <label className="text-muted-foreground mb-1.5 block text-xs">
+          Roles to reach{" "}
+          <span className="opacity-70">
+            (optional — defaults to decision-makers)
+          </span>
+        </label>
+        <input
+          value={roles}
+          onChange={(e) => onRolesChange(e.target.value)}
+          placeholder="CTO, VP Engineering, Head of Product"
+          aria-label="Roles to reach"
+          className="border-input bg-background focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+        />
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {ROLE_SUGGESTIONS.map((role) => (
+            <button
+              key={role}
+              type="button"
+              onClick={() => onRolesChange(appendRole(roles, role))}
+              className="hover:border-primary hover:text-foreground text-muted-foreground rounded-full border border-border px-2.5 py-1 text-xs transition-colors"
+            >
+              + {role}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {entryTab === "describe" && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
