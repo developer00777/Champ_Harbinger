@@ -4,7 +4,7 @@ import { generateObjectLimited as generateObject } from "@/lib/ai/generate";
 import { z } from "zod";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
 import { recordAiUsage } from "@/lib/ai/usage";
-import { searxSearch } from "@/lib/search/searxng-client";
+import { webSearch } from "@/lib/search/web-search";
 import {
   UNTRUSTED_NOTICE,
   stringify,
@@ -106,10 +106,12 @@ function toLinkedInProfile(url: string): string | null {
 }
 
 /**
- * Find a person's LinkedIn profile URL via web search (SearXNG). LinkedIn is the
- * join key we use to map a contact onto LakeB2B, so we want it on every contact
- * even when the company page doesn't link it. Returns null when SearXNG is
- * unconfigured or nothing matches.
+ * Find a person's LinkedIn profile URL via web search (Serper → SearXNG). The
+ * public profile IS indexed by Google, so a working search backend finds it;
+ * the self-hosted SearXNG alone gets blocked (access-denied/CAPTCHA) and
+ * returns nothing, so SERPER_API_KEY is what makes this reliable. LinkedIn is
+ * also the join key onto LakeB2B, so we want it on every contact. Returns null
+ * when no search backend is available or nothing matches.
  */
 export async function findLinkedInUrl(
   name: string,
@@ -125,7 +127,7 @@ export async function findLinkedInUrl(
     `${name} ${orgName} linkedin.com/in`,
     `"${name}" ${orgName} linkedin`,
   ]) {
-    const results = await searxSearch(q, 10);
+    const results = await webSearch(q, 10);
     for (const r of results) {
       const profile = toLinkedInProfile(r.url);
       if (profile) return profile;
@@ -307,7 +309,7 @@ export async function findPeopleViaSearch(
       `"${company.name}" ${title} linkedin`,
       `${company.name} ${title} linkedin.com/in`,
     ]) {
-      const results = await searxSearch(q, 8);
+      const results = await webSearch(q, 8);
       for (const r of results) {
         const li = toLinkedInProfile(r.url);
         if (!li || seen.has(li)) continue;

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getModelSync } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { recordAiUsage } from "@/lib/ai/usage";
-import { searxSearch } from "@/lib/search/searxng-client";
+import { webSearch } from "@/lib/search/web-search";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
 import { verifyCompanies } from "@/lib/lakeb2b/verifier";
 import type { Company } from "@/lib/lakeb2b/schemas";
@@ -126,7 +126,7 @@ export function makePublicWebProvider(): DiscoveryProvider {
       const domainCap = max * 3;
 
       for (const q of queries) {
-        const results = await searxSearch(q, 10);
+        const results = await webSearch(q, 10);
         for (const r of results) {
           const d = registrableDomain(r.url);
           if (!d || seen.has(d) || isAggregator(d)) continue;
