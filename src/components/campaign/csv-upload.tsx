@@ -1,59 +1,49 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import readXlsxFile from "read-excel-file/browser";
 
 import { Button } from "@/components/ui/button";
+import { Select, type SelectItemDef } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-
-interface ParsedCompany {
-  name: string;
-  domain: string | null;
-  url: string | null;
-  industry: string | null;
-  location: string | null;
-  description: string | null;
-}
+import {
+  type CanonicalField,
+  type CompletenessField,
+  type IngestShape,
+  applyMapping,
+  autoDetectMapping,
+  COMPLETENESS_OPTIONS,
+  fieldDefs,
+  missingRequiredFields,
+} from "@/lib/services/csv-mapping";
 
 interface CsvUploadProps {
   campaignId: string;
   onImported: () => void;
 }
 
-// Column name aliases for auto-mapping
-const COLUMN_MAP: Record<string, keyof ParsedCompany> = {
-  name: "name",
-  company: "name",
-  company_name: "name",
-  "company name": "name",
-  organization: "name",
-  domain: "domain",
-  website: "domain",
-  "website url": "domain",
-  site: "domain",
-  url: "url",
-  link: "url",
-  industry: "industry",
-  sector: "industry",
-  vertical: "industry",
-  location: "location",
-  city: "location",
-  country: "location",
-  hq: "location",
-  headquarters: "location",
-  region: "location",
-  geography: "location",
-  description: "description",
-  about: "description",
-  summary: "description",
-  overview: "description",
-};
+const IGNORE = "__ignore__";
+
+const SHAPES: { value: IngestShape; label: string; hint: string }[] = [
+  {
+    value: "companies",
+    label: "Companies",
+    hint: "One company per row — we find the people",
+  },
+  {
+    value: "contacts",
+    label: "Known contacts",
+    hint: "One person per row — we just enrich them",
+  },
+];
+
+// ── CSV / Excel parsing (unchanged) ──────────────────────────────────────────
 
 function parseCSV(text: string): { headers: string[]; rows: string[][] } {
   const lines: string[] = [];
@@ -117,60 +107,19 @@ function parseCSV(text: string): { headers: string[]; rows: string[][] } {
   return { headers, rows };
 }
 
-function mapColumns(headers: string[], rows: string[][]): ParsedCompany[] {
-  // Map header index to field
-  const mapping: Array<keyof ParsedCompany | null> = headers.map((h) => {
-    const normalized = h.toLowerCase().trim();
-    return COLUMN_MAP[normalized] ?? null;
-  });
-
-  // If no "name" column was found, try the first column
-  if (!mapping.includes("name") && headers.length > 0) {
-    mapping[0] = "name";
-  }
-
-  return rows.map((row) => {
-    const company: ParsedCompany = {
-      name: "",
-      domain: null,
-      url: null,
-      industry: null,
-      location: null,
-      description: null,
-    };
-
-    for (let i = 0; i < row.length; i++) {
-      const field = mapping[i];
-      if (field && row[i]) {
-        if (field === "name") {
-          company.name = row[i];
-        } else {
-          company[field] = row[i];
-        }
-      }
-    }
-
-    // If url is set but domain isn't, try extracting domain
-    if (!company.domain && company.url) {
-      try {
-        company.domain = new URL(
-          company.url.startsWith("http")
-            ? company.url
-            : `https://${company.url}`,
-        ).hostname.replace("www.", "");
-      } catch {
-        // skip
-      }
-    }
-
-    return company;
-  });
-}
+// ── Component ────────────────────────────────────────────────────────────────
 
 export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
   const [open, setOpen] = useState(false);
-  const [companies, setCompanies] = useState<ParsedCompany[]>([]);
-  const [headers, setHeaders] = useState<string[]>([]);
+  const [shape, setShape] = useState<IngestShape>("companies");
+  const [rawHeaders, setRawHeaders] = useState<string[]>([]);
+  const [rawRows, setRawRows] = useState<string[][]>([]);
+  const [mapping, setMapping] = useState<(CanonicalField | null)[]>([]);
+  const [requiredFields, setRequiredFields] = useState<CompletenessField[]>([
+    "work_email",
+    "linkedin",
+  ]);
+  const [budgetCap, setBudgetCap] = useState("");
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{
     imported: number;
@@ -180,28 +129,39 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
-    setCompanies([]);
-    setHeaders([]);
+    setRawHeaders([]);
+    setRawRows([]);
+    setMapping([]);
     setResult(null);
     setError(null);
     setImporting(false);
   };
 
-  const finalize = useCallback((h: string[], rows: string[][]) => {
-    if (rows.length === 0) {
-      setError("No data rows found in the file");
-      return;
-    }
-    setHeaders(h);
-    const valid = mapColumns(h, rows).filter((c) => c.name);
-    if (valid.length === 0) {
-      setError(
-        "No valid companies found. Make sure the file has a name/company column.",
-      );
-      return;
-    }
-    setCompanies(valid);
-  }, []);
+  // Re-derive the typed rows + preview whenever the mapping or shape changes.
+  const mapped = useMemo(
+    () => applyMapping(rawHeaders, rawRows, mapping, shape),
+    [rawHeaders, rawRows, mapping, shape],
+  );
+  const missing = useMemo(
+    () => missingRequiredFields(mapping, shape),
+    [mapping, shape],
+  );
+
+  const rowCount =
+    shape === "companies" ? mapped.companies.length : mapped.contacts.length;
+
+  const finalize = useCallback(
+    (h: string[], rows: string[][], nextShape: IngestShape) => {
+      if (rows.length === 0) {
+        setError("No data rows found in the file.");
+        return;
+      }
+      setRawHeaders(h);
+      setRawRows(rows);
+      setMapping(autoDetectMapping(h, nextShape));
+    },
+    [],
+  );
 
   const handleFile = useCallback(
     (file: File) => {
@@ -209,9 +169,6 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
       setOpen(true);
       const isExcel = /\.xlsx?$/i.test(file.name);
       if (isExcel) {
-        // readXlsxFile resolves to an array of sheets ({ sheet, data }); take
-        // the first sheet's rows-of-cells and normalize every cell to a trimmed
-        // string, reusing the same column mapping as CSV.
         readXlsxFile(file)
           .then((sheets) => {
             const data = (sheets[0]?.data ?? []) as unknown[][];
@@ -222,6 +179,7 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
             finalize(
               h,
               rows.filter((r) => r.some((c) => c)),
+              shape,
             );
           })
           .catch((err: unknown) => {
@@ -236,11 +194,11 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
       const reader = new FileReader();
       reader.onload = (e) => {
         const { headers: h, rows } = parseCSV(e.target?.result as string);
-        finalize(h, rows);
+        finalize(h, rows, shape);
       };
       reader.readAsText(file);
     },
-    [finalize],
+    [finalize, shape],
   );
 
   const handleDrop = useCallback(
@@ -254,38 +212,75 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
     [handleFile],
   );
 
+  // Switching shape after a file is loaded re-runs auto-mapping for that shape.
+  const changeShape = (next: IngestShape) => {
+    setShape(next);
+    if (rawHeaders.length > 0) setMapping(autoDetectMapping(rawHeaders, next));
+  };
+
+  const setColumn = (index: number, value: string) => {
+    setMapping((prev) => {
+      const copy = [...prev];
+      copy[index] = value === IGNORE ? null : (value as CanonicalField);
+      return copy;
+    });
+  };
+
+  const toggleRequired = (field: CompletenessField) => {
+    setRequiredFields((prev) =>
+      prev.includes(field) ? prev.filter((f) => f !== field) : [...prev, field],
+    );
+  };
+
   const handleImport = async () => {
     setImporting(true);
     setError(null);
     try {
+      const budgetCapUsd = budgetCap.trim()
+        ? Number.parseFloat(budgetCap.trim())
+        : null;
+      const payload =
+        shape === "companies"
+          ? { companies: mapped.companies }
+          : { contacts: mapped.contacts };
       const res = await fetch("/api/import-csv", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId, companies }),
+        body: JSON.stringify({
+          campaignId,
+          shape,
+          requiredFields,
+          budgetCapUsd:
+            budgetCapUsd != null && Number.isFinite(budgetCapUsd)
+              ? budgetCapUsd
+              : null,
+          ...payload,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Import failed");
+        setError(data.error || "Import failed.");
         return;
       }
       setResult({ imported: data.imported, skipped: data.skipped });
       onImported();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      setError(err instanceof Error ? err.message : "Import failed.");
     } finally {
       setImporting(false);
     }
   };
 
-  const mappedFields = headers.map((h) => {
-    const normalized = h.toLowerCase().trim();
-    return COLUMN_MAP[normalized] ?? null;
-  });
-  if (mappedFields.length > 0 && !mappedFields.includes("name")) {
-    mappedFields[0] = "name";
-  }
+  const fieldItems: SelectItemDef[] = [
+    { value: IGNORE, label: "— Ignore —" },
+    ...fieldDefs(shape).map((d) => ({
+      value: d.field,
+      label: d.required ? `${d.label} *` : d.label,
+    })),
+  ];
 
-  const preview = companies.slice(0, 5);
+  const hasFile = rawHeaders.length > 0;
+  const canImport = hasFile && rowCount > 0 && missing.length === 0;
 
   return (
     <>
@@ -320,7 +315,7 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
       >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Import Companies from CSV or Excel</DialogTitle>
+            <DialogTitle>Import from CSV or Excel</DialogTitle>
           </DialogHeader>
 
           {error && (
@@ -333,7 +328,8 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
             <div className="space-y-3">
               <div className="bg-muted rounded-md px-4 py-3 text-sm">
                 <p>
-                  <strong>{result.imported}</strong> companies imported
+                  <strong>{result.imported}</strong>{" "}
+                  {shape === "companies" ? "companies" : "contacts"} imported
                   {result.skipped > 0 && (
                     <span className="text-muted-foreground">
                       {" "}
@@ -354,101 +350,230 @@ export function CsvUpload({ campaignId, onImported }: CsvUploadProps) {
                 </Button>
               </div>
             </div>
-          ) : companies.length > 0 ? (
-            <div className="space-y-3">
-              <div className="text-muted-foreground text-sm">
-                {companies.length}{" "}
-                {companies.length === 1 ? "company" : "companies"} found
+          ) : (
+            <div className="space-y-4">
+              {/* Shape toggle — companies vs known contacts */}
+              <div>
+                <div className="text-muted-foreground mb-1.5 text-xs font-medium">
+                  What is in this file?
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {SHAPES.map((s) => (
+                    <button
+                      key={s.value}
+                      type="button"
+                      onClick={() => changeShape(s.value)}
+                      className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                        shape === s.value
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:bg-muted/50"
+                      }`}
+                    >
+                      <div className="font-medium">{s.label}</div>
+                      <div className="text-muted-foreground text-xs">
+                        {s.hint}
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Column mapping display */}
-              <div className="flex flex-wrap gap-1.5">
-                {headers.map((h, i) => (
-                  <span
-                    key={i}
-                    className={`rounded-full px-2 py-0.5 text-xs ${
-                      mappedFields[i]
-                        ? "bg-primary/10 text-primary"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {h}
-                    {mappedFields[i] && mappedFields[i] !== h.toLowerCase() && (
-                      <span className="opacity-60"> → {mappedFields[i]}</span>
+              {!hasFile ? (
+                <div className="text-muted-foreground py-6 text-center text-sm">
+                  Parsing file...
+                </div>
+              ) : (
+                <>
+                  {/* Column mapping — editable */}
+                  <div>
+                    <div className="text-muted-foreground mb-1.5 text-xs font-medium">
+                      Map columns ({rawRows.length} rows)
+                    </div>
+                    <div className="grid max-h-48 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
+                      {rawHeaders.map((h, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span
+                            className="text-muted-foreground w-28 shrink-0 truncate text-xs"
+                            title={h}
+                          >
+                            {h || `Column ${i + 1}`}
+                          </span>
+                          <Select
+                            value={mapping[i] ?? IGNORE}
+                            onValueChange={(v) => setColumn(i, v)}
+                            items={fieldItems}
+                            triggerClassName="h-7"
+                            aria-label={`Map column ${h || i + 1}`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    {missing.length > 0 && (
+                      <p className="text-destructive mt-1.5 text-xs">
+                        Map a column to{" "}
+                        {missing
+                          .map(
+                            (f) =>
+                              fieldDefs(shape).find((d) => d.field === f)
+                                ?.label ?? f,
+                          )
+                          .join(" and ")}{" "}
+                        to continue.
+                      </p>
                     )}
-                    {!mappedFields[i] && (
-                      <span className="opacity-60"> (ignored)</span>
-                    )}
-                  </span>
-                ))}
-              </div>
-
-              {/* Preview table */}
-              <div className="border-border overflow-x-auto rounded-md border">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted/50">
-                      <th className="px-3 py-1.5 text-left text-xs font-medium">
-                        Name
-                      </th>
-                      <th className="px-3 py-1.5 text-left text-xs font-medium">
-                        Domain
-                      </th>
-                      <th className="px-3 py-1.5 text-left text-xs font-medium">
-                        Industry
-                      </th>
-                      <th className="px-3 py-1.5 text-left text-xs font-medium">
-                        Location
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.map((c, i) => (
-                      <tr key={i} className="border-border border-t">
-                        <td className="px-3 py-1.5">{c.name}</td>
-                        <td className="text-muted-foreground px-3 py-1.5">
-                          {c.domain || "--"}
-                        </td>
-                        <td className="text-muted-foreground px-3 py-1.5">
-                          {c.industry || "--"}
-                        </td>
-                        <td className="text-muted-foreground px-3 py-1.5">
-                          {c.location || "--"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {companies.length > 5 && (
-                  <div className="text-muted-foreground border-border border-t px-3 py-1.5 text-xs">
-                    + {companies.length - 5} more
                   </div>
-                )}
-              </div>
 
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setOpen(false);
-                    reset();
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={handleImport} disabled={importing}>
-                  {importing
-                    ? "Importing..."
-                    : `Import ${companies.length} ${companies.length === 1 ? "company" : "companies"}`}
-                </Button>
-              </div>
+                  {/* Required-field set + per-job budget cap */}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <div className="text-muted-foreground mb-1.5 text-xs font-medium">
+                        A complete contact must have
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {COMPLETENESS_OPTIONS.map((opt) => {
+                          const on = requiredFields.includes(opt.field);
+                          return (
+                            <button
+                              key={opt.field}
+                              type="button"
+                              onClick={() => toggleRequired(opt.field)}
+                              className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                                on
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "border-border text-muted-foreground hover:bg-muted/50"
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="budget-cap"
+                        className="text-muted-foreground mb-1.5 block text-xs font-medium"
+                      >
+                        Per-job budget cap (optional)
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-muted-foreground text-sm">$</span>
+                        <input
+                          id="budget-cap"
+                          type="number"
+                          min="0"
+                          step="1"
+                          inputMode="decimal"
+                          placeholder="No cap"
+                          value={budgetCap}
+                          onChange={(e) => setBudgetCap(e.target.value)}
+                          className="border-input bg-background focus-visible:ring-ring/50 h-8 w-full rounded-lg border px-2.5 text-sm focus-visible:outline-none focus-visible:ring-3"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  <div className="border-border overflow-x-auto rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/50 text-left text-xs font-medium">
+                          {shape === "companies" ? (
+                            <>
+                              <th className="px-3 py-1.5">Name</th>
+                              <th className="px-3 py-1.5">Domain</th>
+                              <th className="px-3 py-1.5">Titles</th>
+                              <th className="px-3 py-1.5">Location</th>
+                            </>
+                          ) : (
+                            <>
+                              <th className="px-3 py-1.5">Name</th>
+                              <th className="px-3 py-1.5">Title</th>
+                              <th className="px-3 py-1.5">Company</th>
+                              <th className="px-3 py-1.5">Email</th>
+                            </>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shape === "companies"
+                          ? mapped.companies.slice(0, 5).map((c, i) => (
+                              <tr key={i} className="border-border border-t">
+                                <td className="px-3 py-1.5">{c.name}</td>
+                                <td className="text-muted-foreground px-3 py-1.5">
+                                  {c.domain || "--"}
+                                </td>
+                                <td className="text-muted-foreground px-3 py-1.5">
+                                  {c.targetTitles.length
+                                    ? c.targetTitles.join(", ")
+                                    : "--"}
+                                </td>
+                                <td className="text-muted-foreground px-3 py-1.5">
+                                  {c.location || "--"}
+                                </td>
+                              </tr>
+                            ))
+                          : mapped.contacts.slice(0, 5).map((c, i) => (
+                              <tr key={i} className="border-border border-t">
+                                <td className="px-3 py-1.5">{c.name}</td>
+                                <td className="text-muted-foreground px-3 py-1.5">
+                                  {c.title || "--"}
+                                </td>
+                                <td className="text-muted-foreground px-3 py-1.5">
+                                  {c.company}
+                                </td>
+                                <td className="text-muted-foreground px-3 py-1.5">
+                                  {c.email || "--"}
+                                </td>
+                              </tr>
+                            ))}
+                      </tbody>
+                    </table>
+                    {rowCount > 5 && (
+                      <div className="text-muted-foreground border-border border-t px-3 py-1.5 text-xs">
+                        + {rowCount - 5} more
+                      </div>
+                    )}
+                    {rowCount === 0 && (
+                      <div className="text-muted-foreground px-3 py-3 text-xs">
+                        No valid rows with the current mapping.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setOpen(false);
+                        reset();
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleImport}
+                      disabled={importing || !canImport}
+                    >
+                      {importing
+                        ? "Importing..."
+                        : `Import ${rowCount} ${
+                            shape === "companies"
+                              ? rowCount === 1
+                                ? "company"
+                                : "companies"
+                              : rowCount === 1
+                                ? "contact"
+                                : "contacts"
+                          }`}
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
-          ) : !error ? (
-            <div className="text-muted-foreground py-8 text-center text-sm">
-              Parsing file...
-            </div>
-          ) : null}
+          )}
         </DialogContent>
       </Dialog>
     </>
