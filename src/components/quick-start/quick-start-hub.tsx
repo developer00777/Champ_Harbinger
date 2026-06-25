@@ -84,6 +84,10 @@ const ROLE_SUGGESTIONS = [
   "Head of Marketing",
 ];
 
+// Title-match score at/above which a found contact is auto-accepted (selected)
+// for drafting; below this the rep eyeballs and opts in (v2 spec §4).
+const ACCEPT_THRESHOLD = 0.6;
+
 /** Append a role to the comma-separated list if not already present. */
 function appendRole(current: string, role: string): string {
   const parts = current
@@ -338,14 +342,27 @@ export function QuickStartHub() {
       );
       const { contacts: refreshed } = await refreshCampaign(campaignId);
       setContacts(refreshed);
-      setSelectedContactIds(new Set(refreshed.map((c) => c.id)));
+      // Auto-accept the strong role-matches; leave the borderline ones for the
+      // rep to eyeball (v2 spec §4). With no roles set, accept everything.
+      const requestedTitles = roles
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean);
+      const accepted =
+        requestedTitles.length > 0
+          ? refreshed.filter(
+              (c) =>
+                bestTitleScore(c.title, requestedTitles) >= ACCEPT_THRESHOLD,
+            )
+          : refreshed;
+      setSelectedContactIds(new Set(accepted.map((c) => c.id)));
       setStep("contacts");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Finding contacts failed.");
     } finally {
       setFindingContacts(false);
     }
-  }, [campaignId, companies, refreshCampaign]);
+  }, [campaignId, companies, refreshCampaign, roles]);
 
   // ── Step: Draft personalized messages ──────────────────────────────────────
   const handleDraft = useCallback(async () => {
@@ -1095,13 +1112,24 @@ function ContactsStep({
           .sort((a, b) => b.score - a.score)
       : contacts.map((c) => ({ c, score: 0 }));
 
+  const matchCount = ranked.filter((r) => r.score >= ACCEPT_THRESHOLD).length;
+
   return (
     <div className="bg-card shadow-card space-y-3 rounded-xl border border-border p-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Users className="text-muted-foreground h-4 w-4" />
-          {contacts.length} {contacts.length === 1 ? "contact" : "contacts"}{" "}
-          found
+          <div>
+            <div>
+              {contacts.length} {contacts.length === 1 ? "contact" : "contacts"}{" "}
+              found
+            </div>
+            {requestedTitles.length > 0 && contacts.length > 0 && (
+              <div className="text-muted-foreground text-xs font-normal">
+                {matchCount} match your roles — pre-selected; review the rest
+              </div>
+            )}
+          </div>
         </div>
         {contacts.length > 0 && (
           <label className="text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs">
