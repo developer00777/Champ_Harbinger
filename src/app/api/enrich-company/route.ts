@@ -20,6 +20,7 @@ import {
   findPeopleForCompany,
   type CompanyContext,
 } from "@/lib/services/contact-filter";
+import { resolveDomain } from "@/lib/services/domain-resolver";
 import {
   recordVerifiedEmail,
   makeEmailPatternDb,
@@ -219,10 +220,25 @@ async function findContactsForCompany(
       | string[]
       | undefined) || [];
 
+  // Name-only companies (Excel upload / Champ Sets) have no domain — resolve
+  // one from the name so the team scrape + email patterns can run, and persist
+  // it back to the org for next time.
+  let companyCtx = company;
+  if (!companyCtx.domain && companyCtx.name) {
+    const resolved = await resolveDomain(companyCtx.name);
+    if (resolved) {
+      companyCtx = { ...companyCtx, domain: resolved };
+      await adminDb
+        .update(schema.organizations)
+        .set({ domain: resolved })
+        .where(eq(schema.organizations.id, orgId));
+    }
+  }
+
   // Find as many people as possible at the company, role-filtered: team-page
   // scrape + LinkedIn/web search, merged. Runs even with no domain.
   try {
-    const found = await findPeopleForCompany(company, targetTitles);
+    const found = await findPeopleForCompany(companyCtx, targetTitles);
     for (const dp of found) {
       if (dp.linkedinUrl && existingUrls.has(dp.linkedinUrl)) continue;
 

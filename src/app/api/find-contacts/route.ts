@@ -8,6 +8,7 @@ import {
   linkPersonToCampaign,
 } from "@/lib/services/knowledge-base";
 import { findPeopleForCompany } from "@/lib/services/contact-filter";
+import { resolveDomain } from "@/lib/services/domain-resolver";
 import {
   recordVerifiedEmail,
   makeEmailPatternDb,
@@ -116,6 +117,20 @@ export async function POST(request: Request) {
 
     const epDb = makeEmailPatternDb(adminDb);
 
+    // Name-only companies have no domain — resolve one from the name so the
+    // team scrape + email patterns can run, and persist it for next time.
+    let domain = org.domain;
+    if (!domain && org.name) {
+      const resolved = await resolveDomain(org.name);
+      if (resolved) {
+        domain = resolved;
+        await adminDb
+          .update(schema.organizations)
+          .set({ domain: resolved })
+          .where(eq(schema.organizations.id, orgId));
+      }
+    }
+
     // Find as many people as possible at the company, filtered to the
     // campaign's target roles: team-page scrape + LinkedIn/web search, merged.
     // Runs even when the org has no domain (search-only).
@@ -123,7 +138,7 @@ export async function POST(request: Request) {
       const found = await findPeopleForCompany(
         {
           name: org.name,
-          domain: org.domain,
+          domain,
           industry: org.industry,
           location: org.location,
           description: org.description,
