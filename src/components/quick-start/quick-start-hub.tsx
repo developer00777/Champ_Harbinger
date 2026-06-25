@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CsvUpload } from "@/components/campaign/csv-upload";
+import { bestTitleScore } from "@/lib/services/title-match";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -509,6 +510,10 @@ export function QuickStartHub() {
 
           {step === "contacts" && (
             <ContactsStep
+              requestedTitles={roles
+                .split(",")
+                .map((r) => r.trim())
+                .filter(Boolean)}
               contacts={contacts}
               selectedIds={selectedContactIds}
               onToggle={(id) =>
@@ -1041,7 +1046,26 @@ function CompaniesStep({
 
 // ── Contacts step ────────────────────────────────────────────────────────────
 
+function MatchBadge({ score }: { score: number }) {
+  const pct = Math.round(score * 100);
+  const tone =
+    score >= 0.85
+      ? "bg-success/15 text-success"
+      : score >= 0.6
+        ? "bg-peach text-peach-foreground"
+        : "bg-muted text-muted-foreground";
+  return (
+    <span
+      className={`shrink-0 rounded-full px-1.5 py-0.5 font-mono text-[10px] font-semibold ${tone}`}
+      title="How well this person's title matches your target roles"
+    >
+      {pct}% match
+    </span>
+  );
+}
+
 function ContactsStep({
+  requestedTitles,
   contacts,
   selectedIds,
   onToggle,
@@ -1050,6 +1074,7 @@ function ContactsStep({
   onBack,
   onDraft,
 }: {
+  requestedTitles: string[];
   contacts: StagedContact[];
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
@@ -1060,6 +1085,15 @@ function ContactsStep({
 }) {
   const allSelected =
     contacts.length > 0 && selectedIds.size === contacts.length;
+
+  // Score each contact's title against the requested roles and rank best-first
+  // so the rep reviews the strongest matches at the top (v2 spec §4 Discover).
+  const ranked =
+    requestedTitles.length > 0
+      ? [...contacts]
+          .map((c) => ({ c, score: bestTitleScore(c.title, requestedTitles) }))
+          .sort((a, b) => b.score - a.score)
+      : contacts.map((c) => ({ c, score: 0 }));
 
   return (
     <div className="bg-card shadow-card space-y-3 rounded-xl border border-border p-5">
@@ -1089,7 +1123,7 @@ function ContactsStep({
         </p>
       ) : (
         <div className="max-h-72 space-y-1.5 overflow-y-auto">
-          {contacts.map((c) => (
+          {ranked.map(({ c, score }) => (
             <label
               key={c.id}
               className="bg-background flex cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2"
@@ -1103,6 +1137,9 @@ function ContactsStep({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-sm font-medium">{c.name}</span>
+                  {requestedTitles.length > 0 && score > 0 && (
+                    <MatchBadge score={score} />
+                  )}
                   {c.linkedinUrl && (
                     <a
                       href={linkedinHref(c.linkedinUrl)}
