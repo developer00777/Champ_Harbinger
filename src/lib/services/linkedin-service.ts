@@ -3,6 +3,10 @@ import {
   obscuraFetchHtml,
   isObscuraConfigured,
 } from "@/lib/services/browser-pool";
+import {
+  brightDataFetchHtml,
+  isBrightDataConfigured,
+} from "@/lib/services/brightdata-client";
 
 export interface LinkedInPost {
   id: string;
@@ -42,81 +46,105 @@ function cleanLinkedInUsername(input: string): string {
     .replace(/\?.*$/, "");
 }
 
+/**
+ * Parse rendered LinkedIn profile HTML into a profile + body text, or null when
+ * the page is empty or an auth/login wall. Pure — no network. Shared by every
+ * retrieval source so the parsing (and blocked-detection) lives in one place.
+ */
+function parseProfileHtml(
+  html: string,
+  username: string,
+): LinkedInScrapeResult | null {
+  if (!html) return null;
+
+  const $ = cheerio.load(html);
+  // Drop non-content nodes before reading name/headline or body text.
+  $("script, style, noscript, template").remove();
+
+  const name = $("h1").first().text().trim();
+  const headline = $(
+    '[class*="headline"], [data-test*="headline"], .top-card-layout__headline',
+  )
+    .first()
+    .text()
+    .trim();
+
+  // LinkedIn auth walls render generic titles with no real name; treat those as
+  // "blocked" so the caller can try the next source.
+  if (!name || /sign in|join linkedin|log in/i.test(name)) {
+    return null;
+  }
+
+  // Cleaned body text for the LLM extractor. Prefer the main content region when
+  // present; fall back to the whole body. Collapse whitespace so the model reads
+  // dense, low-noise text.
+  const bodyText = ($("main").text() || $("body").text() || "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  const rawText = bodyText ? bodyText.slice(0, 12000) : undefined;
+
+  // Unauthenticated profile pages don't expose post feeds; return profile (with
+  // rich body text) and an empty posts array.
+  return { profile: { username, name, headline, rawText }, posts: [] };
+}
+
+interface ProfileSource {
+  name: string;
+  fetchHtml: (url: string) => Promise<string>;
+}
+
 export class LinkedinService {
   extractUsername(linkedinUrl: string): string {
     return cleanLinkedInUsername(linkedinUrl);
   }
 
   /**
-   * Best-effort fetch of a public LinkedIn profile via the self-hosted Obscura
-   * browser. LinkedIn aggressively blocks unauthenticated access, so this is
-   * expected to return empty data in most cases. It NEVER throws — callers get
-   * the same `{ profile, posts }` shape with empty arrays when blocked or when
-   * Obscura is not configured.
+   * Best-effort fetch of a public LinkedIn profile. Retrieval is tried source by
+   * source, in order: Bright Data Web Unlocker first (residential IPs, gets past
+   * the auth wall), then the self-hosted Obscura browser as a fallback. The HTML
+   * is parsed in-house — only the public profile URL ever leaves.
+   *
+   * LinkedIn aggressively blocks unauthenticated access, so this can still return
+   * empty when no source is configured or all are blocked. It NEVER throws —
+   * callers get the same `{ profile, posts }` shape with empty arrays.
    */
   async scrapeProfile(linkedinUrl: string): Promise<LinkedInScrapeResult> {
     const username = cleanLinkedInUsername(linkedinUrl);
-
-    if (!isObscuraConfigured()) {
-      return { profile: null, posts: [] };
-    }
-
     const profileUrl = `https://www.linkedin.com/in/${username}/`;
-    console.log(`[LinkedIn] Attempting public fetch: ${profileUrl}`);
 
-    try {
-      const html = await obscuraFetchHtml(profileUrl);
-
-      // Empty render / blocked => return empty gracefully.
-      if (!html) {
-        return { profile: null, posts: [] };
-      }
-
-      const $ = cheerio.load(html);
-      // Drop non-content nodes before reading name/headline or body text.
-      $("script, style, noscript, template").remove();
-
-      const name = $("h1").first().text().trim();
-      const headline = $(
-        '[class*="headline"], [data-test*="headline"], .top-card-layout__headline',
-      )
-        .first()
-        .text()
-        .trim();
-
-      // LinkedIn auth walls render generic titles with no real name; treat
-      // those as "blocked" and return an empty result.
-      if (!name || /sign in|join linkedin|log in/i.test(name)) {
-        return { profile: null, posts: [] };
-      }
-
-      // Cleaned body text for the LLM extractor. Prefer the main content region
-      // when present; fall back to the whole body. Collapse whitespace so the
-      // model reads dense, low-noise text.
-      const bodyText = ($("main").text() || $("body").text() || "")
-        .replace(/[ \t]{2,}/g, " ")
-        .replace(/\n[ \t]+/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-      const rawText = bodyText ? bodyText.slice(0, 12000) : undefined;
-
-      const profile: LinkedInProfile = {
-        username,
-        name,
-        headline,
-        rawText,
-      };
-
-      // Unauthenticated profile pages don't expose post feeds; return profile
-      // (with rich body text) and an empty posts array.
-      return { profile, posts: [] };
-    } catch (err) {
-      console.warn(
-        `[LinkedIn] Public fetch failed (expected when blocked): ${
-          err instanceof Error ? err.message : "unknown"
-        }`,
-      );
+    const sources: ProfileSource[] = [];
+    if (isBrightDataConfigured()) {
+      sources.push({ name: "brightdata", fetchHtml: brightDataFetchHtml });
+    }
+    if (isObscuraConfigured()) {
+      sources.push({ name: "obscura", fetchHtml: obscuraFetchHtml });
+    }
+    if (sources.length === 0) {
       return { profile: null, posts: [] };
     }
+
+    for (const source of sources) {
+      console.log(
+        `[LinkedIn] Attempting fetch via ${source.name}: ${profileUrl}`,
+      );
+      try {
+        const html = await source.fetchHtml(profileUrl);
+        const parsed = parseProfileHtml(html, username);
+        if (parsed) return parsed;
+        console.log(
+          `[LinkedIn] ${source.name} returned no usable profile (blocked/empty); trying next source.`,
+        );
+      } catch (err) {
+        console.warn(
+          `[LinkedIn] ${source.name} fetch failed (expected when blocked): ${
+            err instanceof Error ? err.message : "unknown"
+          }`,
+        );
+      }
+    }
+
+    return { profile: null, posts: [] };
   }
 }
