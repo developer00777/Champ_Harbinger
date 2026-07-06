@@ -149,10 +149,21 @@ export class OwnedScrapeAdapter implements ProviderAdapter {
     if (linkedinUrl) {
       try {
         const li = await scrapeLinkedIn(linkedinUrl);
-        if (li) {
-          profileJson = li;
+        const profile = (li as { profile?: Record<string, unknown> } | null)
+          ?.profile;
+        if (profile) {
           profileFetched = true;
-          textParts.push(JSON.stringify(li).slice(0, 6000));
+          // Rendered body text is the richest signal — hand it to the LLM as
+          // scraped content. Keep the small structured header as profileJson.
+          const { rawText, ...structured } = profile as {
+            rawText?: string;
+          } & Record<string, unknown>;
+          profileJson = structured;
+          if (typeof rawText === "string" && rawText.trim()) {
+            textParts.push(`LinkedIn profile:\n${rawText}`);
+          } else {
+            textParts.push(JSON.stringify(structured).slice(0, 6000));
+          }
         }
       } catch {
         // best-effort

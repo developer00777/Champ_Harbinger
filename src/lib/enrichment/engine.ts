@@ -12,6 +12,7 @@ import { buildFieldValue } from "./confidence";
 import { WaterfallOrchestrator, type AuditLogFn } from "./orchestrator";
 import { ProviderRegistry } from "./providers/base";
 import { OwnedScrapeAdapter } from "./providers/ownedScrape";
+import { LakeB2BAdapter } from "./providers/lakeb2bAdapter";
 import { verifyEmailOwned } from "./providers/emailGate";
 import { MasterDBWriter } from "./writeback";
 import {
@@ -43,9 +44,11 @@ function getRegistry(): ProviderRegistry {
   if (cachedRegistry) return cachedRegistry;
   const settings = getSettings();
   const registry = new ProviderRegistry(settings);
+  // LakeB2B is the pinned primary (orchestrator.PINNED_PRIMARY); it no-ops
+  // gracefully when neither a real key nor mock mode is configured, so the
+  // engine still runs owned-only on one OpenRouter key.
+  registry.register(new LakeB2BAdapter());
   registry.register(new OwnedScrapeAdapter());
-  // LakeB2B (pinned primary) and optional paid vendor adapters are registered
-  // in later phases; until then the engine runs owned-only on one OpenRouter key.
   cachedRegistry = registry;
   return registry;
 }
@@ -66,7 +69,13 @@ export interface EnrichContactInput {
   maxTier?: Tier;
   budgetUsd?: number | null;
   writeBack?: boolean;
-  clerkUserId: string;
+  /**
+   * Clerk user for per-user key resolution + the waterfall's private audit
+   * tables. Optional: when absent (e.g. an unauthenticated chat tool) the engine
+   * runs on server env keys and skips its private persistence, but STILL syncs
+   * the additive result into the shared knowledge graph.
+   */
+  clerkUserId?: string;
   clerkOrgId?: string | null;
 }
 
@@ -113,7 +122,7 @@ function seedToContact(seed: ContactSeed): Contact {
  * call AND logs cost to api_usage for billable calls.
  */
 function makeAuditLog(
-  clerkUserId: string,
+  clerkUserId: string | undefined,
   clerkOrgId: string | null,
 ): AuditLogFn {
   return async (row: Record<string, unknown>) => {
@@ -145,7 +154,7 @@ function makeAuditLog(
     }
 
     const cost = Number(row.costUsd ?? 0);
-    if (cost > 0) {
+    if (cost > 0 && clerkUserId) {
       trackUsage({
         service: "enrichment",
         operation: `provider:${String(row.provider ?? "unknown")}`,
@@ -165,7 +174,7 @@ function makeAuditLog(
 
 function buildOrchestrator(
   registry: ProviderRegistry,
-  clerkUserId: string,
+  clerkUserId: string | undefined,
   clerkOrgId: string | null,
 ): WaterfallOrchestrator {
   return new WaterfallOrchestrator({
@@ -201,10 +210,12 @@ function bestValue(contact: Contact, field: string): string | null {
 async function persistContactAndJob(
   contact: Contact,
   result: EnrichmentResult,
-  clerkUserId: string,
+  clerkUserId: string | undefined,
   clerkOrgId: string | null,
 ): Promise<void> {
-  if (!contact.contactId) return;
+  // The private audit tables (enrichment_contacts/jobs) require a user; without
+  // one we skip them. The shared knowledge-graph sync still runs (see caller).
+  if (!contact.contactId || !clerkUserId) return;
   const email = getValue(contact, "email");
   try {
     await adminDb
@@ -308,6 +319,23 @@ export async function enrichContact(
       result.notes.push(
         `Wrote ${wb.fieldsWritten.length} field(s) to the owned master (rollback token ${wb.rollbackToken}).`,
       );
+    }
+  }
+
+  // Sync the provenance-merged result into the production knowledge graph
+  // (people / organizations) so outreach + personalization read it. Additive:
+  // LakeB2B and LinkedIn/web land in their own enrichment_data subtrees. Runs
+  // whenever we gathered anything, not just on acceptance, so partial signal
+  // still grows the graph. Best-effort — never fails the enrichment.
+  const gatheredSomething =
+    Object.keys(contact.fields).length > 0 ||
+    Object.keys(contact.firmographics).length > 0;
+  if ((input.writeBack ?? true) && gatheredSomething) {
+    try {
+      const { syncToKnowledgeBase } = await import("./knowledgeBaseSync");
+      await syncToKnowledgeBase(contact);
+    } catch {
+      // knowledge-graph sync is best-effort.
     }
   }
 
