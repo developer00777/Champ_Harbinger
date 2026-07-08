@@ -73,4 +73,35 @@ describe("brightDataFetchHtml", () => {
       brightDataFetchHtml("https://www.linkedin.com/in/jane-doe/"),
     ).rejects.toThrow(/Bright Data 403/);
   });
+
+  it("retries on an empty 200 body (Web Unlocker cold start), then returns content", async () => {
+    process.env.BRIGHTDATA_RETRY_DELAY_MS = "0";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response("<html><h1>Jane Doe</h1></html>", { status: 200 }),
+      );
+
+    const html = await brightDataFetchHtml(
+      "https://www.linkedin.com/in/jane-doe/",
+    );
+    expect(html).toContain("Jane Doe");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns empty string after all attempts are empty so the caller can fall back", async () => {
+    process.env.BRIGHTDATA_RETRY_DELAY_MS = "0";
+    process.env.BRIGHTDATA_MAX_ATTEMPTS = "2";
+    // Fresh Response per call — a Response body can only be read once.
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("", { status: 200 }));
+
+    const html = await brightDataFetchHtml(
+      "https://www.linkedin.com/in/jane-doe/",
+    );
+    expect(html).toBe("");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

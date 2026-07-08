@@ -40,13 +40,26 @@ export function isBrightDataConfigured(): boolean {
 export interface BrightDataFetchOptions {
   /** Hard request timeout in seconds (default 30). */
   timeoutSec?: number;
+  /**
+   * Total attempts on an empty 200 body. Web Unlocker occasionally returns an
+   * empty response on the first (cold) request for a hard target like LinkedIn,
+   * then succeeds on retry. Default 3 (env BRIGHTDATA_MAX_ATTEMPTS).
+   */
+  maxAttempts?: number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
  * Fetch a URL's rendered HTML through Bright Data's Web Unlocker.
  *
- * Only the target URL is sent to Bright Data. Throws when unconfigured or when
- * the request fails — callers guard with isBrightDataConfigured() and/or catch.
+ * Only the target URL is sent to Bright Data. Retries on an empty 200 body (a
+ * known Web Unlocker cold-start behavior on hard targets like LinkedIn) up to
+ * maxAttempts, then returns "" so the caller can fall back. Throws when
+ * unconfigured or on a non-OK HTTP status — callers guard with
+ * isBrightDataConfigured() and/or catch.
  */
 export async function brightDataFetchHtml(
   url: string,
@@ -62,23 +75,37 @@ export async function brightDataFetchHtml(
 
   const timeoutSec =
     opts.timeoutSec ?? (Number(process.env.BRIGHTDATA_TIMEOUT_SEC) || 30);
-
-  const res = await fetchWithTimeout(
-    REQUEST_ENDPOINT,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ zone, url, format: "raw" }),
-    },
-    (timeoutSec + 20) * 1000,
+  const maxAttempts = Math.max(
+    1,
+    opts.maxAttempts ?? (Number(process.env.BRIGHTDATA_MAX_ATTEMPTS) || 3),
   );
+  const retryDelayMs = Number(process.env.BRIGHTDATA_RETRY_DELAY_MS) || 1500;
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Bright Data ${res.status}: ${detail.slice(0, 300)}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetchWithTimeout(
+      REQUEST_ENDPOINT,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ zone, url, format: "raw" }),
+      },
+      (timeoutSec + 20) * 1000,
+    );
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Bright Data ${res.status}: ${detail.slice(0, 300)}`);
+    }
+
+    const body = await res.text();
+    if (body) return body;
+
+    // Empty 200: Web Unlocker cold-start / transient block. Retry, then give up.
+    if (attempt < maxAttempts) await sleep(retryDelayMs);
   }
-  return res.text();
+
+  return "";
 }
