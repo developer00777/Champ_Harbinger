@@ -13,6 +13,8 @@ import { WaterfallOrchestrator, type AuditLogFn } from "./orchestrator";
 import { ProviderRegistry } from "./providers/base";
 import { OwnedScrapeAdapter } from "./providers/ownedScrape";
 import { LakeB2BAdapter } from "./providers/lakeb2bAdapter";
+import { ApolloAdapter } from "./providers/apolloAdapter";
+import { PeopleDataLabsAdapter } from "./providers/peopleDataLabsAdapter";
 import { verifyEmailOwned } from "./providers/emailGate";
 import { MasterDBWriter } from "./writeback";
 import {
@@ -49,6 +51,11 @@ function getRegistry(): ProviderRegistry {
   // engine still runs owned-only on one OpenRouter key.
   registry.register(new LakeB2BAdapter());
   registry.register(new OwnedScrapeAdapter());
+  // Paid data-API providers (escalation tiers). Each no-ops gracefully until its
+  // key is configured (env or per-user BYOK), and only runs for still-missing
+  // required fields per the config-driven provider priority list.
+  registry.register(new ApolloAdapter());
+  registry.register(new PeopleDataLabsAdapter());
   cachedRegistry = registry;
   return registry;
 }

@@ -5,6 +5,8 @@ import { schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { XService } from "@/lib/services/x-service";
 import { enrichContact as runWaterfall } from "@/lib/enrichment/engine";
+import { assertWithinBudget } from "@/lib/budget/guard";
+import { budgetErrorResponse } from "@/lib/budget/respond";
 import {
   mergeEnrichmentData,
   isRecentlyEnriched,
@@ -30,6 +32,16 @@ export async function POST(request: Request) {
   const { contactId } = body as { contactId: string };
   if (!contactId) {
     return Response.json({ error: "contactId is required" }, { status: 400 });
+  }
+
+  // Enforce the user's weekly credit limit before running the waterfall (which
+  // can escalate to paid data APIs). Blocked users get a 402.
+  try {
+    await assertWithinBudget({ userId });
+  } catch (err) {
+    const blocked = budgetErrorResponse(err);
+    if (blocked) return blocked;
+    throw err;
   }
 
   // contactId may be a campaign_people link ID -- resolve to person.

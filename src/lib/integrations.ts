@@ -217,6 +217,36 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Add LAKEB2B_API_KEY to .env.local or paste it in Settings → Keys",
   },
   {
+    id: "apollo",
+    name: "Apollo",
+    category: "enrichment",
+    severity: "optional",
+    feature:
+      "Paid people/company enrichment in the waterfall (email, title, LinkedIn, firmographics)",
+    consequence:
+      "The waterfall stops at the owned tiers + LakeB2B; Apollo is skipped and fields it would fill stay missing.",
+    envVars: ["APOLLO_API_KEY"],
+    keyName: "apollo_api_key",
+    signupUrl: "https://www.apollo.io",
+    keysUrl: "https://developer.apollo.io/keys",
+    fixHint: "Add APOLLO_API_KEY to .env.local or paste it in Settings → Keys",
+  },
+  {
+    id: "pdl",
+    name: "People Data Labs",
+    category: "enrichment",
+    severity: "optional",
+    feature:
+      "Paid person enrichment in the waterfall (job title, work email, LinkedIn, company)",
+    consequence:
+      "The waterfall skips PDL; person fields it would fill stay missing.",
+    envVars: ["PDL_API_KEY"],
+    keyName: "pdl_api_key",
+    signupUrl: "https://www.peopledatalabs.com",
+    keysUrl: "https://dashboard.peopledatalabs.com/api-keys",
+    fixHint: "Add PDL_API_KEY to .env.local or paste it in Settings → Keys",
+  },
+  {
     id: "jobs-aggregator",
     name: "Job Boards (Greenhouse/Lever/Ashby)",
     category: "enrichment",
