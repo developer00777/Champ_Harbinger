@@ -6,6 +6,7 @@ import { WaterfallOrchestrator } from "./orchestrator";
 import { gateEmail } from "./providers/emailGate";
 import { ProviderRegistry } from "./providers/base";
 import { OwnedScrapeAdapter } from "./providers/ownedScrape";
+import { MockLakeB2BAdapter } from "./providers/lakeb2bMock";
 import { MasterDBWriter, type MasterStore } from "./writeback";
 import { JobStatus, makeContact, Tier } from "./types";
 
@@ -152,5 +153,61 @@ describe("owned-only enrichment end-to-end (one OpenRouter key)", () => {
     expect(wb?.fieldsWritten).not.toContain("title");
     expect(upserts[0].email).toBe("jane@acme.com");
     expect(upserts[0].linkedinUrl).toBe("https://www.linkedin.com/in/jane-doe");
+  });
+});
+
+/**
+ * The pinned LakeB2B primary (mock) runs AHEAD of the configurable priority
+ * list. This proves the "LakeB2B first" rule from spec §5 is observable through
+ * the real orchestrator once the adapter is registered.
+ */
+describe("LakeB2B pinned primary (mock adapter)", () => {
+  it("runs lakeb2b first and fills fields from its record", async () => {
+    const reg = new ProviderRegistry(settings);
+    reg.register(new MockLakeB2BAdapter({ enabled: true }));
+    const orch = new WaterfallOrchestrator({
+      registry: reg,
+      settings,
+      verifyEmail: (email) => gateEmail(email, { mxCheck: async () => true }),
+    });
+    const contact = makeContact({
+      contactId: "33333333-3333-3333-3333-333333333333",
+      fullName: "Jane Doe",
+      domain: "acme.com",
+      company: "Acme",
+    });
+    const result = await orch.run(contact, {
+      requiredFields: ["email", "title", "seniority"],
+    });
+
+    const providersCalled = result.tiersAttempted.flatMap(
+      (a) => a.providersCalled,
+    );
+    expect(providersCalled).toEqual(["lakeb2b"]);
+    expect(result.tiersAttempted[0].tier).toBe(Tier.T0Master);
+    expect(result.fields.email.value).toBe("jane.doe@acme.com");
+    expect(result.fields.title.value).toBeTruthy();
+    expect(result.fields.seniority.value).toBeTruthy();
+    expect(result.totalCostUsd).toBe(0);
+  });
+
+  it("is skipped entirely when the mock flag is off", async () => {
+    const reg = new ProviderRegistry(settings);
+    reg.register(new MockLakeB2BAdapter({ enabled: false }));
+    const orch = new WaterfallOrchestrator({ registry: reg, settings });
+    const contact = makeContact({
+      contactId: "44444444-4444-4444-4444-444444444444",
+      fullName: "Jane Doe",
+      domain: "acme.com",
+      company: "Acme",
+    });
+    const result = await orch.run(contact, {
+      requiredFields: ["email", "title"],
+    });
+    const providersCalled = result.tiersAttempted.flatMap(
+      (a) => a.providersCalled,
+    );
+    expect(providersCalled).not.toContain("lakeb2b");
+    expect(result.status).toBe(JobStatus.Exhausted);
   });
 });

@@ -12,6 +12,7 @@ import { buildFieldValue } from "./confidence";
 import { WaterfallOrchestrator, type AuditLogFn } from "./orchestrator";
 import { ProviderRegistry } from "./providers/base";
 import { OwnedScrapeAdapter } from "./providers/ownedScrape";
+import { MockLakeB2BAdapter } from "./providers/lakeb2bMock";
 import { verifyEmailOwned } from "./providers/emailGate";
 import { MasterDBWriter } from "./writeback";
 import {
@@ -44,8 +45,15 @@ function getRegistry(): ProviderRegistry {
   const settings = getSettings();
   const registry = new ProviderRegistry(settings);
   registry.register(new OwnedScrapeAdapter());
-  // LakeB2B (pinned primary) and optional paid vendor adapters are registered
-  // in later phases; until then the engine runs owned-only on one OpenRouter key.
+  // LakeB2B is the pinned primary (spec §5). Until the real API contract lands
+  // (blocked on Sundar, §7), a deterministic mock adapter stands in so the whole
+  // tool is demoable with "LakeB2B first". It self-disables unless LAKEB2B_MOCK
+  // is set, so owned-only runs are untouched; the real adapter drops in here
+  // behind the same interface with no orchestrator change.
+  registry.register(new MockLakeB2BAdapter());
+  // Optional paid vendor adapters (proxycurl/pdl/apollo/zoominfo) register in
+  // later phases; each no-ops without its key, so the engine still runs
+  // owned-only on one OpenRouter key.
   cachedRegistry = registry;
   return registry;
 }
