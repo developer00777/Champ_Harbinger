@@ -2,10 +2,13 @@
 
 import { usePathname } from "next/navigation";
 import {
+  ClipboardList,
   Eye,
   LayoutDashboard,
   Mail,
   MessageCircle,
+  RefreshCw,
+  Sparkles,
   Target,
   UserCircle,
   Zap,
@@ -27,6 +30,9 @@ const navItems: NavItem[] = [
   { title: "Overview", url: "/dashboard", icon: LayoutDashboard },
   { title: "Chat", url: "/chat", icon: MessageCircle },
   { title: "Campaigns", url: "/campaigns", icon: Target },
+  { title: "Enrich", url: "/enrich", icon: Sparkles },
+  { title: "Results", url: "/results", icon: ClipboardList },
+  { title: "Sync queue", url: "/sync", icon: RefreshCw },
   { title: "Signals", url: "/signals", icon: Zap },
   { title: "Tracking", url: "/tracking", icon: Eye },
   { title: "Outreach", url: "/outreach", icon: Mail },
