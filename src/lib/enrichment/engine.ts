@@ -307,6 +307,12 @@ export async function enrichContact(
     budgetUsd: input.budgetUsd ?? null,
   });
 
+  // Persist the working contact + provenance + job FIRST: the master
+  // writeback log's contactId FK references enrichment_contacts, so the row
+  // must exist before writeBack() logs against it (otherwise the audit +
+  // rollback trail is silently dropped and masterWriteback misreports false).
+  await persistContactAndJob(contact, result, input.clerkUserId, clerkOrgId);
+
   // Close the loop on acceptance: build up the owned master DB.
   if ((input.writeBack ?? true) && result.status === JobStatus.Accepted) {
     const writer = new MasterDBWriter();
@@ -319,7 +325,6 @@ export async function enrichContact(
     }
   }
 
-  await persistContactAndJob(contact, result, input.clerkUserId, clerkOrgId);
   return { ...result, summary: summaryText(result) };
 }
 
