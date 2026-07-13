@@ -6,8 +6,9 @@ import { Models } from "@/lib/ai/models";
 import { recordAiUsage } from "@/lib/ai/usage";
 import { webSearch } from "@/lib/search/web-search";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
-import { verifyCompanies } from "@/lib/lakeb2b/verifier";
-import type { Company } from "@/lib/lakeb2b/schemas";
+import { verifyCompanies, verifyPeople } from "@/lib/lakeb2b/verifier";
+import type { Company, Person } from "@/lib/lakeb2b/schemas";
+import { normalizeLinkedInUrl } from "@/lib/enrichment/providers/linkedinResolver";
 import type { DiscoveryProvider } from "./types";
 
 // Directories / social / aggregators that aren't a company's own site.
@@ -107,13 +108,87 @@ async function normalizeCompany(
   }
 }
 
+/** Turn a linkedin slug ("jane-doe-1a2b") into a display name ("Jane Doe"). */
+function slugToName(slug: string): string {
+  return slug
+    .replace(/-?[0-9a-f]{6,}$/i, "") // drop the trailing hash LinkedIn appends
+    .replace(/-\d+$/, "")
+    .split("-")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ")
+    .trim();
+}
+
+/**
+ * Best-effort parse of a person from a LinkedIn search hit. Search engines
+ * render LinkedIn /in/ results as "First Last - Title - Company | LinkedIn",
+ * which we split into name/title/company. Returns null for non-/in/ results
+ * (company pages, posts) so only real people flow through.
+ */
+function parsePersonFromResult(r: {
+  url?: string;
+  title?: string;
+  content?: string;
+}): Person | null {
+  if (!r.url) return null;
+  const linkedin = normalizeLinkedInUrl(r.url);
+  if (!linkedin) return null;
+  const slug = linkedin.replace("https://www.linkedin.com/in/", "");
+
+  const cleaned = (r.title ?? "").replace(/\s*[|·-]\s*LinkedIn.*$/i, "").trim();
+  const segments = cleaned
+    .split(/\s+[-–—|·]\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const fullName = segments[0] || slugToName(slug);
+  if (!fullName) return null;
+
+  return {
+    id: `web-${slug}`,
+    full_name: fullName,
+    title: segments[1] || undefined,
+    company_name: segments[2] || undefined,
+    linkedin_url: linkedin,
+  } as Person;
+}
+
+async function generatePeopleSearchQueries(
+  criteria: string,
+): Promise<string[]> {
+  const schema = z.object({
+    queries: z.array(z.string()).describe("3 to 5 web search queries"),
+  });
+  const startedAt = Date.now();
+  const result = await generateObject({
+    model: getModelSync(Models.classification),
+    schema,
+    prompt: `Turn this prospecting criteria into 3-5 web search queries that surface INDIVIDUAL people's public LinkedIn profiles (linkedin.com/in/...) matching it. Include role/title terms and company or industry context; vary the angle.\n\nCriteria: ${criteria}`,
+  });
+  recordAiUsage(result, {
+    operation: "discovery-people-query-gen",
+    costModel: "haiku",
+    modelLabel: Models.classification,
+    startedAt,
+  });
+  return result.object.queries
+    .filter((q) => q.trim())
+    .map((q) =>
+      /site:linkedin\.com\/in/i.test(q) ? q : `${q} site:linkedin.com/in`,
+    )
+    .slice(0, 5);
+}
+
 /**
  * Public-web discovery: LLM query-gen → SearXNG → dedupe to company domains →
  * extract each homepage → LLM-normalize into Company → ICP-verify (reusing the
  * same verifier as LakeB2B). Returns [] gracefully when SearXNG is unconfigured.
  *
- * People discovery from public web is unreliable without authenticated profile
- * access, so discoverPeople returns [] (LakeB2B is the people path when keyed).
+ * People discovery is best-effort: it mines public LinkedIn /in/ search hits,
+ * parses name/title/company from the result, dedupes, and ICP-verifies them.
+ * Lower reliability than a keyed data provider, but it lets discovery work
+ * without a LakeB2B key and composes additively with LakeB2B when both exist.
  */
 export function makePublicWebProvider(): DiscoveryProvider {
   const extractor = new WebExtractionService();
@@ -149,8 +224,26 @@ export function makePublicWebProvider(): DiscoveryProvider {
 
       return verifyCompanies(candidates, criteria);
     },
-    async discoverPeople() {
-      return [];
+    async discoverPeople(criteria, max) {
+      const queries = await generatePeopleSearchQueries(criteria);
+      const seen = new Set<string>();
+      const candidates: Person[] = [];
+      const cap = max * 3;
+
+      for (const q of queries) {
+        const results = await webSearch(q, 10);
+        for (const r of results) {
+          const person = parsePersonFromResult(r);
+          if (!person || !person.linkedin_url) continue;
+          if (seen.has(person.linkedin_url)) continue;
+          seen.add(person.linkedin_url);
+          candidates.push(person);
+        }
+        if (candidates.length >= cap) break;
+      }
+
+      if (candidates.length === 0) return [];
+      return verifyPeople(candidates.slice(0, cap), criteria);
     },
   };
 }

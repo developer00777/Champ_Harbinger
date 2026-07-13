@@ -3,8 +3,10 @@ import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { eq } from "drizzle-orm";
-import { LinkedinService } from "@/lib/services/linkedin-service";
 import { XService } from "@/lib/services/x-service";
+import { enrichContact as runWaterfall } from "@/lib/enrichment/engine";
+import { assertWithinBudget } from "@/lib/budget/guard";
+import { budgetErrorResponse } from "@/lib/budget/respond";
 import {
   mergeEnrichmentData,
   isRecentlyEnriched,
@@ -30,6 +32,16 @@ export async function POST(request: Request) {
   const { contactId } = body as { contactId: string };
   if (!contactId) {
     return Response.json({ error: "contactId is required" }, { status: 400 });
+  }
+
+  // Enforce the user's weekly credit limit before running the waterfall (which
+  // can escalate to paid data APIs). Blocked users get a 402.
+  try {
+    await assertWithinBudget({ userId });
+  } catch (err) {
+    const blocked = budgetErrorResponse(err);
+    if (blocked) return blocked;
+    throw err;
   }
 
   // contactId may be a campaign_people link ID -- resolve to person.
@@ -68,6 +80,7 @@ export async function POST(request: Request) {
       twitterUrl: schema.people.twitterUrl,
       enrichmentData: schema.people.enrichmentData,
       orgName: schema.organizations.name,
+      orgDomain: schema.organizations.domain,
     })
     .from(schema.people)
     .leftJoin(
@@ -110,74 +123,62 @@ export async function POST(request: Request) {
       .set({ enrichmentStatus: "in_progress" })
       .where(eq(schema.people.id, personId));
 
-    const enrichmentData: Record<string, unknown> = {};
     const errors: string[] = [];
-    const promises: Promise<void>[] = [];
 
-    if (personRow.linkedinUrl) {
-      promises.push(
-        (async () => {
-          try {
-            const linkedin = new LinkedinService();
-            const scrapeResult = await linkedin.scrapeProfile(
-              personRow.linkedinUrl!,
-            );
-            enrichmentData.linkedin = {
-              profileInfo: scrapeResult.profile || null,
-              posts: scrapeResult.posts.slice(0, 10),
-            };
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Unknown error";
-            console.error(`[enrich API] LinkedIn scrape failed: ${msg}`);
-            errors.push(`LinkedIn: ${msg}`);
-          }
-        })(),
-      );
+    // LinkedIn + company-web + LakeB2B via the provenance-aware waterfall. It
+    // resolves/scrapes the public LinkedIn profile, runs LakeB2B as the pinned
+    // primary, merges by confidence/recency, and syncs an ADDITIVE,
+    // source-namespaced enrichment_data (enrichment_data.linkedin / .lakeb2b /
+    // .provenance) back into this person — LakeB2B and LinkedIn never clobber.
+    try {
+      await runWaterfall({
+        name: personRow.name ?? null,
+        company: personRow.orgName ?? null,
+        domain: personRow.orgDomain ?? null,
+        linkedin: personRow.linkedinUrl ?? null,
+        clerkUserId: userId,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error(`[enrich API] Waterfall enrichment failed: ${msg}`);
+      errors.push(`Enrichment: ${msg}`);
     }
 
+    // Twitter/X is not part of the owned waterfall; enrich + merge separately
+    // (additive: it lands under enrichment_data.twitter).
     if (personRow.twitterUrl) {
-      promises.push(
-        (async () => {
-          try {
-            const x = new XService();
-            const result = await x.enrichTwitterProfile(personRow.twitterUrl!);
-            enrichmentData.twitter = {
-              user: result.user,
-              tweets: result.tweets.slice(0, 10),
-            };
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Unknown error";
-            console.error(`[enrich API] Twitter enrich failed: ${msg}`);
-            errors.push(`Twitter: ${msg}`);
-          }
-        })(),
-      );
+      try {
+        const x = new XService();
+        const result = await x.enrichTwitterProfile(personRow.twitterUrl);
+        await mergeEnrichmentData("people", personId, {
+          twitter: {
+            user: result.user,
+            tweets: result.tweets.slice(0, 10),
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        console.error(`[enrich API] Twitter enrich failed: ${msg}`);
+        errors.push(`Twitter: ${msg}`);
+      }
     }
 
-    if (promises.length === 0) {
+    const [after] = await adminDb
+      .select({ enrichmentData: schema.people.enrichmentData })
+      .from(schema.people)
+      .where(eq(schema.people.id, personId))
+      .limit(1);
+    const enrichmentData =
+      (after?.enrichmentData as Record<string, unknown>) || {};
+    const status =
+      Object.keys(enrichmentData).length > 0 ? "enriched" : "failed";
+
+    if (status === "failed") {
       await adminDb
         .update(schema.people)
         .set({ enrichmentStatus: "failed" })
         .where(eq(schema.people.id, personId));
-
-      return Response.json({
-        contactId: personId,
-        status: "failed",
-        errors: ["No enrichment sources available"],
-      });
     }
-
-    await Promise.all(promises);
-
-    const status =
-      Object.keys(enrichmentData).length > 0 ? "enriched" : "failed";
-
-    await mergeEnrichmentData(
-      "people",
-      personId,
-      enrichmentData,
-      status as "enriched" | "failed",
-    );
 
     return Response.json({
       contactId: personId,

@@ -3,7 +3,6 @@ import { z } from "zod";
 import { eq, inArray, and } from "drizzle-orm";
 import { adminDb as db } from "@/lib/db/admin";
 import { schema } from "@/db";
-import { LinkedinService } from "@/lib/services/linkedin-service";
 import { XService } from "@/lib/services/x-service";
 import { WebExtractionService } from "@/lib/services/web-extraction-service";
 import { GooglePlacesService } from "@/lib/services/google-places-service";
@@ -64,8 +63,14 @@ async function enrichContactById(
       linkedinUrl: schema.people.linkedinUrl,
       twitterUrl: schema.people.twitterUrl,
       organizationId: schema.people.organizationId,
+      orgName: schema.organizations.name,
+      orgDomain: schema.organizations.domain,
     })
     .from(schema.people)
+    .leftJoin(
+      schema.organizations,
+      eq(schema.people.organizationId, schema.organizations.id),
+    )
     .where(eq(schema.people.id, personId))
     .limit(1);
 
@@ -78,39 +83,46 @@ async function enrichContactById(
     .set({ enrichmentStatus: "in_progress" })
     .where(eq(schema.people.id, personId));
 
-  const enrichmentData: Record<string, unknown> = {};
   const errors: string[] = [];
   const promises: Promise<void>[] = [];
 
-  if (linkedinFinal) {
-    promises.push(
-      (async () => {
-        try {
-          const linkedin = new LinkedinService();
-          const scrapeResult = await linkedin.scrapeProfile(linkedinFinal);
-          enrichmentData.linkedin = {
-            profileInfo: scrapeResult.profile || null,
-            posts: scrapeResult.posts.slice(0, 10),
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Unknown error";
-          console.error(`[enrichContact] LinkedIn scrape failed: ${msg}`);
-          errors.push(`LinkedIn: ${msg}`);
-        }
-      })(),
-    );
-  }
+  // LinkedIn + company-web + LakeB2B via the provenance-aware waterfall. It
+  // syncs an ADDITIVE, source-namespaced enrichment_data
+  // (enrichment_data.linkedin / .lakeb2b / .provenance) into this person, so
+  // LakeB2B and the public LinkedIn scrape augment each other, never clobber.
+  promises.push(
+    (async () => {
+      try {
+        const { enrichContact: runWaterfall } =
+          await import("@/lib/enrichment/engine");
+        await runWaterfall({
+          name: person?.name ?? null,
+          company: person?.orgName ?? null,
+          domain: person?.orgDomain ?? null,
+          linkedin: linkedinFinal ?? null,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        console.error(`[enrichContact] Waterfall enrichment failed: ${msg}`);
+        errors.push(`Enrichment: ${msg}`);
+      }
+    })(),
+  );
 
+  // Twitter/X is not part of the owned waterfall; enrich + merge separately
+  // (additive: it lands under enrichment_data.twitter).
   if (twitterFinal) {
     promises.push(
       (async () => {
         try {
           const x = new XService();
           const result = await x.enrichTwitterProfile(twitterFinal);
-          enrichmentData.twitter = {
-            user: result.user,
-            tweets: result.tweets.slice(0, 10),
-          };
+          await mergeEnrichmentData("people", personId, {
+            twitter: {
+              user: result.user,
+              tweets: result.tweets.slice(0, 10),
+            },
+          });
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error";
           console.error(`[enrichContact] Twitter enrich failed: ${msg}`);
@@ -120,35 +132,24 @@ async function enrichContactById(
     );
   }
 
-  if (linkedinFinal) {
-    promises.push(
-      (async () => {
-        try {
-          if (!extractWebContent.execute)
-            throw new Error("extractWebContent.execute not available");
-          const result = await extractWebContent.execute(
-            { url: linkedinFinal, includeLinks: false },
-            { toolCallId: `enrich-contact-${personId}`, messages: [] },
-          );
-          enrichmentData.linkedin_profile = result;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Unknown error";
-          errors.push(`LinkedIn profile: ${msg}`);
-        }
-      })(),
-    );
-  }
-
   await Promise.all(promises);
 
+  // Re-read the merged blob the waterfall + twitter wrote to decide status.
+  const [afterRow] = await db
+    .select({ enrichmentData: schema.people.enrichmentData })
+    .from(schema.people)
+    .where(eq(schema.people.id, personId))
+    .limit(1);
+  const enrichmentData =
+    (afterRow?.enrichmentData as Record<string, unknown>) || {};
   const status = Object.keys(enrichmentData).length > 0 ? "enriched" : "failed";
 
-  await mergeEnrichmentData(
-    "people",
-    personId,
-    enrichmentData,
-    status as "enriched" | "failed",
-  );
+  if (status === "failed") {
+    await db
+      .update(schema.people)
+      .set({ enrichmentStatus: "failed" })
+      .where(eq(schema.people.id, personId));
+  }
 
   // ── Email discovery ──────────────────────────────────────────────────
   // If the contact has no email after enrichment, try to find one.

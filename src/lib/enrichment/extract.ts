@@ -28,6 +28,24 @@ const ExtractionSchema = z.object({
   linkedin: z.string().nullable().optional(),
   /** Recent social/news posts, used later for engagement / intent signals. */
   recentPosts: z.array(z.string()).nullable().optional(),
+  /**
+   * Personalization signals lifted from a public profile (LinkedIn/X). These
+   * feed outreach personalization; they are NOT identity/contact fields, so they
+   * ride in firmographics.personalization rather than the canonical field store.
+   */
+  personalization: z
+    .object({
+      about: z.string().nullable().optional(),
+      location: z.string().nullable().optional(),
+      current_company: z.string().nullable().optional(),
+      current_role: z.string().nullable().optional(),
+      experience: z.array(z.string()).nullable().optional(),
+      education: z.array(z.string()).nullable().optional(),
+      skills: z.array(z.string()).nullable().optional(),
+      recent_activity: z.array(z.string()).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
   firmographics: z
     .object({
       company_name: z.string().nullable().optional(),
@@ -94,6 +112,7 @@ function buildPrompt(input: ExtractInput): string {
     "You extract B2B contact and company facts from scraped public web content.",
     "Only return facts clearly supported by the content. Use null for anything not present.",
     "Prefer a work email over a personal one. Normalize a LinkedIn URL to its canonical https form.",
+    "When the content is a LinkedIn/social profile, also fill `personalization` with what the page states: a short `about`/summary, `location`, `current_company`/`current_role`, past `experience` and `education` as short strings, `skills`, and any `recent_activity`/posts. Never invent these — omit or use null when absent.",
     seedLines ? `\nKnown identity:\n${seedLines}` : "",
     `\n\nScraped content:\n${input.scrapedText.slice(0, 12000)}${profile}`,
   ].join("");
@@ -193,6 +212,16 @@ export async function extractContactFields(
   }
   if (Array.isArray(data.recentPosts) && data.recentPosts.length > 0) {
     firmographics.recent_posts = data.recentPosts;
+  }
+
+  if (data.personalization && typeof data.personalization === "object") {
+    const personalization: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data.personalization)) {
+      if (!emptyish(v)) personalization[k] = v;
+    }
+    if (Object.keys(personalization).length > 0) {
+      firmographics.personalization = personalization;
+    }
   }
 
   return { fields, firmographics };
