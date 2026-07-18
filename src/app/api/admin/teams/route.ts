@@ -26,8 +26,12 @@ export async function POST(request: Request) {
     .values({
       name: input.name,
       weeklyLimitUsd: usdToNumeric(input.weeklyLimitUsd),
+      dailyLimitUsd: usdToNumeric(input.dailyLimitUsd),
       perUserDefaultWeeklyLimitUsd: usdToNumeric(
         input.perUserDefaultWeeklyLimitUsd,
+      ),
+      perUserDefaultDailyLimitUsd: usdToNumeric(
+        input.perUserDefaultDailyLimitUsd,
       ),
       hardStop: input.hardStop ?? true,
       updatedBy: userId,

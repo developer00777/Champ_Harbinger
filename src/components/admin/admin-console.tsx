@@ -13,6 +13,8 @@ import { TeamsTable } from "@/components/admin/teams-table";
 import { MembersTable } from "@/components/admin/members-table";
 import { InviteForm } from "@/components/admin/invite-form";
 import { TeamDialog } from "@/components/admin/team-dialog";
+import { UsageAnalytics } from "@/components/admin/usage-analytics";
+import { AppSettingsPanel } from "@/components/admin/app-settings-panel";
 
 export function AdminConsole({ initial }: { initial: AdminOverview }) {
   const router = useRouter();
@@ -83,10 +85,7 @@ export function AdminConsole({ initial }: { initial: AdminOverview }) {
             Create a team first to invite users into it.
           </p>
         ) : (
-          <InviteForm
-            teamOptions={teamOptions}
-            onInvited={() => refresh()}
-          />
+          <InviteForm teamOptions={teamOptions} onInvited={() => refresh()} />
         )}
       </SettingsSection>
 
@@ -102,6 +101,10 @@ export function AdminConsole({ initial }: { initial: AdminOverview }) {
           }}
         />
       </SettingsSection>
+
+      <UsageAnalytics />
+
+      <AppSettingsPanel />
 
       <TeamDialog
         open={createOpen}
