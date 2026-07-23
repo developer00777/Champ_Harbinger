@@ -7,17 +7,65 @@ import {
   buildEmailSystemPrompt,
   type ComposedEmail,
 } from "./skill";
+import {
+  buildGenericFallbackEmail,
+  checkEmailGuardrails,
+  DEFAULT_BODY_WORD_LIMIT,
+  type GuardrailViolation,
+  type PrimaryHook,
+} from "./guardrails";
 import type { EmailSkill } from "@/lib/types/email-skill";
 
 type UserPromptInput = Parameters<typeof buildComposeUserPrompt>[0];
 
 export type ComposeInput = UserPromptInput & {
   skills?: EmailSkill[];
+  /**
+   * Person to fetch a verified `PrimaryHook` for (via Port A's
+   * knowledge-graph retrieval, dynamically imported — see
+   * `fetchPrimaryHook` below). Ignored if `personalizationHook` is passed
+   * explicitly.
+   */
+  personId?: string;
+  /** Pre-fetched hook, bypasses the personId lookup when supplied. */
+  personalizationHook?: PrimaryHook | null;
+  /** Hard cap on body word count. Defaults to DEFAULT_BODY_WORD_LIMIT. */
+  wordLimit?: number;
 };
 
 export type ComposeResult =
-  | { ok: true; email: ComposedEmail }
+  | {
+      ok: true;
+      email: ComposedEmail;
+      guardrails: {
+        wordCount: number;
+        regenerated: boolean;
+        usedFallback: boolean;
+        violations: GuardrailViolation[];
+      };
+    }
   | { ok: false; error: string };
+
+/**
+ * Dynamically imports Port A's knowledge-graph retrieval and fetches the
+ * verified primary hook for a person. Guarded exactly like other optional
+ * cross-module deps in this codebase (see e.g.
+ * src/lib/enrichment/engine.ts's knowledgeBaseSync import): the module may
+ * not exist on disk yet (built concurrently by a sibling agent), and this
+ * lookup is best-effort — personalization degrades gracefully to "no hook"
+ * rather than failing composition.
+ */
+async function fetchPrimaryHook(personId: string): Promise<PrimaryHook | null> {
+  try {
+    const { getPersonContext } =
+      await import("@/lib/knowledge-graph/retrieval");
+    const context = await getPersonContext(personId);
+    return context?.primaryHook ?? null;
+  } catch {
+    // Module not present yet, or lookup failed — compose without a hook.
+    return null;
+  }
+}
 
 /**
  * Single-email composition via generateObject. One focused Claude call per
@@ -33,21 +81,88 @@ export async function composeEmail(
   input: ComposeInput,
 ): Promise<ComposeResult> {
   try {
-    const { skills, ...userPromptInput } = input;
-    const { object } = await generateObject({
-      model: getModel(Models.personalization()),
-      schema: ComposedEmailSchema,
-      system: buildEmailSystemPrompt(skills ?? []),
-      prompt: buildComposeUserPrompt(userPromptInput),
-      providerOptions: {
-        anthropic: {
-          // Cache the stable system prompt across the fan-out batch.
-          cacheControl: { type: "ephemeral" },
+    const {
+      skills,
+      personId,
+      personalizationHook,
+      wordLimit,
+      ...userPromptInput
+    } = input;
+
+    const hook: PrimaryHook | null =
+      personalizationHook !== undefined
+        ? personalizationHook
+        : personId
+          ? await fetchPrimaryHook(personId)
+          : null;
+
+    const limit = wordLimit ?? DEFAULT_BODY_WORD_LIMIT;
+    const system = buildEmailSystemPrompt(skills ?? []);
+    const promptInput = { ...userPromptInput, primaryHook: hook };
+
+    const generate = (extra?: string) =>
+      generateObject({
+        model: getModel(Models.personalization()),
+        schema: ComposedEmailSchema,
+        system,
+        prompt: extra
+          ? `${buildComposeUserPrompt(promptInput)}\n\n${extra}`
+          : buildComposeUserPrompt(promptInput),
+        providerOptions: {
+          anthropic: {
+            // Cache the stable system prompt across the fan-out batch.
+            cacheControl: { type: "ephemeral" },
+          },
         },
+        maxOutputTokens: 1200,
+      });
+
+    let { object } = await generate();
+    let check = checkEmailGuardrails(object, { hook, wordLimit: limit });
+    let regenerated = false;
+    let usedFallback = false;
+
+    if (!check.ok) {
+      regenerated = true;
+      const violationSummary = check.violations
+        .map((v) => `- ${v.message}`)
+        .join("\n");
+      const retry = await generate(
+        `REGENERATE: your previous draft violated these hard rules and was rejected:\n${violationSummary}\nFix ALL of them. Stay under ${limit} words. Do not use fake-familiarity openers. End on a single low-commitment question.`,
+      );
+      object = retry.object;
+      check = checkEmailGuardrails(object, { hook, wordLimit: limit });
+    }
+
+    if (!check.ok) {
+      usedFallback = true;
+      const contact = userPromptInput.contact;
+      const company = userPromptInput.company;
+      const offering = userPromptInput.campaign?.offering;
+      object = buildGenericFallbackEmail({
+        recipientName: contact?.name ?? null,
+        recipientTitle: contact?.title ?? null,
+        companyName: company?.name ?? null,
+        senderName: userPromptInput.senderProfile?.name ?? null,
+        senderCompany: userPromptInput.senderProfile?.company ?? null,
+        offeringSummary:
+          offering && typeof offering === "object"
+            ? JSON.stringify(offering).slice(0, 200)
+            : null,
+      });
+      check = checkEmailGuardrails(object, { wordLimit: limit });
+    }
+
+    return {
+      ok: true,
+      email: object,
+      guardrails: {
+        wordCount: check.wordCount,
+        regenerated,
+        usedFallback,
+        violations: check.violations,
       },
-      maxOutputTokens: 1200,
-    });
-    return { ok: true, email: object };
+    };
   } catch (err) {
     return {
       ok: false,
