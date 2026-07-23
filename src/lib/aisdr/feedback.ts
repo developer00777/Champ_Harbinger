@@ -7,21 +7,10 @@ import { schema } from "@/db";
 
 /**
  * Captures human-review actions on AI-drafted replies (edit/approve/reject)
- * as structured training signal. This is meant to later feed Port B's prompt
- * taxonomy — see SCHEMA NEEDS below for the follow-up this module is a
- * stopgap for.
- *
- * NO NEW TABLE: `emailDrafts` has no dedicated feedback/diff/rejection-reason
- * column yet (only `aiReasoning`, which already holds the AI's OWN reasoning
- * for the draft and shouldn't be overwritten — Port B needs both the
- * original reasoning AND the human correction to compare them). We append a
- * structured, timestamped note to `aiReasoning` as a working stopgap so the
- * signal isn't lost, but this should move to a dedicated column/table.
- *
- * SCHEMA NEEDS (report to coordinator, do not add ourselves):
- *   - emailDrafts.reviewFeedback jsonb  — structured {action, diffs, reason,
- *     recordedAt} history, one row of truth instead of parsing appended text.
- *   - emailDrafts.rejectionReason text  — free-text reason captured on reject.
+ * as structured training signal, meant to later feed Port B's prompt
+ * taxonomy. Persisted to `emailDrafts.reviewFeedback` (structured history)
+ * and `emailDrafts.rejectionReason` (latest reject reason) — `aiReasoning`
+ * is left untouched since it holds the AI's own reasoning for the draft.
  */
 
 export type FeedbackAction = "approved" | "edited" | "rejected";
@@ -84,34 +73,37 @@ export function computeDiff(
 }
 
 /**
- * Persists a feedback record by appending a structured note to
- * `emailDrafts.aiReasoning`. Best-effort: failures are logged, not thrown —
- * losing training signal must never block the approve/reject/edit action
- * itself.
+ * Persists a feedback record onto `emailDrafts.reviewFeedback` (append) and
+ * `emailDrafts.rejectionReason` (latest reason, when rejecting). Best-effort:
+ * failures are logged, not thrown — losing training signal must never block
+ * the approve/reject/edit action itself.
  */
 export async function recordFeedback(record: FeedbackRecord): Promise<void> {
   try {
     const [existing] = await adminDb
-      .select({ aiReasoning: schema.emailDrafts.aiReasoning })
+      .select({ reviewFeedback: schema.emailDrafts.reviewFeedback })
       .from(schema.emailDrafts)
       .where(eq(schema.emailDrafts.id, record.draftId))
       .limit(1);
 
-    const note = JSON.stringify({
-      type: "aisdr_review_feedback",
+    const entry = {
       action: record.action,
       reason: record.reason ?? null,
       diffs: record.diffs ?? [],
       recordedAt: new Date().toISOString(),
-    });
+    };
 
-    const nextReasoning = existing?.aiReasoning
-      ? `${existing.aiReasoning}\n\n[FEEDBACK] ${note}`
-      : `[FEEDBACK] ${note}`;
+    const nextFeedback = [...(existing?.reviewFeedback ?? []), entry];
 
     await adminDb
       .update(schema.emailDrafts)
-      .set({ aiReasoning: nextReasoning, updatedAt: new Date() })
+      .set({
+        reviewFeedback: nextFeedback,
+        ...(record.action === "rejected"
+          ? { rejectionReason: record.reason ?? null }
+          : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(schema.emailDrafts.id, record.draftId));
   } catch (err) {
     console.error("[aisdr/feedback] failed to record feedback:", err);

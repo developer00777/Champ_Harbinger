@@ -247,6 +247,21 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Add PDL_API_KEY to .env.local or paste it in Settings → Keys",
   },
   {
+    id: "inboxkit",
+    name: "InboxKit",
+    category: "email",
+    severity: "optional",
+    feature:
+      "Cold-outreach domain + mailbox provisioning, warmup, and sending infra",
+    consequence:
+      "Domain/mailbox provisioning UI is disabled; only manually-connected mailboxes work.",
+    envVars: ["INBOXKIT_API_KEY"],
+    keyName: "inboxkit_api_key",
+    signupUrl: "https://inboxkit.com",
+    fixHint:
+      "Add INBOXKIT_API_KEY (and INBOXKIT_WORKSPACE_ID) to .env.local or paste it in Settings → Keys",
+  },
+  {
     id: "jobs-aggregator",
     name: "Job Boards (Greenhouse/Lever/Ashby)",
     category: "enrichment",

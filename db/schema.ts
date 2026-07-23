@@ -651,6 +651,13 @@ export const emailDrafts = pgTable(
     ),
     aiReasoning: text("ai_reasoning"),
     reviewStatus: text("review_status").default("pending"),
+    // Structured human-review signal (AISDR correction loop): each entry is
+    // {action, diffs, reason, recordedAt} — approve/edit/reject history used
+    // to refine the Writer's prompt taxonomy over time.
+    reviewFeedback: jsonb("review_feedback")
+      .$type<Array<Record<string, unknown>>>()
+      .default([]),
+    rejectionReason: text("rejection_reason"),
     ...timestamps,
   },
   (t) => ({

@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const { state } = vi.hoisted(() => {
   return {
     state: {
-      aiReasoning: null as string | null,
+      reviewFeedback: [] as Record<string, unknown>[],
       updateSetCalls: [] as Record<string, unknown>[],
     },
   };
@@ -22,11 +22,7 @@ vi.mock("@/lib/db/admin", () => ({
         where: vi.fn(() => ({
           limit: vi
             .fn()
-            .mockResolvedValue(
-              state.aiReasoning !== undefined
-                ? [{ aiReasoning: state.aiReasoning }]
-                : [],
-            ),
+            .mockResolvedValue([{ reviewFeedback: state.reviewFeedback }]),
         })),
       })),
     })),
@@ -80,11 +76,11 @@ describe("computeDiff", () => {
 
 describe("recordFeedback", () => {
   beforeEach(() => {
-    state.aiReasoning = "Original AI reasoning.";
+    state.reviewFeedback = [{ action: "edited", recordedAt: "earlier" }];
     state.updateSetCalls = [];
   });
 
-  it("appends a structured feedback note without discarding the original aiReasoning", async () => {
+  it("appends a structured feedback entry to reviewFeedback without discarding history", async () => {
     await recordFeedback({
       draftId: "draft1",
       action: "edited",
@@ -93,9 +89,22 @@ describe("recordFeedback", () => {
 
     expect(state.updateSetCalls).toHaveLength(1);
     const patch = state.updateSetCalls[0];
-    expect(patch.aiReasoning).toContain("Original AI reasoning.");
-    expect(patch.aiReasoning).toContain("[FEEDBACK]");
-    expect(patch.aiReasoning).toContain("edited");
+    const feedback = patch.reviewFeedback as Record<string, unknown>[];
+    expect(feedback).toHaveLength(2);
+    expect(feedback[0]).toEqual({ action: "edited", recordedAt: "earlier" });
+    expect(feedback[1]).toMatchObject({ action: "edited" });
+    expect(patch.rejectionReason).toBeUndefined();
+  });
+
+  it("sets rejectionReason when the action is rejected", async () => {
+    await recordFeedback({
+      draftId: "draft1",
+      action: "rejected",
+      reason: "not relevant",
+    });
+
+    const patch = state.updateSetCalls[0];
+    expect(patch.rejectionReason).toBe("not relevant");
   });
 
   it("never throws, even if the DB update fails", async () => {

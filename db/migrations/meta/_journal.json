@@ -78,6 +78,13 @@
       "when": 1784326455878,
       "tag": "0010_happy_sabretooth",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784830718926,
+      "tag": "0011_blushing_kronos",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "@/components/settings/settings-section";
 
 export function EmailSettings() {
@@ -15,6 +16,9 @@ export function EmailSettings() {
 
   const [fromName, setFromName] = useState("");
   const [replyTo, setReplyTo] = useState("");
+  const [warmIntroEmail, setWarmIntroEmail] = useState("");
+  const [warmIntroName, setWarmIntroName] = useState("");
+  const [aisdrMode, setAisdrMode] = useState<"review" | "auto">("review");
 
   const mountedRef = useRef(true);
 
@@ -32,6 +36,9 @@ export function EmailSettings() {
         setProviderName(data.provider_name ?? "stub");
         setFromName(data.settings.from_name ?? "");
         setReplyTo(data.settings.reply_to_email ?? "");
+        setWarmIntroEmail(data.settings.warm_intro_email ?? "");
+        setWarmIntroName(data.settings.warm_intro_name ?? "");
+        setAisdrMode(data.settings.aisdr_mode === "auto" ? "auto" : "review");
       } catch {
         // silently fail
       } finally {
@@ -54,6 +61,9 @@ export function EmailSettings() {
         body: JSON.stringify({
           from_name: fromName || null,
           reply_to_email: replyTo || null,
+          warm_intro_email: warmIntroEmail || null,
+          warm_intro_name: warmIntroName || null,
+          aisdr_mode: aisdrMode,
         }),
       });
       const data = await res.json();
@@ -139,6 +149,69 @@ export function EmailSettings() {
           <p className="text-muted-foreground text-xs">
             Where replies go when a provider is configured.
           </p>
+        </div>
+
+        <div className="border-primary/30 bg-primary/5 space-y-4 rounded-lg border p-4">
+          <div>
+            <p className="text-sm font-semibold">Warm intro handoff</p>
+            <p className="text-muted-foreground text-xs">
+              When the AISDR agent sees a reply worth handing off — someone
+              interested or asking for a meeting — it loops in this person
+              automatically. Set this up now so nothing falls through.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="warm-intro-name" className="text-sm font-medium">
+              Account manager / BDR name
+            </label>
+            <Input
+              id="warm-intro-name"
+              type="text"
+              placeholder="e.g. Jordan"
+              value={warmIntroName}
+              onChange={(e) => setWarmIntroName(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="warm-intro-email" className="text-sm font-medium">
+              Warm intro email
+            </label>
+            <Input
+              id="warm-intro-email"
+              type="email"
+              placeholder="e.g. jordan@yourcompany.com"
+              value={warmIntroEmail}
+              onChange={(e) => setWarmIntroEmail(e.target.value)}
+            />
+            <p className="text-muted-foreground text-xs">
+              Notified the moment a reply looks like a real opportunity.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between border-t pt-3">
+            <div>
+              <p className="text-sm font-medium">AISDR pacing preference</p>
+              <p className="text-muted-foreground text-xs">
+                Every AI-drafted reply always waits in your review queue for
+                approval — that isn&apos;t optional. This only sets your
+                preferred pace for automated cold-outreach sequencing; it
+                doesn&apos;t enable unattended sending.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs">Careful</span>
+              <Switch
+                checked={aisdrMode === "auto"}
+                onCheckedChange={(checked) =>
+                  setAisdrMode(checked ? "auto" : "review")
+                }
+                aria-label="Toggle AISDR pacing preference"
+              />
+              <span className="text-muted-foreground text-xs">Faster</span>
+            </div>
+          </div>
         </div>
 
         <Button onClick={handleSave} disabled={saving}>
