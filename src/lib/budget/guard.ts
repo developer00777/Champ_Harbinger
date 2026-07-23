@@ -1,16 +1,21 @@
 /**
- * Weekly spend enforcement. Stops paid work when a user / their team / the
- * whole instance is over its weekly cap. Checked at coarse entry points (heavy
- * job intake + chat), NOT per LLM call, via a short-TTL cached spend tally so we
- * don't hit the DB on every request.
+ * Spend enforcement. Stops paid work when a user / their team / the whole
+ * instance is over its daily or weekly cap. Checked at coarse entry points
+ * (heavy job intake + chat), NOT per LLM call, via a short-TTL cached spend
+ * tally so we don't hit the DB on every request.
  *
- * Resolution order (first hard violation wins): global -> team -> user.
+ * Resolution order (first hard violation wins): daily caps first
+ * (global -> team -> user), then weekly caps (global -> team -> user). Daily
+ * comes first because when both are blown the daily window resets sooner —
+ * the error the user sees carries the most actionable reset time.
  */
 
 export type BudgetScope = "global" | "team" | "user";
+export type BudgetPeriod = "daily" | "weekly";
 
 export interface BudgetCheck {
   scope: BudgetScope;
+  period: BudgetPeriod;
   limitUsd: number | null; // null = unlimited
   spentUsd: number;
   hardStop: boolean; // false = warn only, never blocks
@@ -18,6 +23,7 @@ export interface BudgetCheck {
 
 export class BudgetExceededError extends Error {
   readonly scope: BudgetScope;
+  readonly period: BudgetPeriod;
   readonly limitUsd: number;
   readonly spentUsd: number;
   readonly resetsAt: Date;
@@ -29,14 +35,16 @@ export class BudgetExceededError extends Error {
     spentUsd: number,
     resetsAt: Date,
     reason: "budget" | "team_disabled" = "budget",
+    period: BudgetPeriod = "weekly",
   ) {
     super(
       reason === "team_disabled"
         ? "Your team has been paused by an administrator."
-        : `Weekly ${scope} budget reached ($${spentUsd.toFixed(2)} of $${limitUsd.toFixed(2)}). Resets ${resetsAt.toISOString()}.`,
+        : `${period === "daily" ? "Daily" : "Weekly"} ${scope} budget reached ($${spentUsd.toFixed(2)} of $${limitUsd.toFixed(2)}). Resets ${resetsAt.toISOString()}.`,
     );
     this.name = "BudgetExceededError";
     this.scope = scope;
+    this.period = period;
     this.limitUsd = limitUsd;
     this.spentUsd = spentUsd;
     this.resetsAt = resetsAt;
@@ -81,13 +89,21 @@ function budgetCacheTtlMs(): number {
   return Number.isFinite(n) && n > 0 ? n : 45_000;
 }
 
-function globalWeeklyLimitUsd(): number | null {
-  const n = Number(process.env.GLOBAL_WEEKLY_BUDGET_USD);
+function envLimitUsd(name: string): number | null {
+  const n = Number(process.env[name]);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// Per-process cached spend tallies, keyed by scope. Pinned to globalThis so the
-// app + (dev) hot reloads share one cache.
+function globalWeeklyLimitUsd(): number | null {
+  return envLimitUsd("GLOBAL_WEEKLY_BUDGET_USD");
+}
+
+function globalDailyLimitUsd(): number | null {
+  return envLimitUsd("GLOBAL_DAILY_BUDGET_USD");
+}
+
+// Per-process cached spend tallies, keyed by scope+period. Pinned to
+// globalThis so the app + (dev) hot reloads share one cache.
 function spendCache(): TtlCache<number> {
   const g = globalThis as typeof globalThis & {
     __harbinger_budget_cache?: TtlCache<number>;
@@ -100,8 +116,8 @@ function spendCache(): TtlCache<number> {
 
 /**
  * Throws BudgetExceededError if `userId` (or their team, or the instance) is
- * over a hard weekly cap. No-ops when no caps apply. DB modules are imported
- * dynamically so this file's pure helpers stay unit-testable.
+ * over a hard daily or weekly cap. No-ops when no caps apply. DB modules are
+ * imported dynamically so this file's pure helpers stay unit-testable.
  */
 export async function assertWithinBudget(args: {
   userId: string;
@@ -127,11 +143,58 @@ export async function assertWithinBudget(args: {
 
   const checks: BudgetCheck[] = [];
 
+  // ── Daily caps (global -> team -> user) ────────────────────────────────────
+
+  const gDailyLimit = globalDailyLimitUsd();
+  if (gDailyLimit != null) {
+    const gSpent = await cache.get("global:day", () =>
+      spend.globalDaySpendUsd(),
+    );
+    checks.push({
+      scope: "global",
+      period: "daily",
+      limitUsd: gDailyLimit,
+      spentUsd: gSpent,
+      hardStop: true,
+    });
+  }
+
+  if (ctx.team?.dailyLimitUsd != null) {
+    const teamId = ctx.team.id;
+    const tSpent = await cache.get(`team:${teamId}:day`, () =>
+      spend.teamDaySpendUsd(teamId),
+    );
+    checks.push({
+      scope: "team",
+      period: "daily",
+      limitUsd: Number(ctx.team.dailyLimitUsd),
+      spentUsd: tSpent,
+      hardStop: ctx.team.hardStop,
+    });
+  }
+
+  const userDailyLimit = teams.effectiveUserDailyLimitUsd(ctx);
+  if (userDailyLimit != null) {
+    const uSpent = await cache.get(`user:${userId}:day`, () =>
+      spend.userDaySpendUsd(userId),
+    );
+    checks.push({
+      scope: "user",
+      period: "daily",
+      limitUsd: userDailyLimit,
+      spentUsd: uSpent,
+      hardStop: ctx.team?.hardStop ?? true,
+    });
+  }
+
+  // ── Weekly caps (global -> team -> user) ───────────────────────────────────
+
   const gLimit = globalWeeklyLimitUsd();
   if (gLimit != null) {
     const gSpent = await cache.get("global", () => spend.globalWeekSpendUsd());
     checks.push({
       scope: "global",
+      period: "weekly",
       limitUsd: gLimit,
       spentUsd: gSpent,
       hardStop: true,
@@ -145,6 +208,7 @@ export async function assertWithinBudget(args: {
     );
     checks.push({
       scope: "team",
+      period: "weekly",
       limitUsd: Number(ctx.team.weeklyLimitUsd),
       spentUsd: tSpent,
       hardStop: ctx.team.hardStop,
@@ -158,6 +222,7 @@ export async function assertWithinBudget(args: {
     );
     checks.push({
       scope: "user",
+      period: "weekly",
       limitUsd: userLimit,
       spentUsd: uSpent,
       hardStop: ctx.team?.hardStop ?? true,
@@ -170,7 +235,11 @@ export async function assertWithinBudget(args: {
       violation.scope,
       violation.limitUsd ?? 0,
       violation.spentUsd,
-      spend.nextWeekStartUtc(),
+      violation.period === "daily"
+        ? spend.nextDayStartUtc()
+        : spend.nextWeekStartUtc(),
+      "budget",
+      violation.period,
     );
   }
 }

@@ -2,7 +2,7 @@ import "server-only";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import { aiEnv } from "./env";
-import { Models } from "./models";
+import { Models, resolveModelForUser } from "./models";
 import {
   getOllamaClassificationModel,
   isOllamaConfigured,
@@ -36,6 +36,20 @@ export async function getModel(
     // tracking mirrors OpenRouter instead of relying on local token estimates.
     usage: { include: true },
   }) as unknown as LanguageModel;
+}
+
+/**
+ * Like getModel(), but resolves WHICH model via the three-layer default chain
+ * (user preference → admin app-setting → env) instead of a hard-coded id.
+ * Prefer this at entry points where a clerkUserId is naturally available.
+ * An explicit `modelId` (a call site that deliberately picked a tier) wins.
+ */
+export async function getModelForUser(
+  clerkUserId?: string,
+  modelId?: string,
+): Promise<LanguageModel> {
+  const resolved = modelId ?? (await resolveModelForUser(clerkUserId));
+  return getModel(resolved, clerkUserId);
 }
 
 /**

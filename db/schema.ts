@@ -194,6 +194,13 @@ export const userSettings = pgTable(
       .default({}),
     // Lake B2B integration settings
     lakeb2bBaseUrl: text("lakeb2b_base_url"),
+    // AISDR settings: where warm-intro handoffs go (account manager / BDR email)
+    // and whether AI-drafted replies auto-send or wait for review.
+    warmIntroEmail: text("warm_intro_email"),
+    warmIntroName: text("warm_intro_name"),
+    aisdrMode: text("aisdr_mode").notNull().default("review"), // review | auto
+    // Per-user OpenRouter model override; null = admin default → env default.
+    preferredModel: text("preferred_model"),
     ...timestamps,
   },
   (t) => ({
@@ -644,6 +651,13 @@ export const emailDrafts = pgTable(
     ),
     aiReasoning: text("ai_reasoning"),
     reviewStatus: text("review_status").default("pending"),
+    // Structured human-review signal (AISDR correction loop): each entry is
+    // {action, diffs, reason, recordedAt} — approve/edit/reject history used
+    // to refine the Writer's prompt taxonomy over time.
+    reviewFeedback: jsonb("review_feedback")
+      .$type<Array<Record<string, unknown>>>()
+      .default([]),
+    rejectionReason: text("rejection_reason"),
     ...timestamps,
   },
   (t) => ({
@@ -1367,8 +1381,13 @@ export const teams = pgTable("teams", {
   name: text("name").notNull(),
   // Null = unlimited (no team-level cap).
   weeklyLimitUsd: numeric("weekly_limit_usd", { precision: 10, scale: 2 }),
-  // Default per-member weekly cap; a member row can override it.
+  dailyLimitUsd: numeric("daily_limit_usd", { precision: 10, scale: 2 }),
+  // Default per-member caps; a member row can override them.
   perUserDefaultWeeklyLimitUsd: numeric("per_user_default_weekly_limit_usd", {
+    precision: 10,
+    scale: 2,
+  }),
+  perUserDefaultDailyLimitUsd: numeric("per_user_default_daily_limit_usd", {
     precision: 10,
     scale: 2,
   }),
@@ -1402,6 +1421,10 @@ export const teamMembers = pgTable(
       precision: 10,
       scale: 2,
     }),
+    perUserDailyLimitUsd: numeric("per_user_daily_limit_usd", {
+      precision: 10,
+      scale: 2,
+    }),
     status: text("status").notNull().default("invited"), // invited | active | disabled
     role: text("role").notNull().default("member"), // member | team_admin
     invitedBy: text("invited_by"),
@@ -1419,3 +1442,134 @@ export const teamMembers = pgTable(
     byTeam: index("team_members_team_idx").on(t.teamId),
   }),
 );
+
+// ─── Knowledge graph (Graphiti-style temporal graph, Postgres-native) ─────────
+
+/**
+ * Knowledge-graph nodes: entities we know about (people, organizations, topics,
+ * signals, events). `refTable`/`refId` link back to the source row when the
+ * entity mirrors a knowledge-base record; free-standing concepts leave them null.
+ */
+export const kgNodes = pgTable(
+  "kg_nodes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(), // person | organization | topic | signal | event
+    name: text("name").notNull(),
+    refTable: text("ref_table"), // people | organizations | signals | null
+    refId: uuid("ref_id"),
+    summary: text("summary"),
+    attributes: jsonb("attributes")
+      .$type<Record<string, unknown>>()
+      .default({}),
+    ...timestamps,
+  },
+  (t) => ({
+    byKindName: index("kg_nodes_kind_name_idx").on(t.kind, t.name),
+    byRef: index("kg_nodes_ref_idx").on(t.refTable, t.refId),
+  }),
+);
+
+/**
+ * Temporal edges: facts connecting two nodes. Bi-temporal in the Graphiti
+ * style — `validFrom`/`invalidAt` bound when the fact held true; superseded
+ * facts are invalidated, never deleted, so history is queryable.
+ */
+export const kgEdges = pgTable(
+  "kg_edges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => kgNodes.id, { onDelete: "cascade" }),
+    targetId: uuid("target_id")
+      .notNull()
+      .references(() => kgNodes.id, { onDelete: "cascade" }),
+    relation: text("relation").notNull(), // works_at | interested_in | mentioned | ...
+    factText: text("fact_text").notNull(), // human-readable statement of the fact
+    confidence: numeric("confidence", { precision: 4, scale: 3 }),
+    source: text("source"), // provider/channel the fact came from
+    episodeId: uuid("episode_id").references(() => kgEpisodes.id, {
+      onDelete: "set null",
+    }),
+    validFrom: timestamp("valid_from", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    invalidAt: timestamp("invalid_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => ({
+    bySource: index("kg_edges_source_idx").on(t.sourceId),
+    byTarget: index("kg_edges_target_idx").on(t.targetId),
+    byRelation: index("kg_edges_relation_idx").on(t.relation),
+  }),
+);
+
+/**
+ * Episodes: raw ingestion events (an enrichment run, a signal hit, an email
+ * sent/received) that the graph extractor turns into nodes+edges. Kept for
+ * provenance and reprocessing.
+ */
+export const kgEpisodes = pgTable(
+  "kg_episodes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(), // enrichment | signal | email_sent | email_received | note
+    clerkUserId: text("clerk_user_id"),
+    refTable: text("ref_table"),
+    refId: uuid("ref_id"),
+    content: jsonb("content").$type<Record<string, unknown>>().notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    error: text("error"),
+    ...timestamps,
+  },
+  (t) => ({
+    byKind: index("kg_episodes_kind_idx").on(t.kind),
+    unprocessed: index("kg_episodes_unprocessed_idx").on(t.processedAt),
+  }),
+);
+
+// ─── Email infrastructure (InboxKit / swappable) ──────────────────────────────
+
+/**
+ * Infrastructure orders placed with the email-infra provider (InboxKit today):
+ * domain registrations + mailbox provisioning. Status is updated by the
+ * provider webhook; when mailboxes turn ready their credentials are imported
+ * into `mailbox_connections` automatically.
+ */
+export const infraOrders = pgTable(
+  "infra_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull().default("inboxkit"),
+    providerOrderId: text("provider_order_id"),
+    clerkUserId: text("clerk_user_id").notNull(),
+    status: text("status").notNull().default("queued"), // queued | processing | done | error
+    request: jsonb("request").$type<Record<string, unknown>>().notNull(),
+    lastEvent: jsonb("last_event").$type<Record<string, unknown>>(),
+    error: text("error"),
+    ...timestamps,
+  },
+  (t) => ({
+    byUser: index("infra_orders_user_idx").on(t.clerkUserId),
+    byProviderOrder: index("infra_orders_provider_order_idx").on(
+      t.providerOrderId,
+    ),
+  }),
+);
+
+// ─── Global app settings (super-admin controlled) ─────────────────────────────
+
+/**
+ * Key/value config the super-admin edits from the console (e.g. the default
+ * OpenRouter model). Resolution order for consumers: user preference →
+ * app_settings → env default.
+ */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});

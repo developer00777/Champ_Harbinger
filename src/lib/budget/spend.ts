@@ -31,6 +31,20 @@ export function nextWeekStartUtc(now: Date = new Date()): Date {
   return s;
 }
 
+/** 00:00:00.000 UTC of the day containing `now`. */
+export function currentDayStartUtc(now: Date = new Date()): Date {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
+/** Start of the next UTC day (when the current daily budget resets). */
+export function nextDayStartUtc(now: Date = new Date()): Date {
+  const s = currentDayStartUtc(now);
+  s.setUTCDate(s.getUTCDate() + 1);
+  return s;
+}
+
 const SUM = sql<string>`coalesce(sum(${schema.apiUsage.estimatedCostUsd}), 0)::text`;
 
 function toUsd(rows: Array<{ total: string }>): number {
@@ -81,4 +95,28 @@ export async function globalWeekSpendUsd(
     .from(schema.apiUsage)
     .where(gte(schema.apiUsage.createdAt, weekStart));
   return toUsd(rows);
+}
+
+// ─── Daily windows ────────────────────────────────────────────────────────────
+// Same rollups over the UTC-day window. They reuse the weekly query functions:
+// those only care about the window start, not its length.
+
+export async function userDaySpendUsd(
+  clerkUserId: string,
+  dayStart: Date = currentDayStartUtc(),
+): Promise<number> {
+  return userWeekSpendUsd(clerkUserId, dayStart);
+}
+
+export async function teamDaySpendUsd(
+  teamId: string,
+  dayStart: Date = currentDayStartUtc(),
+): Promise<number> {
+  return teamWeekSpendUsd(teamId, dayStart);
+}
+
+export async function globalDaySpendUsd(
+  dayStart: Date = currentDayStartUtc(),
+): Promise<number> {
+  return globalWeekSpendUsd(dayStart);
 }

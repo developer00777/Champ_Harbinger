@@ -35,9 +35,15 @@ export async function PATCH(
   if (input.name !== undefined) patch.name = input.name;
   if ("weeklyLimitUsd" in input)
     patch.weeklyLimitUsd = usdToNumeric(input.weeklyLimitUsd);
+  if ("dailyLimitUsd" in input)
+    patch.dailyLimitUsd = usdToNumeric(input.dailyLimitUsd);
   if ("perUserDefaultWeeklyLimitUsd" in input)
     patch.perUserDefaultWeeklyLimitUsd = usdToNumeric(
       input.perUserDefaultWeeklyLimitUsd,
+    );
+  if ("perUserDefaultDailyLimitUsd" in input)
+    patch.perUserDefaultDailyLimitUsd = usdToNumeric(
+      input.perUserDefaultDailyLimitUsd,
     );
   if (input.hardStop !== undefined) patch.hardStop = input.hardStop;
   if (input.enabled !== undefined) patch.enabled = input.enabled;

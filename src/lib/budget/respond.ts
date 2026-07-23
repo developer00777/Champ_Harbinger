@@ -14,6 +14,7 @@ export function budgetErrorResponse(
       {
         error: err.message,
         scope: err.scope,
+        period: err.period,
         reason: err.reason,
         limitUsd: err.limitUsd,
         spentUsd: err.spentUsd,

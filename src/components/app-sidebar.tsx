@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import {
   ClipboardList,
   Eye,
+  Inbox,
   LayoutDashboard,
   Mail,
   MessageCircle,
@@ -36,6 +37,7 @@ const navItems: NavItem[] = [
   { title: "Signals", url: "/signals", icon: Zap },
   { title: "Tracking", url: "/tracking", icon: Eye },
   { title: "Outreach", url: "/outreach", icon: Mail },
+  { title: "AISDR Replies", url: "/aisdr/review", icon: Inbox },
   { title: "Profiles", url: "/profile", icon: UserCircle },
 ];
 

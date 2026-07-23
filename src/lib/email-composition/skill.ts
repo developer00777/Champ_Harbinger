@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { EmailSkill } from "@/lib/types/email-skill";
+import type { PrimaryHook } from "./guardrails";
 
 /**
  * Shared "write email" skill. Used by:
@@ -30,6 +31,8 @@ export const EMAIL_SKILL_SYSTEM_PROMPT = `You are a cold-email copywriter drafti
 Rules:
 - Keep it short: 3-5 sentences for the initial step, even shorter for follow-ups and breakups.
 - Open with something SPECIFIC to this person — a recent post, a hiring signal, a company news item, an angle from their bio — but ONLY if it appears explicitly in the context below. If no specific hook is present, anchor on the prospect's ROLE + INDUSTRY in general terms (e.g., "VPs of sales at manufacturers often..."). A generic-but-honest opener beats a fabricated-but-specific one.
+- If a VERIFIED PRIMARY HOOK is provided below, that is THE fact to build the email around — reference it explicitly and specifically, don't bury it or paraphrase it into vagueness.
+- Never open with a generic pleasantry ("Hope you're doing well", "Hope this finds you well", "Just wanted to reach out", etc). Start with substance.
 - Frame the offering in terms of the prospect's context, not generic features.
 - Exactly one clear call-to-action. Low friction: a short reply, a question, a calendar link ask.
 - No jargon, no buzzwords, no "synergy", no "circle back", no em-dashes in excess, no ChatGPT-flavored fluff.
@@ -100,6 +103,14 @@ export function buildComposeUserPrompt(input: {
   };
   previousSubject?: string | null;
   triggerReason?: string | null;
+  /**
+   * The one verified fact (from Port A's knowledge-graph retrieval) this
+   * draft must ground itself on. When present, it's surfaced prominently
+   * and separately from the raw enrichment blob so the model has one
+   * unambiguous, pre-verified thing to open with — guardrails.ts enforces
+   * post-generation that the draft actually used it.
+   */
+  primaryHook?: PrimaryHook | null;
 }): string {
   const sections: string[] = [];
 
@@ -116,6 +127,16 @@ export function buildComposeUserPrompt(input: {
   if (input.triggerReason) {
     sections.push(
       `TRIGGER (why this prospect was flagged as ready to contact — use this to frame the email's opening line):\n${input.triggerReason}`,
+    );
+  }
+
+  if (input.primaryHook?.fact) {
+    sections.push(
+      `VERIFIED PRIMARY HOOK (the ONE fact you must explicitly reference in the email — do not invent anything beyond this; this has already been fact-checked, so anchor your opening line on it):\n${input.primaryHook.fact}${
+        input.primaryHook.sourceUrl
+          ? `\nSource: ${input.primaryHook.sourceUrl}`
+          : ""
+      }`,
     );
   }
 

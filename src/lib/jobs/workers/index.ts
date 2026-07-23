@@ -5,6 +5,9 @@ import {
   OUTREACH_FOLLOWUPS,
   ENRICH_COMPANY,
   MAILBOX_SYNC,
+  AISDR_PROCESS,
+  SIGNAL_RESEARCH,
+  USAGE_ALERTS,
   type EnrichCompanyJob,
 } from "@/lib/jobs/boss";
 import { dispatchDueTrackingConfigs } from "@/lib/jobs/handlers/dispatch-tracking";
@@ -12,6 +15,7 @@ import { syncMailboxes } from "@/lib/jobs/handlers/sync-mailboxes";
 import { getAppBaseUrl, workerHeaders } from "@/lib/jobs/internal-auth";
 import { createFairDispatcher } from "@/lib/jobs/fair-dispatcher";
 import { assertWithinBudget, BudgetExceededError } from "@/lib/budget/guard";
+import { processRecentSignalResults } from "@/lib/signals/process";
 
 async function postInternal(path: string, body: unknown): Promise<void> {
   const res = await fetch(`${getAppBaseUrl()}${path}`, {
@@ -97,10 +101,18 @@ export async function startWorkers(): Promise<void> {
   const followupsCron = process.env.OUTREACH_FOLLOWUPS_CRON || "*/15 * * * *";
 
   const mailboxSyncCron = process.env.MAILBOX_SYNC_CRON || "*/3 * * * *";
+  // Runs a few minutes after mailbox sync so newly-synced replies are picked
+  // up the same cycle or the next.
+  const aisdrCron = process.env.AISDR_CRON || "*/5 * * * *";
+  const signalResearchCron = process.env.SIGNAL_RESEARCH_CRON || "*/10 * * * *";
+  const usageAlertsCron = process.env.USAGE_ALERTS_CRON || "0 * * * *";
 
   await boss.schedule(TRACKING_DISPATCH, dispatchCron);
   await boss.schedule(OUTREACH_FOLLOWUPS, followupsCron);
   await boss.schedule(MAILBOX_SYNC, mailboxSyncCron);
+  await boss.schedule(AISDR_PROCESS, aisdrCron);
+  await boss.schedule(SIGNAL_RESEARCH, signalResearchCron);
+  await boss.schedule(USAGE_ALERTS, usageAlertsCron);
 
   await boss.work(TRACKING_DISPATCH, async () => {
     const result = await dispatchDueTrackingConfigs();
@@ -111,21 +123,25 @@ export async function startWorkers(): Promise<void> {
     }
   });
 
-  await boss.work(TRACKING_RUN, { batchSize: BOSS_FETCH_BATCH }, async (jobs) => {
-    await Promise.allSettled(
-      jobs.map((job) => {
-        const { trackingConfigId, clerkUserId } = job.data as {
-          trackingConfigId: string;
-          clerkUserId?: string;
-        };
-        return dispatchHeavy({
-          kind: "tracking",
-          userId: clerkUserId ?? UNKNOWN_USER,
-          trackingConfigId,
-        });
-      }),
-    );
-  });
+  await boss.work(
+    TRACKING_RUN,
+    { batchSize: BOSS_FETCH_BATCH },
+    async (jobs) => {
+      await Promise.allSettled(
+        jobs.map((job) => {
+          const { trackingConfigId, clerkUserId } = job.data as {
+            trackingConfigId: string;
+            clerkUserId?: string;
+          };
+          return dispatchHeavy({
+            kind: "tracking",
+            userId: clerkUserId ?? UNKNOWN_USER,
+            trackingConfigId,
+          });
+        }),
+      );
+    },
+  );
 
   await boss.work(OUTREACH_FOLLOWUPS, async () => {
     await postInternal("/api/outreach/process", { type: "followups" });
@@ -171,7 +187,31 @@ export async function startWorkers(): Promise<void> {
     }
   });
 
+  // Port A (researcher) and Port D (AISDR reply agent) both call OpenRouter.
+  // Each batch driver already processes its rows sequentially (one LLM call
+  // in flight at a time), and localConcurrency: 1 below additionally caps
+  // this node to a single worker per queue — so a burst of due
+  // signal-research/aisdr ticks can't stack concurrent OpenRouter calls on
+  // top of each other or on top of the enrich/tracking fair dispatcher's own
+  // concurrency budget.
+  await boss.work(AISDR_PROCESS, { localConcurrency: 1 }, async () => {
+    await postInternal("/api/aisdr/process", {});
+  });
+
+  await boss.work(SIGNAL_RESEARCH, { localConcurrency: 1 }, async () => {
+    const r = await processRecentSignalResults();
+    if (r.attempted > 0) {
+      console.log(
+        `[worker] signal research: ${r.hooksFound}/${r.attempted} hooks found`,
+      );
+    }
+  });
+
+  await boss.work(USAGE_ALERTS, { localConcurrency: 1 }, async () => {
+    await postInternal("/api/admin/alerts/run", {});
+  });
+
   console.log(
-    `[worker] ready — dispatch:"${dispatchCron}" followups:"${followupsCron}" mailbox:"${mailboxSyncCron}"`,
+    `[worker] ready — dispatch:"${dispatchCron}" followups:"${followupsCron}" mailbox:"${mailboxSyncCron}" aisdr:"${aisdrCron}" signal-research:"${signalResearchCron}" usage-alerts:"${usageAlertsCron}"`,
   );
 }

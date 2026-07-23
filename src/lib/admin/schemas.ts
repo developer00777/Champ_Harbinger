@@ -5,17 +5,14 @@ import { z } from "zod";
  * Limits are dollars with 2dp; we accept a number from the client and store
  * its `.toFixed(2)` string. `null` clears the cap (unlimited).
  */
-const usdLimit = z
-  .number()
-  .nonnegative()
-  .max(1_000_000)
-  .nullable()
-  .optional();
+const usdLimit = z.number().nonnegative().max(1_000_000).nullable().optional();
 
 export const createTeamSchema = z.object({
   name: z.string().trim().min(1).max(120),
   weeklyLimitUsd: usdLimit,
+  dailyLimitUsd: usdLimit,
   perUserDefaultWeeklyLimitUsd: usdLimit,
+  perUserDefaultDailyLimitUsd: usdLimit,
   hardStop: z.boolean().optional(),
 });
 export type CreateTeamInput = z.infer<typeof createTeamSchema>;
@@ -24,7 +21,9 @@ export const updateTeamSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     weeklyLimitUsd: usdLimit,
+    dailyLimitUsd: usdLimit,
     perUserDefaultWeeklyLimitUsd: usdLimit,
+    perUserDefaultDailyLimitUsd: usdLimit,
     hardStop: z.boolean().optional(),
     enabled: z.boolean().optional(),
   })
@@ -42,6 +41,7 @@ export type InviteInput = z.infer<typeof inviteSchema>;
 export const updateMemberSchema = z
   .object({
     perUserWeeklyLimitUsd: usdLimit,
+    perUserDailyLimitUsd: usdLimit,
     status: z.enum(["invited", "active", "disabled"]).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {

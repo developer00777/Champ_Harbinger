@@ -5,6 +5,7 @@ import {
   findOrCreatePerson,
   mergeEnrichmentData,
 } from "@/lib/services/knowledge-base";
+import { processEpisode, recordEpisode } from "@/lib/knowledge-graph";
 import { getValue, type Contact } from "./types";
 
 /**
@@ -212,6 +213,26 @@ export async function syncToKnowledgeBase(
     );
   } catch {
     // enrichment merge is best-effort; the record already exists.
+  }
+
+  // 4. Feed the knowledge graph: record this enrichment run as an episode and
+  // extract it inline so a freshly-synced fact is queryable via
+  // getPersonContext() without waiting for a separate batch job. Best-effort
+  // — the knowledge base sync itself must never fail because the graph did.
+  try {
+    const episode = await recordEpisode({
+      kind: "enrichment",
+      refTable: "people",
+      refId: personId,
+      content: {
+        fullName: name,
+        organizationId,
+        firmographics: firmo,
+      },
+    });
+    await processEpisode(episode.id);
+  } catch {
+    // Graph extraction is additive; never block the sync on it.
   }
 
   return { personId, organizationId };

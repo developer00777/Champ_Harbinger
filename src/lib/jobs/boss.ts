@@ -16,6 +16,9 @@ export const TRACKING_RUN = "tracking-run";
 export const OUTREACH_FOLLOWUPS = "outreach-followups";
 export const ENRICH_COMPANY = "enrich-company";
 export const MAILBOX_SYNC = "mailbox-sync";
+export const AISDR_PROCESS = "aisdr-process";
+export const SIGNAL_RESEARCH = "signal-research";
+export const USAGE_ALERTS = "usage-alerts";
 
 declare global {
   var __harbinger_boss: PgBoss | undefined;
@@ -44,6 +47,9 @@ export async function getBoss(): Promise<PgBoss> {
         OUTREACH_FOLLOWUPS,
         ENRICH_COMPANY,
         MAILBOX_SYNC,
+        AISDR_PROCESS,
+        SIGNAL_RESEARCH,
+        USAGE_ALERTS,
       ]) {
         try {
           await boss.createQueue(queue);

@@ -14,6 +14,8 @@ import { EmailSkillsAttacher } from "@/components/email-skills/email-skills-atta
 import { ApiKeysPanel } from "@/components/settings/api-keys-panel";
 import { ChampIQPanel } from "@/components/settings/champiq-panel";
 import { MailboxesPanel } from "@/components/settings/mailboxes-panel";
+import { ModelSettings } from "@/components/settings/model-settings";
+import { InboxKitPanel } from "@/components/settings/inboxkit-panel";
 
 const noop = () => () => {};
 const getTrue = () => true;
@@ -66,6 +68,7 @@ export default function SettingsPage() {
 
           <TabsContent value="email" className="space-y-8">
             <MailboxesPanel />
+            <InboxKitPanel />
             <EmailSettings />
             <EmailSkillsAttacher
               scopeType="user"
@@ -85,10 +88,11 @@ export default function SettingsPage() {
             </SettingsSection>
           </TabsContent>
 
-          <TabsContent value="preferences">
+          <TabsContent value="preferences" className="space-y-8">
             <SettingsSection title="Appearance">
               <DarkModeToggle />
             </SettingsSection>
+            <ModelSettings />
           </TabsContent>
 
           <TabsContent value="usage">

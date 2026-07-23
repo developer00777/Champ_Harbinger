@@ -32,6 +32,8 @@ export async function PATCH(
   };
   if ("perUserWeeklyLimitUsd" in input)
     patch.perUserWeeklyLimitUsd = usdToNumeric(input.perUserWeeklyLimitUsd);
+  if ("perUserDailyLimitUsd" in input)
+    patch.perUserDailyLimitUsd = usdToNumeric(input.perUserDailyLimitUsd);
   if (input.status !== undefined) patch.status = input.status;
 
   const [member] = await adminDb

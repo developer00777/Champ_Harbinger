@@ -48,6 +48,18 @@ export function effectiveUserWeeklyLimitUsd(ctx: MemberContext): number | null {
 }
 
 /**
+ * Effective daily per-user limit in USD: the member override, else the team
+ * default, else null (no per-user daily cap).
+ */
+export function effectiveUserDailyLimitUsd(ctx: MemberContext): number | null {
+  const override = ctx.membership?.perUserDailyLimitUsd;
+  if (override != null) return Number(override);
+  const teamDefault = ctx.team?.perUserDefaultDailyLimitUsd;
+  if (teamDefault != null) return Number(teamDefault);
+  return null;
+}
+
+/**
  * First-login provisioning: link a freshly signed-in user's clerkUserId to the
  * pending invite row matched by email (status invited -> active). Idempotent and
  * safe to call on every authed request — it no-ops once the user is linked.

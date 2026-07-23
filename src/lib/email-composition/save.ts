@@ -1,5 +1,6 @@
 import { eq, and } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { assertDraftOnly } from "./guardrails";
 
 export type SaveDraftInput = {
   userId: string;
@@ -88,6 +89,13 @@ export async function saveDraft(
       error: "Person is not linked to the specified campaign.",
     };
   }
+
+  // Runtime guard (not just convention): this is the only insert path into
+  // email_drafts. status is a hardcoded literal below, never taken from
+  // caller input — this assertion exists so a future refactor that starts
+  // threading a status through SaveDraftInput can't silently regress into
+  // writing a non-"draft" status without a human-reviewed send step.
+  assertDraftOnly({ status: "draft" });
 
   try {
     const [draft] = await db
