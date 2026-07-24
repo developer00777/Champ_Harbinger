@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // "standalone" packages a self-contained server.js for the Docker image
+  // (Dockerfile copies .next/standalone — see docs/DEPLOY-RAILWAY.md and
+  // docs/DEPLOY-COOLIFY-VERCEL.md). Vercel has its own build/trace pipeline
+  // and sets VERCEL=1 at build time; skip "standalone" there so the same
+  // config serves both deploy targets without extra, unused tracing work.
+  ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
   experimental: {
     optimizePackageImports: ["lucide-react"],
   },
