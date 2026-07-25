@@ -11,7 +11,22 @@ const nextConfig: NextConfig = {
     optimizePackageImports: ["lucide-react"],
   },
   async rewrites() {
+    // Split deploy: Vercel serves the UI, a Coolify container serves the API.
+    // When HARBINGER_API_ORIGIN is set, /api/* is proxied to that origin
+    // instead of being handled locally. The API host itself leaves the var
+    // UNSET so it keeps serving its own routes — otherwise it would proxy to
+    // itself and loop. See docs/DEPLOY-COOLIFY-VERCEL.md.
+    //
+    // Every /api/* route proxies, including /api/metrics — the API host is the
+    // only process touching Postgres and pg-boss, so it is the only one whose
+    // metrics mean anything. Check the frontend's own liveness with "/".
+    const apiOrigin = process.env.HARBINGER_API_ORIGIN?.replace(/\/+$/, "");
+    const apiProxy = apiOrigin
+      ? [{ source: "/api/:path*", destination: `${apiOrigin}/api/:path*` }]
+      : [];
+
     return [
+      ...apiProxy,
       {
         source: "/ingest/static/:path*",
         destination: "https://us-assets.i.posthog.com/static/:path*",
