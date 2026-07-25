@@ -32,10 +32,16 @@
     #ff8544 0%,
     #f26722 100%
   );
+  /* Theme-aware: this block is `@theme inline`, so Tailwind bakes the value
+     straight into the .bg-peach-wash utility. Hardcoding the light hex here
+     meant the section stayed cream in dark mode while --foreground flipped to
+     near-white (oklch .96) — near-white on cream is ~1.05:1 contrast, i.e. the
+     headline disappeared. Referencing vars keeps the substitution but defers
+     the actual colours to :root/.dark below, where they resolve at runtime. */
   --background-image-peach-wash: linear-gradient(
     180deg,
-    #fff4ec 0%,
-    #ffffff 100%
+    var(--peach-wash-start) 0%,
+    var(--peach-wash-end) 100%
   );
   --background-image-orange-fade: linear-gradient(
     180deg,
@@ -154,6 +160,10 @@
   --sidebar-accent-foreground: oklch(0.2 0.02 260);
   --sidebar-border: oklch(0.92 0.006 260);
   --sidebar-ring: oklch(0.67 0.18 39);
+  /* Warm brand wash behind the marketing hero + feature grid. Light mode keeps
+     the original Champions soft-peach -> white fade. */
+  --peach-wash-start: #fff4ec;
+  --peach-wash-end: #ffffff;
 }
 
 .dark {
@@ -198,6 +208,11 @@
   --sidebar-accent-foreground: oklch(0.96 0.004 260);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.73 0.16 42);
+  /* Dark mode keeps the warm brand tint but as a dark wash, fading into
+     --background so the section still reads as one surface. Against this,
+     --foreground (oklch .96) lands at roughly 13:1 instead of 1.05:1. */
+  --peach-wash-start: oklch(0.23 0.025 50);
+  --peach-wash-end: oklch(0.16 0.008 260);
 }
 
 @layer base {
