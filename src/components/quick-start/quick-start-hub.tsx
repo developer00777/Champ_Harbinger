@@ -15,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { jsonOrThrow } from "@/lib/api/read-json";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
@@ -296,11 +297,10 @@ export function QuickStartHub() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ criteria: criteria.trim(), campaignId: id }),
       });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Discovery failed.");
-        return;
-      }
+      // jsonOrThrow reads text first, so a bodiless 500 reports its status
+      // instead of raising "Unexpected end of JSON input". The catch below
+      // renders whatever reason the route gave us.
+      await jsonOrThrow(res);
       const { companies: refreshed } = await refreshCampaign(id);
       setCompanies(refreshed);
       setStep("companies");
@@ -380,13 +380,8 @@ export function QuickStartHub() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ campaignId, contactIds: ids }),
       });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Drafting failed.");
-        return;
-      }
-      const rows: DraftRow[] = (json.drafts ?? []).map(
-        (d: {
+      const json = await jsonOrThrow<{
+        drafts?: Array<{
           id: string;
           contactId: string;
           contact: {
@@ -397,14 +392,15 @@ export function QuickStartHub() {
           };
           subject: string;
           bodyText: string;
-        }) => ({
-          id: d.id,
-          contactId: d.contactId,
-          contact: d.contact,
-          subject: d.subject,
-          bodyText: d.bodyText,
-        }),
-      );
+        }>;
+      }>(res);
+      const rows: DraftRow[] = (json.drafts ?? []).map((d) => ({
+        id: d.id,
+        contactId: d.contactId,
+        contact: d.contact,
+        subject: d.subject,
+        bodyText: d.bodyText,
+      }));
       setDrafts(rows);
       if (rows.length === 0) {
         setError(
