@@ -1,9 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
-import { describeUpstreamError } from "@/lib/api/upstream-error";
+import { runAction } from "@/lib/api/guarded-action";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { and, eq, inArray } from "drizzle-orm";
-import { withAction } from "@/lib/services/cost-tracker";
 import { composeEmail, mapConcurrent } from "@/lib/email-composition/compose";
 import { loadActiveEmailSkills } from "@/lib/email-composition/load-skills";
 import { saveDraft } from "@/lib/email-composition/save";
@@ -174,129 +173,120 @@ export async function POST(request: Request) {
     campaignId: campaign.id,
   });
 
-  // Same reasoning as quick-start/discover: withAction does not catch, so an
-  // LLM/provider failure here would otherwise become a bodiless 500.
-  try {
-    return await withAction(`Quick-Start draft: ${campaign.name}`, async () => {
-      const results = await mapConcurrent(cpRows, 4, async (contact) => {
-        const email = contact.workEmail ?? contact.personalEmail;
-        if (!email) {
-          return {
-            contactId: contact.cpId,
-            personId: contact.personId,
-            ok: false as const,
-            error: "No email address on this contact.",
-          };
-        }
-
-        const org = contact.organizationId
-          ? orgMap.get(contact.organizationId)
-          : undefined;
-
-        const composed = await composeEmail({
-          skills: activeSkills,
-          contact: {
-            name: contact.name ?? null,
-            title: contact.title ?? null,
-            email,
-            enrichmentData:
-              (contact.enrichmentData as Record<string, unknown> | null) ??
-              null,
-          },
-          company: org
-            ? {
-                name: org.name ?? null,
-                domain: org.domain ?? null,
-                industry: org.industry ?? null,
-                enrichmentData:
-                  (org.enrichmentData as Record<string, unknown> | null) ??
-                  null,
-              }
-            : null,
-          step: {
-            stepNumber: 1,
-            totalSteps: 1,
-            condition: "initial",
-            isFinal: false,
-          },
-          campaign: {
-            name: campaign.name,
-            icp: (campaign.icp as Record<string, unknown> | null) ?? null,
-            offering:
-              (campaign.offering as Record<string, unknown> | null) ?? null,
-            positioning:
-              (campaign.positioning as Record<string, unknown> | null) ?? null,
-          },
-          senderProfile: {
-            name: profile?.name ?? null,
-            title: profile?.roleTitle ?? null,
-            company: profile?.companyName ?? null,
-            signature: profile?.notes ?? null,
-          },
-          triggerReason: null,
-        });
-
-        if (!composed.ok) {
-          return {
-            contactId: contact.cpId,
-            personId: contact.personId,
-            ok: false as const,
-            error: composed.error,
-          };
-        }
-
-        const saved = await saveDraft({
-          userId,
-          orgId,
-          campaignId: campaign.id,
-          personId: contact.personId,
-          subject: composed.email.subject,
-          bodyHtml: composed.email.bodyHtml,
-          bodyText: composed.email.bodyText,
-          aiReasoning: composed.email.aiReasoning,
-        });
-
-        if (!saved.ok) {
-          return {
-            contactId: contact.cpId,
-            personId: contact.personId,
-            ok: false as const,
-            error: saved.error,
-          };
-        }
-
+  // runAction, not withAction — see lib/api/guarded-action.ts.
+  return runAction(`Quick-Start draft: ${campaign.name}`, async () => {
+    const results = await mapConcurrent(cpRows, 4, async (contact) => {
+      const email = contact.workEmail ?? contact.personalEmail;
+      if (!email) {
         return {
-          ok: true as const,
-          id: saved.draftId,
           contactId: contact.cpId,
           personId: contact.personId,
-          contact: {
-            name: contact.name,
-            title: contact.title,
-            email,
-            company: org?.name ?? null,
-          },
-          subject: composed.email.subject,
-          bodyHtml: composed.email.bodyHtml,
-          bodyText: composed.email.bodyText,
+          ok: false as const,
+          error: "No email address on this contact.",
         };
+      }
+
+      const org = contact.organizationId
+        ? orgMap.get(contact.organizationId)
+        : undefined;
+
+      const composed = await composeEmail({
+        skills: activeSkills,
+        contact: {
+          name: contact.name ?? null,
+          title: contact.title ?? null,
+          email,
+          enrichmentData:
+            (contact.enrichmentData as Record<string, unknown> | null) ?? null,
+        },
+        company: org
+          ? {
+              name: org.name ?? null,
+              domain: org.domain ?? null,
+              industry: org.industry ?? null,
+              enrichmentData:
+                (org.enrichmentData as Record<string, unknown> | null) ?? null,
+            }
+          : null,
+        step: {
+          stepNumber: 1,
+          totalSteps: 1,
+          condition: "initial",
+          isFinal: false,
+        },
+        campaign: {
+          name: campaign.name,
+          icp: (campaign.icp as Record<string, unknown> | null) ?? null,
+          offering:
+            (campaign.offering as Record<string, unknown> | null) ?? null,
+          positioning:
+            (campaign.positioning as Record<string, unknown> | null) ?? null,
+        },
+        senderProfile: {
+          name: profile?.name ?? null,
+          title: profile?.roleTitle ?? null,
+          company: profile?.companyName ?? null,
+          signature: profile?.notes ?? null,
+        },
+        triggerReason: null,
       });
 
-      const drafts = results.filter((r) => r.ok);
-      const failures = results
-        .filter((r) => !r.ok)
-        .map((r) => ({ contactId: r.contactId, error: r.error }));
+      if (!composed.ok) {
+        return {
+          contactId: contact.cpId,
+          personId: contact.personId,
+          ok: false as const,
+          error: composed.error,
+        };
+      }
 
-      return Response.json({
-        drafts,
-        failures,
-        total: cpRows.length,
-        saved: drafts.length,
+      const saved = await saveDraft({
+        userId,
+        orgId,
+        campaignId: campaign.id,
+        personId: contact.personId,
+        subject: composed.email.subject,
+        bodyHtml: composed.email.bodyHtml,
+        bodyText: composed.email.bodyText,
+        aiReasoning: composed.email.aiReasoning,
       });
+
+      if (!saved.ok) {
+        return {
+          contactId: contact.cpId,
+          personId: contact.personId,
+          ok: false as const,
+          error: saved.error,
+        };
+      }
+
+      return {
+        ok: true as const,
+        id: saved.draftId,
+        contactId: contact.cpId,
+        personId: contact.personId,
+        contact: {
+          name: contact.name,
+          title: contact.title,
+          email,
+          company: org?.name ?? null,
+        },
+        subject: composed.email.subject,
+        bodyHtml: composed.email.bodyHtml,
+        bodyText: composed.email.bodyText,
+      };
     });
-  } catch (err) {
-    console.error("[quick-start/draft] failed:", err);
-    const { status, body } = describeUpstreamError(err);
-    return Response.json(body, { status });
-  }
+
+    const drafts = results.filter((r) => r.ok);
+    const failures = results
+      .filter((r) => !r.ok)
+      .map((r) => ({ contactId: r.contactId, error: r.error }));
+
+    return Response.json({
+      drafts,
+      failures,
+      total: cpRows.length,
+      saved: drafts.length,
+    });
+  });
 }

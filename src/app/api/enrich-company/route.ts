@@ -1,4 +1,4 @@
-import { withAction } from "@/lib/services/cost-tracker";
+import { runAction } from "@/lib/api/guarded-action";
 import { getCurrentUser } from "@/lib/auth";
 import { verifyWorkerSecret } from "@/lib/jobs/internal-auth";
 import { adminDb } from "@/lib/db/admin";
@@ -277,7 +277,7 @@ async function enrichOrganization(
   campaignId?: string,
   linkId?: string,
 ) {
-  return withAction(`Enrich company: ${org.name}`, async () => {
+  return runAction(`Enrich company: ${org.name}`, async () => {
     // Check recency
     const recent = await isRecentlyEnriched("organizations", orgId);
     if (recent) {

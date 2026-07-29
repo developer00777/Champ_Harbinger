@@ -3,7 +3,7 @@ import { generateObjectLimited as generateObject } from "@/lib/ai/generate";
 import { z } from "zod";
 
 import { getProfileForPrompt } from "@/lib/profile";
-import { withAction } from "@/lib/services/cost-tracker";
+import { runAction } from "@/lib/api/guarded-action";
 import { recordAiUsage } from "@/lib/ai/usage";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  return withAction(`Score contacts: ${campaign.name}`, async () => {
+  return runAction(`Score contacts: ${campaign.name}`, async () => {
     // Fetch campaign_people linked to enriched people, with org join
     const links = await adminDb
       .select({
