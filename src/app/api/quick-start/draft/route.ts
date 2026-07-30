@@ -1,8 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
+import { runAction } from "@/lib/api/guarded-action";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { and, eq, inArray } from "drizzle-orm";
-import { withAction } from "@/lib/services/cost-tracker";
 import { composeEmail, mapConcurrent } from "@/lib/email-composition/compose";
 import { loadActiveEmailSkills } from "@/lib/email-composition/load-skills";
 import { saveDraft } from "@/lib/email-composition/save";
@@ -173,7 +173,8 @@ export async function POST(request: Request) {
     campaignId: campaign.id,
   });
 
-  return withAction(`Quick-Start draft: ${campaign.name}`, async () => {
+  // runAction, not withAction — see lib/api/guarded-action.ts.
+  return runAction(`Quick-Start draft: ${campaign.name}`, async () => {
     const results = await mapConcurrent(cpRows, 4, async (contact) => {
       const email = contact.workEmail ?? contact.personalEmail;
       if (!email) {
@@ -216,7 +217,8 @@ export async function POST(request: Request) {
         campaign: {
           name: campaign.name,
           icp: (campaign.icp as Record<string, unknown> | null) ?? null,
-          offering: (campaign.offering as Record<string, unknown> | null) ?? null,
+          offering:
+            (campaign.offering as Record<string, unknown> | null) ?? null,
           positioning:
             (campaign.positioning as Record<string, unknown> | null) ?? null,
         },

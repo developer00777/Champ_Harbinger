@@ -31,4 +31,14 @@ src/__tests__
 *.md
 !README.md
 
+# Dockerfile.worker's CMD is `pnpm worker` -> `tsx scripts/run-worker.ts`, and
+# run-worker.ts resolves the `server-only` stub out of src/__tests__ at runtime.
+# Both directories are excluded above (they are dead weight in the Next.js app
+# image), so without these two exceptions the worker image ships without its own
+# entrypoint and crash-loops on ERR_MODULE_NOT_FOUND. This .dockerignore is
+# shared by both Dockerfiles, so re-include exactly these two files and nothing
+# else — the app image is unaffected in any meaningful way.
+!scripts/run-worker.ts
+!src/__tests__/__mocks__/server-only.ts
+
 tsconfig.tsbuildinfo

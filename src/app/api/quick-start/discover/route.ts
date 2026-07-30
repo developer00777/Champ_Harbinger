@@ -1,9 +1,9 @@
 import { getCurrentUser } from "@/lib/auth";
+import { runAction } from "@/lib/api/guarded-action";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { getDiscoveryProvider } from "@/lib/discovery";
-import { withAction } from "@/lib/services/cost-tracker";
 import { enqueueEnrichCompany } from "@/lib/jobs/boss";
 import {
   findOrCreateOrganization,
@@ -70,7 +70,9 @@ export async function POST(request: Request) {
     }
   }
 
-  return withAction(
+  // runAction, not withAction: withAction does not catch, so a provider
+  // failure would escape as a bodiless 500 (see lib/api/guarded-action.ts).
+  return runAction(
     `Quick-Start discover: ${criteria.slice(0, 60)}`,
     async () => {
       const provider = await getDiscoveryProvider(userId);

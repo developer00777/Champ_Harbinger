@@ -1,4 +1,4 @@
-import { withAction } from "@/lib/services/cost-tracker";
+import { runAction } from "@/lib/api/guarded-action";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
@@ -116,7 +116,7 @@ export async function POST(request: Request) {
     ? `Enrich person: ${contactName} (${companyName})`
     : `Enrich person: ${contactName}`;
 
-  return withAction(actionLabel, async () => {
+  return runAction(actionLabel, async () => {
     // Mark as in_progress
     await adminDb
       .update(schema.people)
