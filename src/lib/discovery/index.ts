@@ -50,6 +50,15 @@ function makeCompositeProvider(
 ): DiscoveryProvider {
   return {
     name: primary.name,
+    // Composite only forms when a real key exists, so it is never mock — but
+    // defer to the members rather than hard-coding that assumption.
+    async usesMockData() {
+      const [a, b] = await Promise.all([
+        primary.usesMockData?.() ?? false,
+        secondary.usesMockData?.() ?? false,
+      ]);
+      return a && b;
+    },
     async discoverCompanies(criteria, max) {
       const [a, b] = await Promise.all([
         primary.discoverCompanies(criteria, max).catch(() => []),
@@ -93,5 +102,17 @@ export async function getDiscoveryProvider(
   if (searx) {
     return makePublicWebProvider();
   }
+
+  // * No LakeB2B key AND no SearXNG URL. The LakeB2B client silently swaps in
+  // * its mock implementation here, which returns 20 hard-coded fixture
+  // * companies (and falls back to the first 10 whenever filters match
+  // * nothing). That is fine for local dev and actively dangerous anywhere
+  // * else — it looks exactly like a real-but-thin result set. Warn loudly;
+  // * callers additionally surface it via provider.usesMockData().
+  console.warn(
+    "[discovery] No LAKEB2B key and no SEARXNG_URL configured — " +
+      "falling back to MOCK data. Results are fixtures, not real companies. " +
+      "Set SEARXNG_URL (free, self-hosted) or a LakeB2B key to get real results.",
+  );
   return makeLakeB2BProvider(clerkUserId); // mock fallback (no real key/URL)
 }
