@@ -1,4 +1,4 @@
-import { withAction } from "@/lib/services/cost-tracker";
+import { runAction } from "@/lib/api/guarded-action";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/db/admin";
 import { schema } from "@/db";
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     description: string | null;
   };
 
-  return withAction(`Find contacts: ${org.name}`, async () => {
+  return runAction(`Find contacts: ${org.name}`, async () => {
     let totalFound = 0;
 
     // Dedup against existing people linked to this campaign (by LinkedIn URL)

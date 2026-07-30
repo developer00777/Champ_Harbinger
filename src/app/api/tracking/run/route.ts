@@ -6,7 +6,7 @@ import {
   getAppBaseUrl,
   workerHeaders,
 } from "@/lib/jobs/internal-auth";
-import { withAction } from "@/lib/services/cost-tracker";
+import { runAction } from "@/lib/api/guarded-action";
 import { signalsRunTotal } from "@/lib/monitoring/metrics";
 import { executeSignal } from "@/lib/signals/executor";
 import type { Signal } from "@/lib/types/signal";
@@ -161,7 +161,7 @@ export async function POST(request: Request) {
   };
 
   // Wrap in withAction for cost tracking
-  return withAction(`Tracking run: ${orgName}`, async () => {
+  return runAction(`Tracking run: ${orgName}`, async () => {
     // ── Execute signal via universal executor ────────────────────────
     const signalRecord = typedConfig.signal as unknown as Signal;
     let rawOutput: Record<string, unknown>;

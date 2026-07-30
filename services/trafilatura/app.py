@@ -79,6 +79,30 @@ class ExtractedContent(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+_DROP = object()
+
+
+def _jsonable(value: Any) -> Any:
+    """Drop anything Pydantic can't serialize out of Trafilatura's metadata.
+
+    `Document.as_dict()` grew a `body` key holding a raw `lxml.etree._Element`
+    (and `commentsbody` alongside it). Those flow straight into
+    `ExtractedContent.metadata`, and FastAPI's response serializer then dies
+    with `PydanticSerializationError: Unable to serialize unknown type` — so
+    every /extract call 500s even though extraction itself succeeded. Filter
+    structurally rather than by key name so a future version adding another
+    element-valued field doesn't reintroduce the same 500.
+    """
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        out = {k: _jsonable(v) for k, v in value.items()}
+        return {k: v for k, v in out.items() if v is not _DROP}
+    if isinstance(value, (list, tuple, set)):
+        return [v for v in (_jsonable(v) for v in value) if v is not _DROP]
+    return _DROP
+
+
 def _tfa_format(out: Literal["text", "markdown", "json"]) -> str:
     """Map our public-API names to Trafilatura's internal names."""
     if out == "markdown":
@@ -129,7 +153,7 @@ def _extract_sync(
     title = author = date = language = None
     if meta is not None:
         try:
-            meta_dict = meta.as_dict()
+            meta_dict = _jsonable(meta.as_dict())
         except Exception:  # noqa: BLE001
             meta_dict = {}
         title = meta_dict.get("title")

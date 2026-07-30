@@ -13,9 +13,7 @@ export async function POST(request: Request) {
   if (guard instanceof Response) return guard;
   const { userId } = guard;
 
-  const parsed = inviteSchema.safeParse(
-    await request.json().catch(() => null),
-  );
+  const parsed = inviteSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return Response.json(
       { error: "Invalid input", issues: parsed.error.flatten() },
