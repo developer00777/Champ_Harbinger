@@ -36,11 +36,20 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { criteria, campaignId } = body as {
+  const {
+    criteria,
+    campaignId,
+    limit: rawLimit,
+  } = body as {
     criteria?: string;
     targetType?: string;
     campaignId?: string;
+    limit?: number;
   };
+
+  // * Was a hard-coded 20 at the discoverCompanies call. The provider now
+  // * paginates upstream, so this is a real target rather than one page.
+  const limit = Math.min(Math.max(Number(rawLimit) || 200, 1), 1000);
 
   if (!criteria || !criteria.trim()) {
     return Response.json({ error: "criteria is required" }, { status: 400 });
@@ -65,7 +74,8 @@ export async function POST(request: Request) {
     `Quick-Start discover: ${criteria.slice(0, 60)}`,
     async () => {
       const provider = await getDiscoveryProvider(userId);
-      const verified = await provider.discoverCompanies(criteria.trim(), 20);
+      const usesMockData = (await provider.usesMockData?.()) ?? false;
+      const verified = await provider.discoverCompanies(criteria.trim(), limit);
 
       // The criteria-verifier is intentionally strict and judges from thin
       // homepage data, so it frequently rejects every real company it found.
@@ -158,6 +168,15 @@ export async function POST(request: Request) {
         skipped,
         staged,
         contactFindingQueued: campaignId ? staged.length : 0,
+        // Never let fixture data pass for real leads.
+        ...(usesMockData
+          ? {
+              mock: true,
+              warning:
+                "MOCK DATA — no LakeB2B key and no SEARXNG_URL configured. " +
+                "These are built-in fixture companies, not real results.",
+            }
+          : {}),
       });
     },
   );
