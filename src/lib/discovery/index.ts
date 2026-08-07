@@ -93,14 +93,14 @@ export async function getDiscoveryProvider(
   if (keyed && searx) {
     return makeCompositeProvider(
       makeLakeB2BProvider(clerkUserId),
-      makePublicWebProvider(),
+      makePublicWebProvider(clerkUserId),
     );
   }
   if (keyed) {
     return makeLakeB2BProvider(clerkUserId);
   }
   if (searx) {
-    return makePublicWebProvider();
+    return makePublicWebProvider(clerkUserId);
   }
 
   // * No LakeB2B key AND no SearXNG URL. The LakeB2B client silently swaps in

@@ -1,7 +1,7 @@
 import { generateObjectLimited as generateObject } from "@/lib/ai/generate";
 import { z } from "zod";
 
-import { getModelSync } from "@/lib/ai/provider";
+import { getClassificationModel } from "@/lib/ai/provider";
 import { Models } from "@/lib/ai/models";
 import { recordAiUsage } from "@/lib/ai/usage";
 import { webSearch } from "@/lib/search/web-search";
@@ -47,7 +47,10 @@ function isAggregator(domain: string): boolean {
   );
 }
 
-async function generateSearchQueries(criteria: string): Promise<string[]> {
+async function generateSearchQueries(
+  criteria: string,
+  clerkUserId?: string,
+): Promise<string[]> {
   // NOTE: do not put array .min()/.max() here — they become JSON-schema
   // minItems/maxItems, which Anthropic/Bedrock structured output reject
   // ("For 'array' type, property 'maxItems' is not supported"). Keep the
@@ -57,7 +60,7 @@ async function generateSearchQueries(criteria: string): Promise<string[]> {
   });
   const startedAt = Date.now();
   const result = await generateObject({
-    model: getModelSync(Models.classification),
+    model: await getClassificationModel(clerkUserId),
     schema,
     prompt: `Turn this prospecting criteria into 3-5 web search queries likely to surface the HOMEPAGES of companies that match it (not directories or listicles). Vary the angle (industry terms, location, product category).\n\nCriteria: ${criteria}`,
   });
@@ -74,6 +77,7 @@ async function normalizeCompany(
   domain: string,
   text: string,
   criteria: string,
+  clerkUserId?: string,
 ): Promise<Company | null> {
   const schema = z.object({
     isCompany: z.boolean(),
@@ -84,7 +88,7 @@ async function normalizeCompany(
   const startedAt = Date.now();
   try {
     const result = await generateObject({
-      model: getModelSync(Models.classification),
+      model: await getClassificationModel(clerkUserId),
       schema,
       prompt: `From this website's text, decide if it is a single company's own site (not a directory/blog/marketplace). If so, extract the company name, a one-line description, and its industry.\n\nCriteria context: ${criteria}\nDomain: ${domain}\n\nText:\n${text.slice(0, 6000)}`,
     });
@@ -156,13 +160,14 @@ function parsePersonFromResult(r: {
 
 async function generatePeopleSearchQueries(
   criteria: string,
+  clerkUserId?: string,
 ): Promise<string[]> {
   const schema = z.object({
     queries: z.array(z.string()).describe("3 to 5 web search queries"),
   });
   const startedAt = Date.now();
   const result = await generateObject({
-    model: getModelSync(Models.classification),
+    model: await getClassificationModel(clerkUserId),
     schema,
     prompt: `Turn this prospecting criteria into 3-5 web search queries that surface INDIVIDUAL people's public LinkedIn profiles (linkedin.com/in/...) matching it. Include role/title terms and company or industry context; vary the angle.\n\nCriteria: ${criteria}`,
   });
@@ -190,12 +195,17 @@ async function generatePeopleSearchQueries(
  * Lower reliability than a keyed data provider, but it lets discovery work
  * without a LakeB2B key and composes additively with LakeB2B when both exist.
  */
-export function makePublicWebProvider(): DiscoveryProvider {
+/**
+ * `clerkUserId` is REQUIRED for BYOK to work. Without it every LLM call falls
+ * back to the server env key, so a key the user saved under Settings → Keys is
+ * silently ignored. getDiscoveryProvider() already has the id — pass it.
+ */
+export function makePublicWebProvider(clerkUserId?: string): DiscoveryProvider {
   const extractor = new WebExtractionService();
   return {
     name: "public-web",
     async discoverCompanies(criteria, max) {
-      const queries = await generateSearchQueries(criteria);
+      const queries = await generateSearchQueries(criteria, clerkUserId);
       const seen = new Set<string>();
       const domains: string[] = [];
       const domainCap = max * 3;
@@ -218,14 +228,19 @@ export function makePublicWebProvider(): DiscoveryProvider {
           includeMetadata: true,
         });
         if (!ex.success || ex.data.content.length < 100) continue;
-        const company = await normalizeCompany(d, ex.data.content, criteria);
+        const company = await normalizeCompany(
+          d,
+          ex.data.content,
+          criteria,
+          clerkUserId,
+        );
         if (company) candidates.push(company);
       }
 
       return verifyCompanies(candidates, criteria);
     },
     async discoverPeople(criteria, max) {
-      const queries = await generatePeopleSearchQueries(criteria);
+      const queries = await generatePeopleSearchQueries(criteria, clerkUserId);
       const seen = new Set<string>();
       const candidates: Person[] = [];
       const cap = max * 3;

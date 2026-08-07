@@ -80,3 +80,29 @@ export function getClassificationModelSync(): LanguageModel {
   }
   return getModelSync(Models.classification);
 }
+
+/**
+ * BYOK-aware classification model. Prefer this over
+ * `getClassificationModelSync()` anywhere a clerkUserId is available.
+ *
+ * Why it exists: `getModelSync()` (and therefore
+ * `getClassificationModelSync()`) can never consult `user_api_keys`, because
+ * that lookup is async. Any call site using the sync variants silently ignores
+ * a key the user saved under Settings → Keys and falls back to the server env
+ * var. That produced a confusing failure — the user pastes a working
+ * OpenRouter key, the Agent chat starts working (it resolves per-user), and
+ * discovery keeps reporting "OpenRouter rejected the API key" because it went
+ * down the sync path to a stale server key.
+ *
+ * Ollama still wins when configured: it is local and needs no key at all, so
+ * there is nothing to resolve per user.
+ */
+export async function getClassificationModel(
+  clerkUserId?: string,
+): Promise<LanguageModel> {
+  if (isOllamaConfigured()) {
+    const ollamaModel = getOllamaClassificationModel();
+    if (ollamaModel) return ollamaModel;
+  }
+  return getModel(Models.classification, clerkUserId);
+}
