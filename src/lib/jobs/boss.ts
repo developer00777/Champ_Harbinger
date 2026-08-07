@@ -19,6 +19,7 @@ export const MAILBOX_SYNC = "mailbox-sync";
 export const AISDR_PROCESS = "aisdr-process";
 export const SIGNAL_RESEARCH = "signal-research";
 export const USAGE_ALERTS = "usage-alerts";
+export const QUICK_START_DISCOVER = "quick-start-discover";
 
 declare global {
   var __harbinger_boss: PgBoss | undefined;
@@ -101,5 +102,36 @@ export async function enqueueEnrichCompany(
     // Generous expiry: the fair dispatcher may hold this in its in-memory
     // backlog (round-robin / per-user cap) before it actually runs.
     expireInSeconds: 3600,
+  });
+}
+
+export interface QuickStartDiscoverJob {
+  criteria: string;
+  userId: string;
+  campaignId: string | null;
+  limit: number;
+}
+
+/**
+ * Enqueue a Quick-Start discovery run and return the pg-boss job id so the UI
+ * can poll GET /api/quick-start/discover/status?jobId=...
+ *
+ * Discovery is a multi-minute fan-out (search -> fetch dozens of homepages ->
+ * LLM normalise -> ICP verify). Run inline in the API process it starved the
+ * whole backend: one request made every other route 504 until it finished.
+ * It belongs on the worker.
+ *
+ * `retryLimit: 0` on purpose — a retry would redo the entire crawl and burn
+ * the user's OpenRouter budget twice. Failures surface to the UI instead.
+ */
+export async function enqueueQuickStartDiscover(
+  job: QuickStartDiscoverJob,
+): Promise<string | null> {
+  const boss = await getBoss();
+  return boss.send(QUICK_START_DISCOVER, job, {
+    retryLimit: 0,
+    // De-dupe: a double-click must not launch two crawls for the same campaign.
+    singletonKey: `${job.userId}:${job.campaignId ?? "no-campaign"}`,
+    expireInSeconds: 1800,
   });
 }
