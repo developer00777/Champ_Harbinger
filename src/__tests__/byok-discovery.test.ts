@@ -47,6 +47,38 @@ describe("BYOK reaches the discovery path", () => {
   });
 });
 
+describe("the shared verifier/criteria are BYOK-aware too", () => {
+  // These live under lib/lakeb2b but the public-web provider reuses them
+  // ("ICP-verify, reusing the same verifier as LakeB2B"). Fixing only
+  // public-web-provider left discovery still dying on OpenRouter 401 here,
+  // AFTER all the scraping work — so they are part of the discovery path.
+  const verifier = read("src/lib/lakeb2b/verifier.ts");
+  const criteria = read("src/lib/lakeb2b/criteria.ts");
+  const publicWeb = read("src/lib/discovery/public-web-provider.ts");
+  const lakeb2b = read("src/lib/discovery/lakeb2b-provider.ts");
+
+  it("verifier resolves the model per user", () => {
+    expect(verifier).not.toMatch(/getClassificationModelSync\s*\(/);
+    expect(verifier).toMatch(/getClassificationModel\(\s*clerkUserId\s*\)/);
+  });
+
+  it("criteria translation resolves the model per user", () => {
+    expect(criteria).not.toMatch(/getClassificationModelSync\s*\(/);
+    expect(criteria).toMatch(/getClassificationModel\(\s*clerkUserId\s*\)/);
+  });
+
+  it("both providers forward clerkUserId into verifyCompanies", () => {
+    expect(publicWeb).toMatch(/verifyCompanies\([^)]*clerkUserId\s*\)/);
+    expect(lakeb2b).toMatch(/verifyCompanies\([^)]*clerkUserId\s*\)/);
+  });
+
+  it("no sync model helper survives anywhere in the discovery graph", () => {
+    for (const src of [publicWeb, lakeb2b, verifier, criteria]) {
+      expect(src).not.toMatch(/getModelSync|getClassificationModelSync/);
+    }
+  });
+});
+
 describe("the async classification helper is BYOK-aware", () => {
   const providerTs = read("src/lib/ai/provider.ts");
 
