@@ -51,6 +51,10 @@ export async function getBoss(): Promise<PgBoss> {
         AISDR_PROCESS,
         SIGNAL_RESEARCH,
         USAGE_ALERTS,
+        // pg-boss v12 does NOT auto-create queues: boss.work() on an unknown
+        // queue throws "Queue <name> does not exist" in a loop. Every queue
+        // must be listed here.
+        QUICK_START_DISCOVER,
       ]) {
         try {
           await boss.createQueue(queue);
