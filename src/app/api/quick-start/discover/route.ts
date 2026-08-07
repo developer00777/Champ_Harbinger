@@ -1,26 +1,26 @@
 import { getCurrentUser } from "@/lib/auth";
 import { runAction } from "@/lib/api/guarded-action";
-import { adminDb } from "@/lib/db/admin";
-import { schema } from "@/db";
-import { eq } from "drizzle-orm";
-import { getDiscoveryProvider } from "@/lib/discovery";
-import { enqueueEnrichCompany } from "@/lib/jobs/boss";
-import {
-  findOrCreateOrganization,
-  linkOrganizationToCampaign,
-} from "@/lib/services/knowledge-base";
-
-export const maxDuration = 60;
+import { enqueueQuickStartDiscover } from "@/lib/jobs/boss";
+import { assertCampaignOwned } from "@/lib/quick-start/run-discovery";
 
 /**
  * Quick-Start "Describe criteria" entry point.
  *
- * Reuses the same discovery provider as POST /api/v1/discover
- * (getDiscoveryProvider → AI-verified companies). Session-auth + ownership
- * (mirrors find-contacts / enrich-company/bulk). If `campaignId` is supplied,
- * the verified companies are imported into that campaign (same KB insert path
- * as /api/import-csv) so they're immediately stage-able in the hub.
+ * ENQUEUES ONLY — it does not run discovery. The pipeline (LLM query-gen →
+ * SearXNG → fetch dozens of homepages → LLM-normalise → ICP verify) routinely
+ * runs for several minutes. Running it inline here starved the backend: on a
+ * 512 MiB / 0.75 CPU container a single discovery request made every other
+ * route (/api/campaigns, /api/dashboard, /api/me/provision) return 504 until it
+ * finished, and killing the request restored the API instantly.
+ *
+ * So the work moved to the pg-boss worker, which exists for exactly this and is
+ * already fair-dispatched and budget-guarded. This route returns 202 with a
+ * jobId; the client polls GET /api/quick-start/discover/status?jobId=...
+ *
+ * maxDuration is now small on purpose — enqueueing is a couple of DB writes.
  */
+export const maxDuration = 30;
+
 export async function POST(request: Request) {
   let userId: string;
   try {
@@ -55,131 +55,45 @@ export async function POST(request: Request) {
     return Response.json({ error: "criteria is required" }, { status: 400 });
   }
 
-  // If a campaign is supplied, verify ownership before importing into it.
   if (campaignId) {
-    const [campaign] = await adminDb
-      .select({ clerkUserId: schema.campaigns.clerkUserId })
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.id, campaignId))
-      .limit(1);
-    if (!campaign) {
+    const owned = await assertCampaignOwned(campaignId, userId);
+    if (owned === "not_found") {
       return Response.json({ error: "Campaign not found" }, { status: 404 });
     }
-    if (campaign.clerkUserId !== userId) {
+    if (owned === "forbidden") {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
   }
 
-  // runAction, not withAction: withAction does not catch, so a provider
-  // failure would escape as a bodiless 500 (see lib/api/guarded-action.ts).
   return runAction(
-    `Quick-Start discover: ${criteria.slice(0, 60)}`,
+    `Quick-Start discover (enqueue): ${criteria.slice(0, 60)}`,
     async () => {
-      const provider = await getDiscoveryProvider(userId);
-      const usesMockData = (await provider.usesMockData?.()) ?? false;
-      const verified = await provider.discoverCompanies(criteria.trim(), limit);
+      const jobId = await enqueueQuickStartDiscover({
+        criteria: criteria.trim(),
+        userId,
+        campaignId: campaignId ?? null,
+        limit,
+      });
 
-      // The criteria-verifier is intentionally strict and judges from thin
-      // homepage data, so it frequently rejects every real company it found.
-      // Quick Start must not come back empty when discovery actually surfaced
-      // companies: prefer the verified-passing set, but fall back to the full
-      // discovered set (each already cleared the "is a real, relevant company"
-      // normalize step) so the user always has companies to work with.
-      const passing = verified.filter((co) => co.passes);
-      const selected = passing.length > 0 ? passing : verified;
-
-      // Shape mirrors POST /api/v1/discover so the UI gets a stable contract.
-      const companies = selected.map((co) => ({
-        name: co.name,
-        domain: co.domain ?? null,
-        url: co.website ?? null,
-        industry: co.industry ?? null,
-        location: co.location?.country ?? null,
-        description: co.description ?? null,
-        score: co.funding_stage ? 7 : 5,
-        score_reason:
-          co.reason ??
-          `${co.industry ?? "Company"} in ${co.location?.country ?? "unknown location"}`,
-      }));
-
-      // When a campaign is given, import the discovered companies so they become
-      // stage-able. Reuse the exact KB path used by /api/import-csv:
-      // findOrCreateOrganization (dedup by domain) + linkOrganizationToCampaign.
-      let imported = 0;
-      let skipped = 0;
-      const staged: Array<{
-        id: string; // campaign_organizations.id — the companyId find-contacts wants
-        organizationId: string;
-        name: string;
-        domain: string | null;
-        industry: string | null;
-        location: string | null;
-      }> = [];
-
-      if (campaignId) {
-        const seenDomains = new Set<string>();
-        for (const co of companies) {
-          if (!co.name?.trim()) {
-            skipped++;
-            continue;
-          }
-          if (co.domain && seenDomains.has(co.domain)) {
-            skipped++;
-            continue;
-          }
-          if (co.domain) seenDomains.add(co.domain);
-
-          const org = await findOrCreateOrganization({
-            name: co.name.trim(),
-            domain: co.domain,
-            url: co.url,
-            industry: co.industry,
-            location: co.location,
-            description: co.description,
-            source: "quick_start_discover",
-          });
-          const link = await linkOrganizationToCampaign(org.id, campaignId);
-          imported++;
-          staged.push({
-            id: link.id,
-            organizationId: org.id,
-            name: org.name,
-            domain: org.domain ?? null,
-            industry: org.industry ?? null,
-            location: org.location ?? null,
-          });
-        }
-      }
-
-      // Auto-kick contact-finding for everything we just staged. Incoming
-      // companies should get their people found automatically — that's the
-      // point. The worker processes these ~5 at a time (fair-dispatched, budget
-      // -guarded); contacts stream into the campaign without per-company clicks.
-      if (campaignId && staged.length > 0) {
-        await Promise.allSettled(
-          staged.map((s) =>
-            enqueueEnrichCompany({ companyId: s.id, campaignId, userId }),
-          ),
+      if (!jobId) {
+        // pg-boss returns null when a singletonKey collides — a run for this
+        // user+campaign is already in flight. Not an error; say so plainly.
+        return Response.json(
+          {
+            queued: false,
+            alreadyRunning: true,
+            campaignId: campaignId ?? null,
+            message:
+              "A discovery run is already in progress for this campaign.",
+          },
+          { status: 202 },
         );
       }
 
-      return Response.json({
-        companies,
-        campaignId: campaignId ?? null,
-        imported,
-        skipped,
-        staged,
-        contactFindingQueued: campaignId ? staged.length : 0,
-        // Never let fixture data pass for real leads.
-        ...(usesMockData
-          ? {
-              mock: true,
-              warning:
-                "MOCK DATA — no LakeB2B key and no SEARXNG_URL configured. " +
-                "These are built-in fixture companies, not real results.",
-            }
-          : {}),
-      });
+      return Response.json(
+        { queued: true, jobId, campaignId: campaignId ?? null },
+        { status: 202 },
+      );
     },
   );
 }

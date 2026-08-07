@@ -300,7 +300,49 @@ export function QuickStartHub() {
       // jsonOrThrow reads text first, so a bodiless 500 reports its status
       // instead of raising "Unexpected end of JSON input". The catch below
       // renders whatever reason the route gave us.
-      await jsonOrThrow(res);
+      const queued = await jsonOrThrow<{
+        queued?: boolean;
+        jobId?: string;
+        alreadyRunning?: boolean;
+        message?: string;
+      }>(res);
+
+      // Discovery now runs on the pg-boss worker — the POST only enqueues (202)
+      // because running it inline starved the backend and 504'd every other
+      // route. Poll until the job finishes.
+      if (queued.alreadyRunning) {
+        setError(
+          queued.message ??
+            "A discovery run is already in progress for this campaign.",
+        );
+        return;
+      }
+      if (!queued.jobId) throw new Error("Discovery did not return a job id.");
+
+      const startedAt = Date.now();
+      const TIMEOUT_MS = 15 * 60_000;
+      for (;;) {
+        if (Date.now() - startedAt > TIMEOUT_MS) {
+          throw new Error(
+            "Discovery is taking unusually long. It is still running in the background — check back shortly.",
+          );
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+        const s = await jsonOrThrow<{
+          state: string;
+          done: boolean;
+          error?: string;
+        }>(
+          await fetch(
+            `/api/quick-start/discover/status?jobId=${encodeURIComponent(queued.jobId)}`,
+          ),
+        );
+        if (s.done) {
+          if (s.error) throw new Error(s.error);
+          break;
+        }
+      }
+
       const { companies: refreshed } = await refreshCampaign(id);
       setCompanies(refreshed);
       setStep("companies");

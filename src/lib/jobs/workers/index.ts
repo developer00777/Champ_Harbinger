@@ -4,6 +4,8 @@ import {
   TRACKING_RUN,
   OUTREACH_FOLLOWUPS,
   ENRICH_COMPANY,
+  QUICK_START_DISCOVER,
+  type QuickStartDiscoverJob,
   MAILBOX_SYNC,
   AISDR_PROCESS,
   SIGNAL_RESEARCH,
@@ -11,6 +13,7 @@ import {
   type EnrichCompanyJob,
 } from "@/lib/jobs/boss";
 import { dispatchDueTrackingConfigs } from "@/lib/jobs/handlers/dispatch-tracking";
+import { runQuickStartDiscovery } from "@/lib/quick-start/run-discovery";
 import { syncMailboxes } from "@/lib/jobs/handlers/sync-mailboxes";
 import { getAppBaseUrl, workerHeaders } from "@/lib/jobs/internal-auth";
 import { createFairDispatcher } from "@/lib/jobs/fair-dispatcher";
@@ -174,6 +177,33 @@ export async function startWorkers(): Promise<void> {
             .slice(0, 3)
             .map((f) => (f as PromiseRejectedResult).reason?.message),
         );
+      }
+    },
+  );
+
+  // Quick-Start discovery. Deliberately localConcurrency 1: one run already
+  // fans out to dozens of concurrent page fetches plus LLM calls, and running
+  // two at once is what exhausted the container and 504'd every other route.
+  // The result is returned so pg-boss stores it as the job output, which is
+  // what GET /api/quick-start/discover/status reads — no extra table needed.
+  await boss.work(
+    QUICK_START_DISCOVER,
+    { localConcurrency: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        const { criteria, userId, campaignId, limit } =
+          job.data as QuickStartDiscoverJob;
+        const result = await runQuickStartDiscovery({
+          criteria,
+          userId,
+          campaignId,
+          limit,
+        });
+        console.log(
+          `[worker] quick-start-discover: ${result.companies.length} companies, ` +
+            `${result.imported} imported, ${result.contactFindingQueued} contact-find jobs queued`,
+        );
+        return result;
       }
     },
   );
