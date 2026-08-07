@@ -237,7 +237,7 @@ export function makePublicWebProvider(clerkUserId?: string): DiscoveryProvider {
         if (company) candidates.push(company);
       }
 
-      return verifyCompanies(candidates, criteria);
+      return verifyCompanies(candidates, criteria, clerkUserId);
     },
     async discoverPeople(criteria, max) {
       const queries = await generatePeopleSearchQueries(criteria, clerkUserId);

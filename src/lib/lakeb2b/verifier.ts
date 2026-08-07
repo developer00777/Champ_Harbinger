@@ -1,6 +1,6 @@
 import "server-only";
 import { generateTextLimited as generateText } from "@/lib/ai/generate";
-import { getClassificationModelSync } from "@/lib/ai/provider";
+import { getClassificationModel } from "@/lib/ai/provider";
 import type { Company, Person } from "./schemas";
 
 export interface VerifiedCompany extends Company {
@@ -49,6 +49,7 @@ function extractVerifications(text: string): VerificationResult[] {
 export async function verifyCompanies(
   companies: Company[],
   criteria: string,
+  clerkUserId?: string,
 ): Promise<VerifiedCompany[]> {
   const results: VerifiedCompany[] = [];
 
@@ -67,7 +68,7 @@ export async function verifyCompanies(
     }));
 
     const { text } = await generateText({
-      model: getClassificationModelSync(),
+      model: await getClassificationModel(clerkUserId),
       system:
         "You are verifying whether B2B companies match a set of criteria. " +
         "For each company, determine if it clearly satisfies ALL stated criteria. " +
@@ -99,6 +100,7 @@ export async function verifyCompanies(
 export async function verifyPeople(
   people: Person[],
   criteria: string,
+  clerkUserId?: string,
 ): Promise<VerifiedPerson[]> {
   const results: VerifiedPerson[] = [];
 
@@ -114,7 +116,7 @@ export async function verifyPeople(
     }));
 
     const { text } = await generateText({
-      model: getClassificationModelSync(),
+      model: await getClassificationModel(clerkUserId),
       system:
         "You are verifying whether B2B contacts match a set of criteria. " +
         "For each person, determine if it clearly satisfies ALL stated criteria. " +

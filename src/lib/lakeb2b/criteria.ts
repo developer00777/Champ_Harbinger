@@ -1,6 +1,6 @@
 import "server-only";
 import { generateTextLimited as generateText } from "@/lib/ai/generate";
-import { getClassificationModelSync } from "@/lib/ai/provider";
+import { getClassificationModel } from "@/lib/ai/provider";
 import { CompanySearchParamsSchema, PeopleSearchParamsSchema } from "./schemas";
 import type { CompanySearchParams, PeopleSearchParams } from "./schemas";
 
@@ -46,9 +46,10 @@ function extractJson(text: string): unknown {
 
 export async function translateCompanyCriteria(
   criteria: string,
+  clerkUserId?: string,
 ): Promise<CompanySearchParams> {
   const { text } = await generateText({
-    model: getClassificationModelSync(),
+    model: await getClassificationModel(clerkUserId),
     system:
       "You are a search query builder for a B2B prospecting database with 120M+ contacts. " +
       "Translate natural language company search criteria into a JSON object of API query parameters. " +
@@ -72,9 +73,10 @@ export async function translateCompanyCriteria(
 
 export async function translatePeopleCriteria(
   criteria: string,
+  clerkUserId?: string,
 ): Promise<PeopleSearchParams> {
   const { text } = await generateText({
-    model: getClassificationModelSync(),
+    model: await getClassificationModel(clerkUserId),
     system:
       "You are a search query builder for a B2B prospecting database with 120M+ contacts. " +
       "Translate natural language people search criteria into a JSON object of API query parameters. " +

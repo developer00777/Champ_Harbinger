@@ -64,7 +64,7 @@ export function makeLakeB2BProvider(clerkUserId?: string): DiscoveryProvider {
     },
     async discoverCompanies(criteria, max) {
       const client = await getLakeB2BClient(clerkUserId);
-      const params = await translateCompanyCriteria(criteria);
+      const params = await translateCompanyCriteria(criteria, clerkUserId);
       const rows = await paginate(max, async (page, perPage) => {
         const result = await client.searchCompanies({
           ...params,
@@ -73,11 +73,11 @@ export function makeLakeB2BProvider(clerkUserId?: string): DiscoveryProvider {
         });
         return { results: result.results, has_more: result.has_more };
       });
-      return verifyCompanies(rows, criteria);
+      return verifyCompanies(rows, criteria, clerkUserId);
     },
     async discoverPeople(criteria, max) {
       const client = await getLakeB2BClient(clerkUserId);
-      const params = await translatePeopleCriteria(criteria);
+      const params = await translatePeopleCriteria(criteria, clerkUserId);
       const rows = await paginate(max, async (page, perPage) => {
         const result = await client.searchPeople({
           ...params,
@@ -86,7 +86,7 @@ export function makeLakeB2BProvider(clerkUserId?: string): DiscoveryProvider {
         });
         return { results: result.results, has_more: result.has_more };
       });
-      return verifyPeople(rows, criteria);
+      return verifyPeople(rows, criteria, clerkUserId);
     },
   };
 }
