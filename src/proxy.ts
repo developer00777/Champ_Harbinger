@@ -17,6 +17,7 @@ const isPublicRoute = createRouteMatcher([
   "/api/outreach/process(.*)", // outreach sequence processing (called by job scheduler)
   "/api/enrich-company(.*)", // bulk enrichment jobs (worker-secret or session authed in-route)
   "/api/rss/(.*)", // RSS monitor (authenticated by chh_ API key, not Clerk session)
+  "/api/internal/worker-config", // worker config pull (x-worker-secret authed in-route, no Clerk session)
 ]);
 
 export const proxy = clerkMiddleware(async (auth, request) => {
