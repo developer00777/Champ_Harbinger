@@ -18,6 +18,14 @@ import { timingSafeEqual } from "node:crypto";
  * is unset, because a leak here hands out live provider keys.
  */
 
+// This route reads request.headers directly rather than next/headers'
+// dynamic headers() API, so Next.js has no signal that the response depends
+// on the request — without this, it can statically optimize/cache the
+// handler at build time and serve one fixed response (always 404, since
+// there's no real request then) to every caller regardless of the secret
+// they send. Force dynamic rendering explicitly.
+export const dynamic = "force-dynamic";
+
 const HEADER = "x-worker-secret";
 
 const ALLOWED_KEYS = [
