@@ -39,11 +39,21 @@ loadEnv({ path: resolve(process.cwd(), ".env") });
 async function main() {
   const { startWorkers } = await import("@/lib/jobs/workers");
   const { getBoss } = await import("@/lib/jobs/boss");
+  const { refreshWorkerConfig, startWorkerConfigPolling } =
+    await import("@/lib/jobs/worker-config");
+
+  // Pull provider keys (OpenRouter, PDL, InboxKit, etc.) from the app before
+  // starting job handlers, so the first job has real keys whenever possible.
+  // Then keep polling in the background so a key rotated in Vercel reaches
+  // this process without a worker redeploy.
+  await refreshWorkerConfig();
+  const configPoll = startWorkerConfigPolling();
 
   await startWorkers();
 
   const shutdown = async (signal: string) => {
     console.log(`[worker] ${signal} received, draining…`);
+    clearInterval(configPoll);
     try {
       const boss = await getBoss();
       await boss.stop({ graceful: true, timeout: 30_000 });

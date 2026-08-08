@@ -101,6 +101,17 @@ const DEFAULT_PROVIDER_PRIORITY: ProviderPriorityEntry[] = [
     rank: 20,
   },
   {
+    // Ranked just ahead of PDL: with a Coresignal key configured, it takes
+    // this paid gap-fill slot instead of PDL — the plug-and-play stand-in
+    // relationship Coresignal has with LakeB2B on the discovery side. No key
+    // configured -> no-ops, so PDL (or nothing) still runs as before.
+    name: "coresignal",
+    enabled: true,
+    costPerCall: 0.02,
+    covers: ["email", "title", "seniority", "linkedin", "company"],
+    rank: 25,
+  },
+  {
     name: "pdl",
     enabled: true,
     costPerCall: 0.1,

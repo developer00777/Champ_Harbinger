@@ -3,6 +3,10 @@ import { isSearxConfigured } from "@/lib/search/searxng-client";
 import { normalizeDomain } from "@/lib/services/knowledge-base";
 import { normalizeLinkedInUrl } from "@/lib/enrichment/providers/linkedinResolver";
 import type { VerifiedCompany, VerifiedPerson } from "@/lib/lakeb2b/verifier";
+import {
+  hasCoresignalKey,
+  makeCoresignalProvider,
+} from "./coresignal-provider";
 import { makeLakeB2BProvider } from "./lakeb2b-provider";
 import { makePublicWebProvider } from "./public-web-provider";
 import type { DiscoveryProvider } from "./types";
@@ -78,11 +82,16 @@ function makeCompositeProvider(
 
 /**
  * Pick a discovery provider. Ordering:
- *   1. real LakeB2B key + SearXNG → COMPOSITE (LakeB2B primary + public web),
+ *   1. real LakeB2B key + SearXNG    → COMPOSITE (LakeB2B primary + public web),
  *      so the two sources are additive.
- *   2. real LakeB2B key only      → LakeB2B (best data).
- *   3. SearXNG only               → public web (the self-hosted default).
- *   4. neither                    → LakeB2B mock client (keeps local dev usable).
+ *   2. real LakeB2B key only         → LakeB2B (best data).
+ *   3. Coresignal key + SearXNG      → COMPOSITE (Coresignal primary + public web).
+ *      Coresignal is a plug-and-play stand-in for testing without LakeB2B
+ *      (see coresignal-provider.ts) — it slots in exactly where LakeB2B would,
+ *      and drops back out the moment a real LakeB2B key is configured.
+ *   4. Coresignal key only           → Coresignal.
+ *   5. SearXNG only                  → public web (the self-hosted default).
+ *   6. neither                       → LakeB2B mock client (keeps local dev usable).
  */
 export async function getDiscoveryProvider(
   clerkUserId?: string,
@@ -99,20 +108,34 @@ export async function getDiscoveryProvider(
   if (keyed) {
     return makeLakeB2BProvider(clerkUserId);
   }
+
+  const coresignalKeyed = await hasCoresignalKey(clerkUserId);
+  if (coresignalKeyed && searx) {
+    return makeCompositeProvider(
+      makeCoresignalProvider(clerkUserId),
+      makePublicWebProvider(clerkUserId),
+    );
+  }
+  if (coresignalKeyed) {
+    return makeCoresignalProvider(clerkUserId);
+  }
+
   if (searx) {
     return makePublicWebProvider(clerkUserId);
   }
 
-  // * No LakeB2B key AND no SearXNG URL. The LakeB2B client silently swaps in
-  // * its mock implementation here, which returns 20 hard-coded fixture
-  // * companies (and falls back to the first 10 whenever filters match
-  // * nothing). That is fine for local dev and actively dangerous anywhere
-  // * else — it looks exactly like a real-but-thin result set. Warn loudly;
-  // * callers additionally surface it via provider.usesMockData().
+  // * No LakeB2B key, no Coresignal key, AND no SearXNG URL. The LakeB2B
+  // * client silently swaps in its mock implementation here, which returns 20
+  // * hard-coded fixture companies (and falls back to the first 10 whenever
+  // * filters match nothing). That is fine for local dev and actively
+  // * dangerous anywhere else — it looks exactly like a real-but-thin result
+  // * set. Warn loudly; callers additionally surface it via
+  // * provider.usesMockData().
   console.warn(
-    "[discovery] No LAKEB2B key and no SEARXNG_URL configured — " +
-      "falling back to MOCK data. Results are fixtures, not real companies. " +
-      "Set SEARXNG_URL (free, self-hosted) or a LakeB2B key to get real results.",
+    "[discovery] No LAKEB2B key, no CORESIGNAL_API_KEY, and no SEARXNG_URL " +
+      "configured — falling back to MOCK data. Results are fixtures, not " +
+      "real companies. Set SEARXNG_URL (free, self-hosted), a LakeB2B key, " +
+      "or a Coresignal key to get real results.",
   );
   return makeLakeB2BProvider(clerkUserId); // mock fallback (no real key/URL)
 }

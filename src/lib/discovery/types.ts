@@ -2,12 +2,14 @@ import type { VerifiedCompany, VerifiedPerson } from "@/lib/lakeb2b/verifier";
 
 /**
  * A discovery provider turns natural-language criteria into ICP-verified
- * companies/people. LakeB2B (when a key is configured) and public-web (SearXNG +
- * extraction) are interchangeable implementations of this interface; both reuse
- * the same criteria-translation and verification code so results are comparable.
+ * companies/people. LakeB2B (when a key is configured), Coresignal (a
+ * plug-and-play stand-in for testing without LakeB2B — see
+ * src/lib/discovery/coresignal-provider.ts), and public-web (SearXNG +
+ * extraction) are interchangeable implementations of this interface; all
+ * reuse the same verification code so results are comparable.
  */
 export interface DiscoveryProvider {
-  readonly name: "lakeb2b" | "public-web" | "composite";
+  readonly name: "lakeb2b" | "coresignal" | "public-web" | "composite";
   /**
    * True when this provider is serving built-in fixture data rather than real
    * results — i.e. no LakeB2B key and no SearXNG URL is configured, so the

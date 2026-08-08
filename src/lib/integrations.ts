@@ -247,6 +247,22 @@ export const INTEGRATIONS: Integration[] = [
     fixHint: "Add PDL_API_KEY to .env.local or paste it in Settings → Keys",
   },
   {
+    id: "coresignal",
+    name: "Coresignal",
+    category: "enrichment",
+    severity: "optional",
+    feature:
+      "Company/people discovery (Agentic Search) and paid person enrichment — a plug-and-play stand-in for Lake B2B during testing",
+    consequence:
+      "Discovery falls back to browser-based web research (or Lake B2B, if configured); the waterfall skips Coresignal for gap-fill enrichment.",
+    envVars: ["CORESIGNAL_API_KEY"],
+    keyName: "coresignal_api_key",
+    signupUrl: "https://coresignal.com",
+    keysUrl: "https://app.coresignal.com",
+    fixHint:
+      "Add CORESIGNAL_API_KEY to .env.local or paste it in Settings → Keys",
+  },
+  {
     id: "inboxkit",
     name: "InboxKit",
     category: "email",

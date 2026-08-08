@@ -16,6 +16,7 @@ import { MockLakeB2BAdapter } from "./providers/lakeb2bMock";
 import { LakeB2BAdapter } from "./providers/lakeb2bAdapter";
 import { ApolloAdapter } from "./providers/apolloAdapter";
 import { PeopleDataLabsAdapter } from "./providers/peopleDataLabsAdapter";
+import { CoresignalAdapter } from "./providers/coresignalAdapter";
 import { verifyEmailOwned } from "./providers/emailGate";
 import { MasterDBWriter } from "./writeback";
 import {
@@ -69,6 +70,7 @@ function getRegistry(): ProviderRegistry {
   // required fields per the config-driven provider priority list.
   registry.register(new ApolloAdapter());
   registry.register(new PeopleDataLabsAdapter());
+  registry.register(new CoresignalAdapter());
   cachedRegistry = registry;
   return registry;
 }
