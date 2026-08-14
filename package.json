@@ -46,7 +46,7 @@
     "@clerk/ui": "^1.26.0",
     "@huggingface/transformers": "^4.2.0",
     "@openrouter/ai-sdk-provider": "6.0.0-alpha.1",
-    "@sentry/nextjs": "^8.0.0",
+    "@sentry/nextjs": "^10.70.0",
     "@x402/fetch": "^2.19.0",
     "ai": "^6.0.116",
     "cheerio": "^1.2.0",
