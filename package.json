@@ -48,7 +48,7 @@
     "@openrouter/ai-sdk-provider": "6.0.0-alpha.1",
     "@sentry/nextjs": "^8.0.0",
     "@x402/fetch": "^2.19.0",
-    "ai": "^6.0.116",
+    "ai": "^7.0.59",
     "cheerio": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
