@@ -1,0 +1,45 @@
+# Files uploaded to Vercel's build but never used by `next build`.
+# The Vercel project builds ONLY the Next.js app (frontend + /api routes) —
+# the worker and the scraper microservices deploy elsewhere (Coolify/Railway),
+# see docs/DEPLOY-COOLIFY-VERCEL.md and docs/DEPLOY-RAILWAY.md.
+#
+# NOTE: this file affects the *upload*, not the build output. Do not add
+# anything `next build` reads — src/, db/schema.ts, public/, next.config.ts,
+# the *.config.* files at the root, and the drizzle config must all stay.
+
+# --- Self-hosted backend services (own Dockerfiles, own hosts) ---
+services/
+browserbase-functions/
+supabase/
+prometheus/
+
+# --- Container / non-Vercel deploy config ---
+Dockerfile
+Dockerfile.worker
+.dockerignore
+docker-compose.yaml
+railway.toml
+railway.worker.toml
+
+# --- Tests: Vercel runs `next build`, never the test suites ---
+e2e/
+test-results/
+playwright-report/
+blob-report/
+coverage/
+playwright.config.ts
+vitest.config.ts
+
+# --- Docs & repo meta ---
+docs/
+*.md
+!README.md
+.github/
+.husky/
+.claude/
+.superpowers/
+
+# --- Local build/dev artifacts (belt-and-braces; Vercel builds clean) ---
+.next/
+node_modules/
+tsconfig.tsbuildinfo
