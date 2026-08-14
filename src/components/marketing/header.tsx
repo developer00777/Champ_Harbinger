@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { currentUser } from "@clerk/nextjs/server";
 
+import { devCurrentUser, isDevAuthBypass } from "@/lib/dev-auth";
+
 const NAV_LINKS = [
   { href: "#features", label: "Features" },
   { href: "#how-it-works", label: "How it works" },
@@ -9,7 +11,7 @@ const NAV_LINKS = [
 ];
 
 export async function MarketingHeader() {
-  const user = await currentUser();
+  const user = isDevAuthBypass() ? devCurrentUser() : await currentUser();
 
   return (
     <header className="border-border/70 bg-background/80 sticky top-0 z-50 border-b backdrop-blur-md">

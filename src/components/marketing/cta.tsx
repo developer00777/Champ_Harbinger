@@ -2,8 +2,10 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { currentUser } from "@clerk/nextjs/server";
 
+import { devCurrentUser, isDevAuthBypass } from "@/lib/dev-auth";
+
 export async function CTA() {
-  const user = await currentUser();
+  const user = isDevAuthBypass() ? devCurrentUser() : await currentUser();
 
   return (
     <section className="bg-background">

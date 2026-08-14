@@ -1,5 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
 
+import { devCurrentUser, isDevAuthBypass } from "@/lib/dev-auth";
 import { ensureProvisioned } from "@/lib/teams";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export const dynamic = "force-dynamic";
  * transient DB problem can never block a user, and this route mirrors that.
  */
 export async function POST() {
-  const user = await currentUser();
+  const user = isDevAuthBypass() ? devCurrentUser() : await currentUser();
   if (!user) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }

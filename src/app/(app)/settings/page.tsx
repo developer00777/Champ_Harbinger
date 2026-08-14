@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
-import { useAuth } from "@clerk/nextjs";
+import { useAuthOrDev } from "@/lib/dev-auth-client";
 
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,7 +44,7 @@ function DarkModeToggle() {
 }
 
 export default function SettingsPage() {
-  const { userId } = useAuth();
+  const { userId } = useAuthOrDev();
 
   return (
     <div className="flex-1 overflow-y-auto">

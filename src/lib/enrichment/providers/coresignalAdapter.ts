@@ -11,6 +11,7 @@ import {
   type FieldValue,
   type ProviderResult,
 } from "../types";
+import { CoresignalNoCreditsError } from "@/lib/discovery/coresignal-provider";
 import type { ProviderAdapter } from "./base";
 import { resolveProviderKey } from "./keys";
 import { normalizeLinkedInUrl } from "./linkedinResolver";
@@ -96,6 +97,10 @@ async function collectByLinkedIn(
     30_000,
   );
   if (res.status === 404) return null;
+  // 402 = plan carries no data credits. Treated as "no match" rather than an
+  // error: the waterfall should quietly fall through to the next provider
+  // instead of recording a failure on every single contact.
+  if (res.status === 402) throw new CoresignalNoCreditsError();
   if (!res.ok) throw new Error(`Coresignal collect ${res.status}`);
   return (await res.json()) as CoresignalPerson;
 }
@@ -126,6 +131,7 @@ async function searchByNameCompany(
     },
     30_000,
   );
+  if (res.status === 402) throw new CoresignalNoCreditsError();
   if (!res.ok) throw new Error(`Coresignal agentic_search/fast ${res.status}`);
   const body = (await res.json()) as
     CoresignalPerson[] | { results?: CoresignalPerson[] };
@@ -146,11 +152,19 @@ async function defaultLookup(
   const key = await resolveKey(clerkUserId);
   if (!key) return null;
 
-  if (ident.linkedinUrl) {
-    return collectByLinkedIn(key, ident.linkedinUrl);
-  }
-  if (ident.fullName) {
-    return searchByNameCompany(key, ident.fullName, ident.company);
+  try {
+    if (ident.linkedinUrl) {
+      return await collectByLinkedIn(key, ident.linkedinUrl);
+    }
+    if (ident.fullName) {
+      return await searchByNameCompany(key, ident.fullName, ident.company);
+    }
+  } catch (err) {
+    // A no-credits plan cannot enrich anyone. Report it as a no-match so the
+    // waterfall moves on to the next provider instead of surfacing an error
+    // for every contact in the batch.
+    if (err instanceof CoresignalNoCreditsError) return null;
+    throw err;
   }
   return null;
 }

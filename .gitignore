@@ -37,6 +37,14 @@ yarn-error.log*
 .env.development.local
 .env.production.local
 .env.test.local
+# Backups/copies of env files hold REAL secrets and must never be committed.
+# `.env.local` alone does not cover `.env.local.bak-1234` or `.env.local.save`.
+.env.local.*
+.env*.bak
+.env*.bak-*
+.env*.backup
+.env*.orig
+.env*.save
 
 # vercel
 .vercel

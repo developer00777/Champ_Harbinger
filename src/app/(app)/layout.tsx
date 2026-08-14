@@ -1,5 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
 
+import { devCurrentUser, isDevAuthBypass } from "@/lib/dev-auth";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { MissingKeyBannerStack } from "@/components/missing-key-banner-stack";
 import { ProvisionOnMount } from "@/components/provision-on-mount";
@@ -25,7 +26,7 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const user = await currentUser();
+  const user = isDevAuthBypass() ? devCurrentUser() : await currentUser();
   const isSuperAdmin = isSuperAdminId(user?.id);
 
   return (

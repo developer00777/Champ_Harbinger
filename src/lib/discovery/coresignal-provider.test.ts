@@ -164,4 +164,59 @@ describe("makeCoresignalProvider", () => {
       makeCoresignalProvider().discoverCompanies("criteria", 10),
     ).rejects.toThrow(/500/);
   });
+
+  // The live test account is on exactly this plan shape: Agentic Search is a
+  // paid add-on (402), ES DSL search is included, `collect` is credit-gated.
+  it("falls back to ES DSL + collect when agentic search 402s", async () => {
+    process.env.CORESIGNAL_API_KEY = "cs-key";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("agentic_search")) return { ok: false, status: 402 };
+      if (url.includes("search/es_dsl")) {
+        return { ok: true, status: 200, json: async () => [77] };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 77,
+          company_name: "Esdsl Corp",
+          website: "https://esdsl.com",
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { makeCoresignalProvider } = await import("./coresignal-provider");
+    const companies = await makeCoresignalProvider().discoverCompanies(
+      "software companies",
+      5,
+    );
+
+    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(urls[0]).toContain("agentic_search/fast");
+    expect(urls[1]).toContain("company_base/search/es_dsl");
+    expect(urls[2]).toContain("company_base/collect/77");
+    expect(companies).toHaveLength(1);
+    expect(companies[0].name).toBe("Esdsl Corp");
+  });
+
+  it("degrades to [] when the plan has no credits on any data path", async () => {
+    process.env.CORESIGNAL_API_KEY = "cs-key";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("search/es_dsl")) {
+        return { ok: true, status: 200, json: async () => [77] };
+      }
+      return { ok: false, status: 402 }; // agentic + collect both gated
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { makeCoresignalProvider } = await import("./coresignal-provider");
+    const companies = await makeCoresignalProvider().discoverCompanies(
+      "software companies",
+      5,
+    );
+    // No records, and crucially no throw — the composite provider's other
+    // half still gets to return its results.
+    expect(companies).toEqual([]);
+  });
 });

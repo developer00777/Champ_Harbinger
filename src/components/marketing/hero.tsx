@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import { currentUser } from "@clerk/nextjs/server";
 
+import { devCurrentUser, isDevAuthBypass } from "@/lib/dev-auth";
+
 const STATS = [
   { value: "12", label: "Champions companies" },
   { value: "120M+", label: "Verified contacts" },
@@ -15,7 +17,7 @@ const PROOF_POINTS = [
 ];
 
 export async function Hero() {
-  const user = await currentUser();
+  const user = isDevAuthBypass() ? devCurrentUser() : await currentUser();
 
   return (
     <section className="bg-peach-wash relative overflow-hidden">

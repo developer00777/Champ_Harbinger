@@ -24,17 +24,17 @@ from the default deploy.
 
 ## 0. Service map
 
-| Railway service | Source | Builder / Dockerfile | Root Dir | Public domain | Healthcheck |
-|---|---|---|---|---|---|
-| **app** (web) | this repo | `Dockerfile` | repo root | **yes** | `/api/metrics` |
-| **worker** | this repo | `Dockerfile.worker` | repo root | no | none |
-| **postgres** | Railway DB / image | `pgvector/pgvector:pg16` | — | no | managed |
-| **obscura** | this repo | `services/obscura-gateway/Dockerfile` | `services/obscura-gateway` | no | `/health` (9223) |
-| **trafilatura** | this repo | `services/trafilatura/Dockerfile` | `services/trafilatura` | no | `/health` (8001) |
-| **searxng** | `searxng/searxng:latest` image | — | — | no | (none / `/healthz`) |
-| **crawl4ai** | this repo | `services/crawl4ai/Dockerfile` | `services/crawl4ai` | no | `/health` (8000) |
-| _ollama_ (optional) | `ollama/ollama:latest` | — | — | no | — |
-| _prometheus_ (optional) | `prom/prometheus:latest` | — | — | no | — |
+| Railway service         | Source                         | Builder / Dockerfile                  | Root Dir                   | Public domain | Healthcheck         |
+| ----------------------- | ------------------------------ | ------------------------------------- | -------------------------- | ------------- | ------------------- |
+| **app** (web)           | this repo                      | `Dockerfile`                          | repo root                  | **yes**       | `/api/metrics`      |
+| **worker**              | this repo                      | `Dockerfile.worker`                   | repo root                  | no            | none                |
+| **postgres**            | Railway DB / image             | `pgvector/pgvector:pg16`              | —                          | no            | managed             |
+| **obscura**             | this repo                      | `services/obscura-gateway/Dockerfile` | `services/obscura-gateway` | no            | `/health` (9223)    |
+| **trafilatura**         | this repo                      | `services/trafilatura/Dockerfile`     | `services/trafilatura`     | no            | `/health` (8001)    |
+| **searxng**             | `searxng/searxng:latest` image | —                                     | —                          | no            | (none / `/healthz`) |
+| **crawl4ai**            | this repo                      | `services/crawl4ai/Dockerfile`        | `services/crawl4ai`        | no            | `/health` (8000)    |
+| _ollama_ (optional)     | `ollama/ollama:latest`         | —                                     | —                          | no            | —                   |
+| _prometheus_ (optional) | `prom/prometheus:latest`       | —                                     | —                          | no            | —                   |
 
 Put everything in **one Railway project** (one environment, e.g. `production`)
 so the services share a private network. Only **app** needs a public domain.
@@ -64,7 +64,7 @@ Config-as-code already in the repo:
      CREATE EXTENSION IF NOT EXISTS vector;
      ```
      (Migration `0008` also runs this, but it needs the extension to be
-     *installable* by the migration role — pre-running it confirms the image
+     _installable_ by the migration role — pre-running it confirms the image
      supports it and surfaces a permissions problem early.)
 
 > Why this matters: migration **0008** creates `CREATE EXTENSION ... "vector"`,
@@ -109,7 +109,7 @@ host, so app↔DB traffic stays on the private network (no egress fees).
 ### App runtime environment variables
 
 Set these as **service variables** on the **app** service (not build args, except
-the `NEXT_PUBLIC_*` ones noted above which are *both* — set them in both Build
+the `NEXT_PUBLIC_*` ones noted above which are _both_ — set them in both Build
 Args and, harmlessly, here):
 
 ```
@@ -146,11 +146,30 @@ BOSS_FETCH_BATCH=20
 BUDGET_CACHE_TTL_MS=45000
 ENRICH_SET_CONCURRENCY=4
 
+# --- Email infrastructure: InboxKit (domains + mailboxes) — see §9 ---
+INBOXKIT_API_KEY=<from the InboxKit dashboard>
+INBOXKIT_WORKSPACE_ID=<workspace uid>             # optional; auto-resolved if unset
+INBOXKIT_WEBHOOK_SECRET=<openssl rand -hex 16>    # must match the secret set in InboxKit
+INBOXKIT_CONTACT_EMAIL=admin@yourdomain.com       # WHOIS registrant (see §9)
+INBOXKIT_CONTACT_FIRST_NAME=...
+INBOXKIT_CONTACT_LAST_NAME=...
+INBOXKIT_CONTACT_PHONE=+1.5555555555
+INBOXKIT_CONTACT_ADDRESS=...
+INBOXKIT_CONTACT_CITY=...
+INBOXKIT_CONTACT_STATE=...
+INBOXKIT_CONTACT_ZIP=...
+INBOXKIT_CONTACT_COUNTRY=US
+
 # --- Optional ---
 HARBINGER_NODE_ENV=production
 SENTRY_DSN=...                                    # optional
 LAKEB2B_MOCK=true                                 # until the real LakeB2B API is wired
 ```
+
+> **Do NOT set `DEV_AUTH_BYPASS` / `NEXT_PUBLIC_DEV_AUTH_BYPASS` on Railway.**
+> They are local-only. Both are additionally gated on `NODE_ENV !== "production"`
+> (which Railway sets), so Clerk auth stays active even if one leaks in — this is
+> enforced by `src/lib/dev-auth.test.ts`. Real Clerk keys are still required.
 
 > **`WORKER_SECRET` must be identical on app and worker.** The worker sends it as
 > `X-Worker-Secret`; the app's internal job routes reject mismatches.
@@ -218,7 +237,7 @@ pending migrations run.
 **devDependency**. The app's standalone runner image (`.next/standalone`) only
 bundles Next's traced runtime deps, so `drizzle-kit` is **absent** there and
 `pnpm db:migrate` would fail with `drizzle-kit: not found`. The **worker** image
-runs a full `pnpm install --frozen-lockfile`, so it *has* drizzle-kit.
+runs a full `pnpm install --frozen-lockfile`, so it _has_ drizzle-kit.
 
 - **How:** worker service → **Settings → Deploy → Pre-Deploy Command =
   `pnpm db:migrate`** (already set if you used `railway.worker.toml`). Railway
@@ -227,7 +246,7 @@ runs a full `pnpm install --frozen-lockfile`, so it *has* drizzle-kit.
   at Postgres, migrations apply on every deploy.
 - **Order:** make sure the `vector` extension is installable first (§1). On the
   very first deploy, if you used the managed-Postgres path, run
-  `CREATE EXTENSION IF NOT EXISTS vector;` in the DB query console *before*
+  `CREATE EXTENSION IF NOT EXISTS vector;` in the DB query console _before_
   triggering the worker deploy.
 - **Only run it on one service.** Don't also add `pnpm db:migrate` to the app,
   to avoid two containers racing the same migration.
@@ -235,6 +254,7 @@ runs a full `pnpm install --frozen-lockfile`, so it *has* drizzle-kit.
 Manual fallback (if you prefer to gate migrations behind a button): leave the
 pre-deploy command off and run, from the worker service's shell or a Railway
 one-off:
+
 ```
 pnpm db:migrate
 ```
@@ -249,14 +269,14 @@ Postgres and the scrapers over these — no public exposure, no egress cost.
 
 Set these on **both app and worker** (the scraper URLs) and on **app** (the DB):
 
-| Variable | Value |
-|---|---|
-| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (already internal) |
-| `OBSCURA_GATEWAY_URL` | `http://obscura.railway.internal:9223` |
-| `TRAFILATURA_BASE_URL` | `http://trafilatura.railway.internal:8001` |
-| `SEARXNG_URL` | `http://searxng.railway.internal:8080` |
-| `CRAWL4AI_BASE_URL` | `http://crawl4ai.railway.internal:8000` |
-| `WORKER_TARGET_URL` (worker only) | `http://app.railway.internal:3000` |
+| Variable                          | Value                                           |
+| --------------------------------- | ----------------------------------------------- |
+| `DATABASE_URL`                    | `${{Postgres.DATABASE_URL}}` (already internal) |
+| `OBSCURA_GATEWAY_URL`             | `http://obscura.railway.internal:9223`          |
+| `TRAFILATURA_BASE_URL`            | `http://trafilatura.railway.internal:8001`      |
+| `SEARXNG_URL`                     | `http://searxng.railway.internal:8080`          |
+| `CRAWL4AI_BASE_URL`               | `http://crawl4ai.railway.internal:8000`         |
+| `WORKER_TARGET_URL` (worker only) | `http://app.railway.internal:3000`              |
 
 > The internal hostname is the **service name** you set in the dashboard. If you
 > named the search service `searxng`, the host is `searxng.railway.internal`.
@@ -274,11 +294,11 @@ subfolder Dockerfile. For each one:
   **Dockerfile Path = `Dockerfile`**.
 - **No public domain** (internal-only).
 
-| Service | Root Directory | Dockerfile Path | Internal port | Notes |
-|---|---|---|---|---|
-| **obscura** | `services/obscura-gateway` | `Dockerfile` | 9223 | Node gateway over the `obscura` binary; `EXPOSE 9223`, `/health` |
-| **trafilatura** | `services/trafilatura` | `Dockerfile` | 8001 | FastAPI/uvicorn, binds `0.0.0.0:8001`, `/health` |
-| **crawl4ai** | `services/crawl4ai` | `Dockerfile` | 8000 | FastAPI + Playwright/Chromium (heavy image; see §8 build memory), `/health` |
+| Service         | Root Directory             | Dockerfile Path | Internal port | Notes                                                                       |
+| --------------- | -------------------------- | --------------- | ------------- | --------------------------------------------------------------------------- |
+| **obscura**     | `services/obscura-gateway` | `Dockerfile`    | 9223          | Node gateway over the `obscura` binary; `EXPOSE 9223`, `/health`            |
+| **trafilatura** | `services/trafilatura`     | `Dockerfile`    | 8001          | FastAPI/uvicorn, binds `0.0.0.0:8001`, `/health`                            |
+| **crawl4ai**    | `services/crawl4ai`        | `Dockerfile`    | 8000          | FastAPI + Playwright/Chromium (heavy image; see §8 build memory), `/health` |
 
 **SearXNG** uses the upstream image plus this repo's `services/searxng/settings.yml`:
 
@@ -317,7 +337,7 @@ set real keys, or auth will be broken/insecure.
 1. In the [Clerk dashboard](https://dashboard.clerk.com), create (or select) a
    **production** instance for your domain.
 2. Copy from **API Keys**:
-   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` → set as a **Build Arg** *and* a runtime
+   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` → set as a **Build Arg** _and_ a runtime
      var on the **app** service (it's inlined into the client bundle at build).
    - `CLERK_SECRET_KEY` → runtime var on the **app** service only.
    - `CLERK_FRONTEND_API_DOMAIN` → your Clerk **Frontend API** domain (e.g.
@@ -368,14 +388,14 @@ Per-user and per-team weekly caps are managed at runtime from the admin console
 
 All have safe defaults (documented in `.env.example`); override only to tune:
 
-| Var | Default | Effect |
-|---|---|---|
-| `LLM_MAX_CONCURRENCY` | 12 | Max parallel in-flight LLM calls per process (semaphore; prevents OpenRouter 429s) |
-| `FAIR_PER_USER_MAX` | 3 | Max concurrent heavy jobs per user (worker fair-share) |
-| `FAIR_GLOBAL_MAX` | 8 | Global ceiling on concurrent heavy jobs |
-| `BOSS_FETCH_BATCH` | 20 | pg-boss jobs pulled per poll |
-| `BUDGET_CACHE_TTL_MS` | 45000 | TTL of the cached spend tally (avoids per-request DB hits) |
-| `ENRICH_SET_CONCURRENCY` | 4 | Parallel enrichments within one waterfall set |
+| Var                      | Default | Effect                                                                             |
+| ------------------------ | ------- | ---------------------------------------------------------------------------------- |
+| `LLM_MAX_CONCURRENCY`    | 12      | Max parallel in-flight LLM calls per process (semaphore; prevents OpenRouter 429s) |
+| `FAIR_PER_USER_MAX`      | 3       | Max concurrent heavy jobs per user (worker fair-share)                             |
+| `FAIR_GLOBAL_MAX`        | 8       | Global ceiling on concurrent heavy jobs                                            |
+| `BOSS_FETCH_BATCH`       | 20      | pg-boss jobs pulled per poll                                                       |
+| `BUDGET_CACHE_TTL_MS`    | 45000   | TTL of the cached spend tally (avoids per-request DB hits)                         |
+| `ENRICH_SET_CONCURRENCY` | 4       | Parallel enrichments within one waterfall set                                      |
 
 > **Multi-instance caveat:** `LLM_MAX_CONCURRENCY` and the budget cache are
 > **per-process**. If you scale the app to multiple replicas, each replica gets
@@ -461,12 +481,72 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<app-domain>/api/metrics   # �
 
 ---
 
-## 9. Optional services (not in the default deploy)
+## 9. InboxKit — email infrastructure (domains + mailboxes)
+
+InboxKit powers **Settings → InboxKit**: domain search, combined
+domain+mailbox orders, and the domain-health signal that
+`src/lib/sequencing/guardrails.ts` fail-closes sending on.
+
+### 9.1 API shape (verified live — don't "fix" it back)
+
+`src/lib/email-infra/inboxkit.ts` looks unusual for a REST client because the
+real API is unusual. All of this was confirmed against `api.inboxkit.com`:
+
+| Thing       | Value                                                                                |
+| ----------- | ------------------------------------------------------------------------------------ |
+| Base URL    | `https://api.inboxkit.com/v1/api` — **bare `/v1` 404s**                              |
+| List/search | **POST** (`/domains/list`, `/domains/search`, `/mailboxes/list`, `/orders`)          |
+| Some reads  | GET with query params (`/dns/list?domain=`, `/mailboxes/show-credentials?email=`)    |
+| Workspace   | `X-Workspace-Id` header **required**; omitting it → `400 "Workspace ID is required"` |
+| Envelope    | `{error:false, message, domains                                                      | mailboxes:[...]}`; failures can arrive as **HTTP 200 with `error:true`** |
+| Domain rows | name is `name` (not `domain`); `price` is a number (USD/yr)                          |
+| TLDs        | only `.com/.net/.org/.shop` are purchasable; `price: 0` = unsellable                 |
+
+`INBOXKIT_WORKSPACE_ID` is optional in config: when unset the client calls
+`/workspaces/list` once and caches the first workspace uid. Set it explicitly
+if the team has more than one workspace.
+
+### 9.2 Registrant (WHOIS) details
+
+`create_order` requires contact details. The code has **placeholder defaults**
+(`INBOXKIT_CONTACT_*` in `.env.example`) — set the real registrant on the app
+service before ordering domains in production, or domains get registered
+against placeholder WHOIS data.
+
+### 9.3 Webhook (required for mailboxes to become usable)
+
+InboxKit provisions asynchronously and reports readiness via a webhook. Until
+it fires, `/api/webhooks/inboxkit` never imports credentials, so ordered
+mailboxes stay unusable for sequencing.
+
+1. Deploy the app and note its public URL.
+2. In InboxKit, set the account webhook to
+   `https://<your-app-domain>/api/webhooks/inboxkit`.
+3. Set the same shared secret in InboxKit and as `INBOXKIT_WEBHOOK_SECRET` on
+   app + worker. The route compares it in constant time; **if the env var is
+   unset the route accepts unsigned posts** (dev convenience) — always set it
+   in production.
+
+> The webhook URL is account-wide and single-valued: pointing it at Railway
+> **replaces** whatever was there. If it currently points at a local
+> `trycloudflare.com` tunnel from local testing, that tunnel stops receiving
+> events once you switch it.
+
+### 9.4 Credits
+
+Ordering spends InboxKit credits (~$3.99/mailbox + domain registration). Check
+`GET /v1/api/account` → `credits_remaining`. **With 0 credits, search works but
+every order fails at payment** — so verify credits before treating ordering as
+broken.
+
+---
+
+## 10. Optional services (not in the default deploy)
 
 - **Ollama** — only if you want classification workloads off OpenRouter. Deploy
   `ollama/ollama:latest` as a service, attach a volume at `/root/.ollama`, pull a
   model (`ollama pull llama3.1:8b`), and set `OLLAMA_BASE_URL=
-  http://ollama.railway.internal:11434` on app+worker. Heavy; needs real CPU/RAM.
+http://ollama.railway.internal:11434` on app+worker. Heavy; needs real CPU/RAM.
 - **Prometheus** — the app already exposes `/api/metrics`. Deploy
   `prom/prometheus:latest` with a config scraping `app.railway.internal:3000`
   only if you want a self-hosted metrics store / Grafana source.
@@ -489,4 +569,9 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<app-domain>/api/metrics   # �
 - [ ] `SUPER_ADMIN_USER_IDS` = your Clerk user id (for `/admin`).
 - [ ] `WORKER_SECRET` identical on app and worker; `HARBINGER_SECRET` set
       (≥ 32 chars).
+- [ ] `DEV_AUTH_BYPASS` / `NEXT_PUBLIC_DEV_AUTH_BYPASS` **not** set on Railway.
+- [ ] InboxKit (§9): `INBOXKIT_API_KEY` set, `INBOXKIT_CONTACT_*` set to the
+      real registrant, webhook pointed at
+      `https://<app-domain>/api/webhooks/inboxkit` with `INBOXKIT_WEBHOOK_SECRET`
+      matching on both sides, and credits available for ordering.
 - [ ] `curl /api/metrics` → 200; build log says `dockerfile`, not `railpack`.

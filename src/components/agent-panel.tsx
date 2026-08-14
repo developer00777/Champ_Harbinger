@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import type { UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
 
-import { useAuth } from "@clerk/nextjs";
+import { useAuthOrDev } from "@/lib/dev-auth-client";
 
 import { ChatInput } from "@/components/chat/chat-input";
 import { ChatMessages } from "@/components/chat/chat-messages";
@@ -142,7 +142,7 @@ function AgentPanelInner({
   const pathname = usePathname();
   const { register } = useStreaming();
   const { consumePendingPrompt } = useCampaign();
-  const { userId } = useAuth();
+  const { userId } = useAuthOrDev();
   const didAutoSend = useRef(false);
 
   const { messages, sendMessage, status, stop } = useChat({

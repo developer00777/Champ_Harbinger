@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { TogglePill } from "@/components/ui/toggle-pill";
 import { EmailSkillCard } from "@/components/email-skills/email-skill-card";
 import { EmailSkillDetailDialog } from "@/components/email-skills/email-skill-detail-dialog";
-import { useAuth } from "@clerk/nextjs";
+import { useAuthOrDev } from "@/lib/dev-auth-client";
 import type { EmailSkill, EmailSkillScopeType } from "@/lib/types/email-skill";
 import type { Campaign } from "@/lib/types/campaign";
 import type { UserProfile } from "@/lib/types/profile";
@@ -43,7 +43,7 @@ const SOURCE_FILTERS = [
 type SourceFilter = (typeof SOURCE_FILTERS)[number]["value"];
 
 export default function EmailSkillsPage() {
-  const { userId } = useAuth();
+  const { userId } = useAuthOrDev();
   const [skills, setSkills] = useState<EmailSkill[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);

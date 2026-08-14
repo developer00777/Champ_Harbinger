@@ -7,8 +7,9 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
 } from "lucide-react";
-import { useClerk, useUser } from "@clerk/nextjs";
+import { useClerk } from "@clerk/nextjs";
 
+import { isDevAuthBypassClient, useUserOrDev } from "@/lib/dev-auth-client";
 import { SafeLink } from "@/components/safe-link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -44,14 +45,19 @@ export function AccountMenu({
 }) {
   const router = useRouter();
   const { signOut } = useClerk();
-  const { user } = useUser();
+  const { user } = useUserOrDev();
 
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
   const name = user?.fullName?.trim() || user?.username || email || "Account";
   const avatar = user?.imageUrl || "";
 
   async function handleSignOut() {
-    await signOut();
+    // Under the local dev bypass there is no Clerk session to end, and the
+    // middleware would just let the user back in. Go to /login so the button
+    // isn't a no-op, but skip the Clerk call.
+    if (!isDevAuthBypassClient()) {
+      await signOut();
+    }
     router.push("/login");
     router.refresh();
   }

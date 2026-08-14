@@ -82,4 +82,42 @@ describe("GET /api/internal/worker-config", () => {
     expect(body.config.APOLLO_API_KEY).toBeUndefined();
     expect(body.config.PDL_API_KEY).toBeUndefined();
   });
+
+  /**
+   * The serving allowlist (this route) and the applying allowlist
+   * (src/lib/jobs/worker-config.ts) are duplicated on purpose: the worker
+   * script doesn't share a build with Next.js route files, so it can't import
+   * from here. That makes silent drift possible — a key added to this route
+   * but not to the worker is served and then dropped on the floor, so the
+   * worker runs with the key missing and no error anywhere. Compare the two
+   * source files directly to catch it.
+   */
+  it("keeps its allowlist in sync with the worker-side allowlist", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    const extract = (source: string, pattern: RegExp) => {
+      const block = source.match(pattern);
+      if (!block) throw new Error("ALLOWED_KEYS block not found");
+      return new Set([...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+    };
+
+    const root = process.cwd();
+    const routeKeys = extract(
+      readFileSync(
+        join(root, "src/app/api/internal/worker-config/route.ts"),
+        "utf8",
+      ),
+      /ALLOWED_KEYS\s*=\s*\[([\s\S]*?)\]\s*as const/,
+    );
+    const workerKeys = extract(
+      readFileSync(join(root, "src/lib/jobs/worker-config.ts"), "utf8"),
+      /ALLOWED_KEYS\s*=\s*new Set\(\[([\s\S]*?)\]\)/,
+    );
+
+    expect(routeKeys.size).toBeGreaterThan(0);
+    // Report the actual difference, so a failure names the drifting keys.
+    expect([...routeKeys].filter((k) => !workerKeys.has(k))).toEqual([]);
+    expect([...workerKeys].filter((k) => !routeKeys.has(k))).toEqual([]);
+  });
 });
